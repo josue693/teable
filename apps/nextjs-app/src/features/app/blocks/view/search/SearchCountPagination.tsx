@@ -44,6 +44,8 @@ export const SearchCountPagination = forwardRef<
   const { gridRef, setSearchCursor } = useGridSearchStore();
   const [isEnd, setIsEnd] = useState(false);
 
+  console.log('test');
+
   useImperativeHandle(ref, () => ({
     nextIndex: () => {
       switchIndex(PageDirection.Next);
