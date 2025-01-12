@@ -23,7 +23,11 @@ import { FilterQueryPostgres } from './filter-query/postgres/filter-query.postgr
 import type { IGroupQueryExtra, IGroupQueryInterface } from './group-query/group-query.interface';
 import { GroupQueryPostgres } from './group-query/group-query.postgres';
 import { SearchQueryAbstract } from './search-query/abstract';
-import { SearchQueryBuilder, SearchQueryPostgres } from './search-query/search-query.postgres';
+import { FullTextSearchQueryPostgresBuilder } from './search-query/search-fts-query.postgres';
+import {
+  SearchQueryPostgresBuilder,
+  SearchQueryPostgres,
+} from './search-query/search-query.postgres';
 import { SortQueryPostgres } from './sort-query/postgres/sort-query.postgres';
 import type { ISortQueryInterface } from './sort-query/sort-query.interface';
 
@@ -320,22 +324,29 @@ export class PostgresProvider implements IDbProvider {
 
   searchQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    fieldMap?: { [fieldId: string]: IFieldInstance },
+    searchFields: IFieldInstance[],
     search?: [string, string?, boolean?]
   ) {
-    return SearchQueryAbstract.factory(SearchQueryPostgres, originQueryBuilder, fieldMap, search);
+    return SearchQueryAbstract.appendQueryBuilder(
+      SearchQueryPostgres,
+      originQueryBuilder,
+      searchFields,
+      search
+    );
   }
 
   searchCountQuery(
     originQueryBuilder: Knex.QueryBuilder,
     searchField: IFieldInstance[],
-    searchValue: string
+    searchValue: string,
+    withFullTextIndex?: boolean
   ) {
     return SearchQueryAbstract.buildSearchCountQuery(
       SearchQueryPostgres,
       originQueryBuilder,
       searchField,
-      searchValue
+      searchValue,
+      withFullTextIndex
     );
   }
 
@@ -346,17 +357,47 @@ export class PostgresProvider implements IDbProvider {
     searchIndexRo: ISearchIndexByQueryRo,
     baseSortIndex?: string,
     setFilterQuery?: (qb: Knex.QueryBuilder) => void,
-    setSortQuery?: (qb: Knex.QueryBuilder) => void
+    setSortQuery?: (qb: Knex.QueryBuilder) => void,
+    withFullTextIndex?: boolean
   ) {
-    return new SearchQueryBuilder(
+    return new SearchQueryPostgresBuilder(
       originQueryBuilder,
       dbTableName,
       searchField,
       searchIndexRo,
       baseSortIndex,
       setFilterQuery,
-      setSortQuery
+      setSortQuery,
+      withFullTextIndex
     ).getSearchIndexQuery();
+  }
+
+  getSearchTsIndexSql(
+    originQueryBuilder: Knex.QueryBuilder,
+    dbTableName: string,
+    searchField: IFieldInstance[]
+  ) {
+    return new FullTextSearchQueryPostgresBuilder(
+      originQueryBuilder,
+      dbTableName,
+      searchField
+    ).getSearchFieldIndexSql();
+  }
+
+  getClearSearchTsIndexSql(
+    originQueryBuilder: Knex.QueryBuilder,
+    dbTableName: string,
+    searchField: IFieldInstance[]
+  ) {
+    return new FullTextSearchQueryPostgresBuilder(
+      originQueryBuilder,
+      dbTableName,
+      searchField
+    ).getClearSearchTsIndexSql();
+  }
+
+  getExistFtsIndexSql(originQueryBuilder: Knex.QueryBuilder, dbTableName: string) {
+    return FullTextSearchQueryPostgresBuilder.getExistFtsIndexSql(originQueryBuilder, dbTableName);
   }
 
   shareFilterCollaboratorsQuery(
