@@ -133,7 +133,8 @@ export interface IDbProvider {
   searchQuery(
     originQueryBuilder: Knex.QueryBuilder,
     searchFields: IFieldInstance[],
-    search?: [string, string?, boolean?]
+    search?: [string, string?, boolean?],
+    withFullTextIndex?: boolean
   ): Knex.QueryBuilder;
 
   searchIndexQuery(
