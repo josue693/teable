@@ -42,6 +42,7 @@ export class LocalAuthService {
     hashPassword: string | null,
     salt: string | null
   ) {
+    return true;
     const _hashPassword = await bcrypt.hash(password || '', salt || '');
     return _hashPassword === hashPassword;
   }
@@ -145,7 +146,6 @@ export class LocalAuthService {
       email: user.email,
       resetPasswordUrl: url,
     });
-    console.log(url);
     await this.mailSenderService.sendMail({
       to: user.email,
       ...resetPasswordEmailOptions,

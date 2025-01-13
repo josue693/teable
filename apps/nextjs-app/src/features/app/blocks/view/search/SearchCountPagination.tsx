@@ -17,7 +17,7 @@ enum PageDirection {
 
 type ISearchMap = Record<number, NonNullable<ISearchIndexVo>[number]>;
 
-const PaginationBuffer = 20;
+const PaginationBuffer = 100;
 
 type ISearchCountPaginationProps = Pick<ISearchButtonProps, 'shareView'>;
 
@@ -69,8 +69,12 @@ export const SearchCountPagination = forwardRef<
   );
 
   const queryFn = async ({ pageParam = 0 }) => {
+    const skipLength = new Set(
+      Object.values(allSearchResults).map((rec) => rec.recordId) as string[]
+    ).size as number;
+
     const baseQueryRo: ISearchIndexByQueryRo = {
-      skip: pageParam,
+      skip: skipLength,
       take: PaginationBuffer,
       viewId: view?.id,
       orderBy: viewOrderBy,
@@ -94,7 +98,7 @@ export const SearchCountPagination = forwardRef<
     }
 
     const nextCursor =
-      result.data?.length ?? 0 >= PaginationBuffer ? pageParam + PaginationBuffer : null;
+      result.data?.length ?? 0 >= PaginationBuffer ? skipLength + PaginationBuffer : null;
 
     const dataLength = Object.values(allSearchResults).length;
 
