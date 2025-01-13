@@ -74,7 +74,7 @@ export const SearchCountPagination = forwardRef<
     ).size as number;
 
     const baseQueryRo: ISearchIndexByQueryRo = {
-      skip: skipLength,
+      skip: pageParam,
       take: PaginationBuffer,
       viewId: view?.id,
       orderBy: viewOrderBy,
@@ -124,6 +124,8 @@ export const SearchCountPagination = forwardRef<
     refetchOnMount: 'always',
     refetchOnWindowFocus: false,
     enabled: !!value,
+    initialData: undefined,
+    keepPreviousData: false,
     getNextPageParam: (lastPage) => {
       return lastPage.nextCursor;
     },
@@ -137,7 +139,7 @@ export const SearchCountPagination = forwardRef<
       finalResult[indexNumber] = result;
     });
     return finalResult;
-  }, [data]);
+  }, [data?.pages]);
 
   const switchIndex = (direction: PageDirection) => {
     const newIndex = currentIndex + direction;
