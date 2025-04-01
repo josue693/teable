@@ -1,0 +1,29 @@
+{
+  "graph": {
+    "node": {
+      "indent": "分析问题",
+      "fieldSelector": "提取字段",
+      "sqlGenerator": "生成SQL",
+      "sqlQuery": "执行SQL",
+      "sqlFixer": "SQL错误修复",
+      "sqlResponse": "SQL执行结果",
+      "normalResponse": "回答"
+    }
+  },
+  "renameDialog": {
+    "title": "重命名对话",
+    "description": "为您的对话输入一个新名称，帮助您更好地组织和查找历史记录。",
+    "placeholder": "输入对话名称"
+  },
+  "chat": {
+    "name": "智能助手",
+    "placeholder": "输入您的问题...",
+    "send": "发送",
+    "newChat": "新对话",
+    "noChat": "没有历史对话记录"
+  },
+  "deleteDialog": {
+    "title": "确定删除对话吗？",
+    "description": "删除后无法恢复，请谨慎操作。"
+  }
+}

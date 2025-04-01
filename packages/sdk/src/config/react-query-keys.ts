@@ -162,4 +162,8 @@ export const ReactQueryKeys = {
   getPublicSetting: () => ['public-setting'] as const,
 
   userLastVisitMap: (baseId: string) => ['user-last-visit-map', baseId] as const,
+  getChatConversations: (baseId: string) => ['chat-conversations', baseId] as const,
+
+  getChatConversation: (baseId: string, sessionId: string) =>
+    ['chat-conversation', baseId, sessionId] as const,
 };

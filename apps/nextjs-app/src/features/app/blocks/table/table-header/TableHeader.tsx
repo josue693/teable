@@ -30,6 +30,7 @@ import {
   SheetHeader,
   SheetTrigger,
 } from '@teable/ui-lib/shadcn';
+import { Bot } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
@@ -37,6 +38,7 @@ import { Fragment, useState } from 'react';
 import { BaseCollaboratorModalTrigger } from '@/features/app/components/collaborator-manage/base/BaseCollaboratorModal';
 import { tableConfig } from '@/features/i18n/table.config';
 import { usePluginPanelStorage } from '../../../components/plugin-panel/hooks/usePluginPanelStorage';
+import { useChatVisible } from '../../ai-chat/store/useChatVisible';
 import { TableTrash } from '../../trash/components/TableTrash';
 import { TableTrashDialog } from '../../trash/components/TableTrashDialog';
 import { ExpandViewList } from '../../view/list/ExpandViewList';
@@ -67,6 +69,7 @@ const RightList = ({
   const [isHistoryDialogOpen, setHistoryDialogOpen] = useState(false);
   const [isTrashDialogOpen, setTrashDialogOpen] = useState(false);
   const { toggleVisible } = usePluginPanelStorage(tableId!);
+  const { toggleVisible: toggleChatVisible } = useChatVisible();
 
   const onRecordClick = (recordId: string) => {
     router.push(
@@ -127,6 +130,14 @@ const RightList = ({
           onClick={toggleVisible}
         >
           <Puzzle className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          className={cn('flex', buttonClassName)}
+          onClick={toggleChatVisible}
+        >
+          <Bot className="size-4" />
         </Button>
         <Button asChild variant="ghost" size="xs" className={cn('flex', buttonClassName)}>
           <a href={t('help.mainLink')} title={t('help.title')} target="_blank" rel="noreferrer">

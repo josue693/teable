@@ -574,3 +574,31 @@ model UserLastVisit {
   @@index([userId, resourceType])
   @@map("user_last_visit")
 }
+
+model ChatSession {
+  id               String    @id @default(cuid())
+  baseId           String    @map("base_id")
+  name             String
+  createdTime      DateTime  @default(now()) @map("created_time")
+  createdBy        String    @map("created_by")
+  lastModifiedTime DateTime? @updatedAt @map("last_modified_time")
+
+  messages         ChatMessage[]
+
+  @@map("chat_session")
+}
+
+model ChatMessage {
+  id               String    @id @default(cuid())
+  sessionId        String    @map("session_id")
+  role             String    @map("role")
+  content          String    @map("content")
+  createdTime      DateTime  @default(now()) @map("created_time")
+  createdBy        String    @map("created_by")
+  lastModifiedTime DateTime? @updatedAt @map("last_modified_time")
+  lastModifiedBy   String?   @map("last_modified_by")
+
+  session          ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("chat_message")
+}

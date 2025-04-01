@@ -122,7 +122,7 @@ export class AiService {
 
     return {
       llmProviders: [
-        ...aiIntegrationConfig.llmProviders,
+        ...(aiIntegrationConfig as IAIConfig).llmProviders,
         ...aiConfig.llmProviders.map((provider) => ({
           ...provider,
           isInstance: true,

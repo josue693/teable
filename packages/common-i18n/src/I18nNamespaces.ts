@@ -1,3 +1,4 @@
+import type aiChat from './locales/en/ai-chat.json';
 import type auth from './locales/en/auth.json';
 import type common from './locales/en/common.json';
 import type dashboard from './locales/en/dashboard.json';
@@ -28,4 +29,5 @@ export interface I18nNamespaces {
   developer: typeof developer;
   plugin: typeof plugin;
   dashboard: typeof dashboard;
+  aiChat: typeof aiChat;
 }

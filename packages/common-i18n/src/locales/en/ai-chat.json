@@ -1,0 +1,29 @@
+{
+  "graph": {
+    "node": {
+      "indent": "Analyze the problem",
+      "fieldSelector": "Extract fields",
+      "sqlGenerator": "Generate SQL",
+      "sqlQuery": "Execute SQL",
+      "sqlFixer": "Fix SQL errors",
+      "sqlResponse": "SQL execution result",
+      "normalResponse": "Answer"
+    }
+  },
+  "renameDialog": {
+    "title": "Rename conversation",
+    "description": "Enter a new name for your conversation to help you better organize and find history records.",
+    "placeholder": "Enter conversation name"
+  },
+  "chat": {
+    "name": "Smart assistant",
+    "placeholder": "Enter your question...",
+    "send": "Send",
+    "newChat": "New conversation",
+    "noChat": "No history conversation record"
+  },
+  "deleteDialog": {
+    "title": "Confirm delete conversation?",
+    "description": "This action cannot be undone, please be careful."
+  }
+}

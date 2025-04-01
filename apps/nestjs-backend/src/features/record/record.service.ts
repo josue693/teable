@@ -510,7 +510,7 @@ export class RecordService {
       | 'collapsedGroupIds'
       | 'selectedRecordIds'
     >
-  ): Promise<Knex.QueryBuilder> {
+  ) {
     // Prepare the base query builder, filtering conditions, sorting rules, grouping rules and field mapping
     const { dbTableName, queryBuilder, filter, search, orderBy, groupBy, fieldMap } =
       await this.prepareQuery(tableId, {
@@ -1300,7 +1300,7 @@ export class RecordService {
     tableId: string,
     query: IGetRecordsRo
   ): Promise<{ ids: string[]; extra?: IExtraResult }> {
-    const { skip, take = 100, ignoreViewQuery } = query;
+    const { skip = 0, take = 100, ignoreViewQuery } = query;
 
     if (identify(tableId) !== IdPrefix.Table) {
       throw new InternalServerErrorException('query collection must be table id');
@@ -1523,8 +1523,8 @@ export class RecordService {
     }
 
     const {
-      skip,
-      take,
+      skip = 0,
+      take = 100,
       orderBy,
       search,
       groupBy,

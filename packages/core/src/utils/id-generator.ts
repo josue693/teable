@@ -54,6 +54,10 @@ export enum IdPrefix {
   OrganizationDepartment = 'odp',
 
   Integration = 'int',
+
+  ChatSession = 'cst',
+
+  ChatMessage = 'cmt',
 }
 
 const chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -212,4 +216,12 @@ export function generateOrganizationDepartmentId() {
 
 export function generateIntegrationId() {
   return IdPrefix.Integration + getRandomString(16);
+}
+
+export function generateChatSessionId() {
+  return IdPrefix.ChatSession + getRandomString(16);
+}
+
+export function generateChatMessageId() {
+  return IdPrefix.ChatMessage + getRandomString(16);
 }
