@@ -21,7 +21,7 @@ import type { IAIMessage } from '../store/useMessage';
 
 export const MessageSteps = ({ message }: { message: IAIMessage }) => {
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
-  const { t } = useTranslation(['aiChat']);
+  const { t } = useTranslation(['ai-chat']);
   const toggleStepExpand = (stepId: string) => {
     setExpandedSteps((prev) => ({
       ...prev,
@@ -40,13 +40,13 @@ export const MessageSteps = ({ message }: { message: IAIMessage }) => {
 
   const nameMap = useMemo(
     () => ({
-      [ChatGraphNode.Indent]: t('aiChat:graph.node.indent'),
-      [ChatGraphNode.FieldSelector]: t('aiChat:graph.node.fieldSelector'),
-      [ChatGraphNode.SqlGenerator]: t('aiChat:graph.node.sqlGenerator'),
-      [ChatGraphNode.SqlQuery]: t('aiChat:graph.node.sqlQuery'),
-      [ChatGraphNode.SqlFixer]: t('aiChat:graph.node.sqlFixer'),
-      [ChatGraphNode.SqlResponse]: t('aiChat:graph.node.sqlResponse'),
-      [ChatGraphNode.NormalResponse]: t('aiChat:graph.node.normalResponse'),
+      [ChatGraphNode.Indent]: t('ai-chat:graph.node.indent'),
+      [ChatGraphNode.FieldSelector]: t('ai-chat:graph.node.fieldSelector'),
+      [ChatGraphNode.SqlGenerator]: t('ai-chat:graph.node.sqlGenerator'),
+      [ChatGraphNode.SqlQuery]: t('ai-chat:graph.node.sqlQuery'),
+      [ChatGraphNode.SqlFixer]: t('ai-chat:graph.node.sqlFixer'),
+      [ChatGraphNode.SqlResponse]: t('ai-chat:graph.node.sqlResponse'),
+      [ChatGraphNode.NormalResponse]: t('ai-chat:graph.node.normalResponse'),
     }),
     [t]
   );

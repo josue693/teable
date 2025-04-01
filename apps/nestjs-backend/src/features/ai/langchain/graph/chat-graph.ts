@@ -167,19 +167,25 @@ export const createChatGraph = ({
     onNodeProgress?.(ChatGraphNode.SqlGenerator);
     const { view, dbTableName, schema, detailFields } = tableInfo;
     const { fields } = fieldSelectorResult;
+    const columns = fields.map((field) =>
+      detailFields.find((detailField) => detailField.name === field)
+    );
     const sqlQueryChain = ChatPromptTemplate.fromMessages([
       systemMessage,
       new MessagesPlaceholder('history'),
       new HumanMessage(
         await sqlGeneratorPrompt.format({
           question,
-          table_info: {
-            schema: view ? undefined : schema,
-            dbTableName: view ? view.name : dbTableName,
-            columns: fields.map((field) =>
-              detailFields.find((detailField) => detailField.name === field)
-            ),
-          },
+          table_info: view
+            ? {
+                dbTableName: view.name,
+                columns,
+              }
+            : {
+                schema,
+                dbTableName,
+                columns,
+              },
           top_k: 5,
         })
       ),
@@ -205,7 +211,23 @@ export const createChatGraph = ({
     const result = await db.runSafe(sql);
     const resultJson = {
       result:
-        typeof result.result === 'string' ? result.result : JSON.stringify(result.result, null, 2),
+        typeof result.result === 'string'
+          ? result.result
+          : JSON.stringify(
+              result.result,
+              (_, value) => {
+                if (typeof value === 'bigint') {
+                  const str = String(value);
+                  const num = Number(str);
+                  if (str !== num.toString()) {
+                    return str;
+                  }
+                  return num;
+                }
+                return value;
+              },
+              2
+            ),
       error: result.error,
     };
     onNodeResult?.(ChatGraphNode.SqlQuery, resultJson);
@@ -223,6 +245,9 @@ export const createChatGraph = ({
     onNodeProgress?.(ChatGraphNode.SqlFixer);
     const { view, dbTableName, schema, detailFields } = tableInfo;
     const { fields } = fieldSelectorResult;
+    const columns = fields.map(
+      (field) => detailFields.find((detailField) => detailField.name === field)?.dbFieldName
+    );
     const sqlFixChain = ChatPromptTemplate.fromMessages([
       systemMessage,
       new MessagesPlaceholder('history'),
@@ -232,13 +257,16 @@ export const createChatGraph = ({
           sql,
           error: sqlError,
           dialect: db.driverClient,
-          table_schemas: {
-            schema: view ? undefined : schema,
-            dbTableName: view ? view.name : dbTableName,
-            columns: fields.map((field) =>
-              detailFields.find((detailField) => detailField.name === field)
-            ),
-          },
+          table_schemas: view
+            ? {
+                dbTableName: view.name,
+                columns,
+              }
+            : {
+                schema,
+                dbTableName,
+                columns,
+              },
         })
       ),
     ]).pipe(llm);
@@ -277,7 +305,6 @@ export const createChatGraph = ({
         })
       ),
     ]).pipe(llm);
-    console.log('ddddd', historyMessages);
     const result = await responseChain.stream(
       {
         history: historyMessages,

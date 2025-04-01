@@ -15,7 +15,7 @@ export const ChatContainer = ({ baseId, sessionId }: { baseId: string; sessionId
     setInput,
     loading: isLoading,
   } = useFetchMessage({ baseId, sessionId });
-  const { t } = useTranslation(['aiChat']);
+  const { t } = useTranslation(['ai-chat']);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // detect new message and scroll to bottom
@@ -52,7 +52,7 @@ export const ChatContainer = ({ baseId, sessionId }: { baseId: string; sessionId
             onChange={(e) => {
               setInput(e.target.value);
             }}
-            placeholder={t('aiChat:chat.placeholder')}
+            placeholder={t('ai-chat:chat.placeholder')}
             className="flex-1 rounded-full border-muted-foreground/20 shadow-sm focus-visible:ring-primary/50"
             disabled={isLoading}
           />
@@ -61,7 +61,7 @@ export const ChatContainer = ({ baseId, sessionId }: { baseId: string; sessionId
             size="icon"
             className="size-10 rounded-full shadow-sm"
             disabled={!input.trim() || isLoading}
-            aria-label={t('aiChat:chat.send')}
+            aria-label={t('ai-chat:chat.send')}
           >
             <Send className="size-4" />
           </Button>

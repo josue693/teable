@@ -12,6 +12,7 @@ You are an {dialect} Validator tasked with fixing invalid AI-generated SQL state
 5. No explanatory text
 6. Ensure valid JSON syntax
 7. The message field must include detailed reasons if SQL cannot be generated.
+8. column name should be quoted
 
 Input:
 Table schemas: {table_schemas}

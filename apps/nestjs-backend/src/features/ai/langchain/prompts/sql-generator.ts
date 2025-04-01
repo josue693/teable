@@ -12,7 +12,7 @@ Note: You generate the sql not need to include CTE.
 Note: If the user's question explicitly requires sorting, then the sql you generate should only contain "order by".
 
 Schema Awareness:
-- Explicitly specify schema using quoted notation: FROM "target_schema"."table"  
+- If table includes schema, explicitly specify schema using quoted notation: FROM "target_schema"."table"  
 - Never use implicit schema paths like schema.table
 
 Use the following format:
@@ -21,7 +21,8 @@ Use the following format:
 3.Ensure valid JSON syntax
 4.Format SQL with line breaks/indentation while retaining valid JSON string syntax.
 5.The message field must include detailed reasons if SQL cannot be generated.
-6. If exist history messages, you should consider the history messages when generating the response.
+6.If exist history messages, you should consider the history messages when generating the response.
+7.column name should be quoted
 
 Example:
 {{

@@ -28,7 +28,7 @@ interface RenameDialogProps {
 
 export function RenameDialog({ baseId, sessionId, open, onClose, name }: RenameDialogProps) {
   const [title, setTitle] = useState(name);
-  const { t } = useTranslation(['aiChat', 'common']);
+  const { t } = useTranslation(['ai-chat', 'common']);
   const queryClient = useQueryClient();
 
   const { mutate: renameChatConversationMutation, isLoading: renameLoading } = useMutation({
@@ -60,8 +60,8 @@ export function RenameDialog({ baseId, sessionId, open, onClose, name }: RenameD
     <Dialog open={open} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>{t('aiChat:renameDialog.title')}</DialogTitle>
-          <DialogDescription>{t('aiChat:renameDialog.description')}</DialogDescription>
+          <DialogTitle>{t('ai-chat:renameDialog.title')}</DialogTitle>
+          <DialogDescription>{t('ai-chat:renameDialog.description')}</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
@@ -69,7 +69,7 @@ export function RenameDialog({ baseId, sessionId, open, onClose, name }: RenameD
               id="name"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={t('aiChat:renameDialog.placeholder')}
+              placeholder={t('ai-chat:renameDialog.placeholder')}
               className="col-span-3"
               autoFocus
             />

@@ -21,7 +21,7 @@ interface ChatPanelProps {
 }
 
 export const ChatPanelContainer = ({ onClose }: ChatPanelProps) => {
-  const { t } = useTranslation(['aiChat']);
+  const { t } = useTranslation(['ai-chat']);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const baseId = useBaseId()!;
   const { visible } = useChatVisible();
@@ -99,7 +99,7 @@ export const ChatPanelContainer = ({ onClose }: ChatPanelProps) => {
               )}
             </Button>
             <Bot className="size-5 text-primary" />
-            <h2 className="text-base font-medium md:text-lg">{t('aiChat:chat.name')}</h2>
+            <h2 className="text-base font-medium md:text-lg">{t('ai-chat:chat.name')}</h2>
           </div>
           <Button
             variant="ghost"

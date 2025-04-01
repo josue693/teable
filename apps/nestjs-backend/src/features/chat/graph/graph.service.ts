@@ -186,12 +186,12 @@ export class GraphService {
   ) {
     let totalTokens = 0;
     const { codingModel, llmProviders } = await this.aiService.getAIConfig(baseId);
-    const llmProvider = llmProviders.find((provider) => provider.name === codingModel);
+    const llmProvider = await this.aiService.getModelConfig(codingModel, llmProviders);
     const llm = new ChatOpenAI({
-      model: llmProvider?.models[0],
-      apiKey: llmProvider?.apiKey,
+      model: llmProvider.model,
+      apiKey: llmProvider.apiKey,
       configuration: {
-        baseURL: llmProvider?.baseUrl,
+        baseURL: llmProvider.baseUrl,
       },
       temperature: 0,
       callbacks: [

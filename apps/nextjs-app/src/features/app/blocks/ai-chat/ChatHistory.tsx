@@ -39,7 +39,7 @@ export function ChatHistory({ baseId, sessionId, onSelectChat }: ChatHistoryProp
   const [dialogContent, setDialogContent] = useState<IChatConversationsItem | null>(null);
   const dayjs = useLanDayjs();
   const queryClient = useQueryClient();
-  const { t } = useTranslation(['aiChat', 'common']);
+  const { t } = useTranslation(['ai-chat', 'common']);
 
   const { data: chatMessages } = useQuery({
     queryKey: ReactQueryKeys.getChatConversations(baseId),
@@ -72,7 +72,7 @@ export function ChatHistory({ baseId, sessionId, onSelectChat }: ChatHistoryProp
           className="flex w-full items-center justify-center gap-2"
         >
           {createLoading ? <Spin className="size-4" /> : <MessageSquarePlus className="size-4" />}
-          <span>{t('aiChat:chat.newChat')}</span>
+          <span>{t('ai-chat:chat.newChat')}</span>
         </Button>
       </div>
 
@@ -80,7 +80,7 @@ export function ChatHistory({ baseId, sessionId, onSelectChat }: ChatHistoryProp
         <div className="space-y-1.5 p-1 sm:p-2">
           {chatHistory?.length === 0 && (
             <div className="py-6 text-center text-sm text-muted-foreground sm:py-8">
-              {t('aiChat:chat.noChat')}
+              {t('ai-chat:chat.noChat')}
             </div>
           )}
           {chatHistory?.map((chat) => (
@@ -95,7 +95,7 @@ export function ChatHistory({ baseId, sessionId, onSelectChat }: ChatHistoryProp
               onClick={() => onSelectChat(chat.sessionId)}
             >
               <div className="flex items-start justify-between">
-                <h3 className="line-clamp-1 text-sm ">{chat.name || '未命名'}</h3>
+                <h3 className="line-clamp-1 text-sm ">{chat.name || t('common:untitled')}</h3>
               </div>
               <div className="mt-3 flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
@@ -154,8 +154,8 @@ export function ChatHistory({ baseId, sessionId, onSelectChat }: ChatHistoryProp
             setDialogContent(null);
           }
         }}
-        title={t('aiChat:deleteDialog.title')}
-        description={t('aiChat:deleteDialog.description')}
+        title={t('ai-chat:deleteDialog.title')}
+        description={t('ai-chat:deleteDialog.description')}
         onCancel={() => {
           setDialogContent(null);
           setOpenDeleteDialog(false);

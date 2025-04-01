@@ -30,7 +30,7 @@ export class BaseSqlExecutorService {
   }
 
   private async getReadOnlyDatabaseConnectionConfig(): Promise<
-    Knex.PgConnectionConfig | Knex.Sqlite3ConnectionConfig | undefined
+    Knex.PgConnectionConfig | undefined
   > {
     if (this.driver === DriverClient.Sqlite) {
       return;
@@ -60,6 +60,7 @@ export class BaseSqlExecutorService {
       ...this.dsn,
       database: this.dsn.db,
       password: this.dsn.pass,
+      query_timeout: 10000,
       user: BASE_SCHEMA_TABLE_READ_ONLY_ROLE_NAME,
     };
   }
@@ -87,10 +88,7 @@ export class BaseSqlExecutorService {
     }
     const connection = knex({
       client: this.driver,
-      connection: {
-        ...connectionConfig,
-        requestTimeout: 10000,
-      },
+      connection: connectionConfig,
     });
 
     // validate connection

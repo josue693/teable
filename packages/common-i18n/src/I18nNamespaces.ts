@@ -29,5 +29,6 @@ export interface I18nNamespaces {
   developer: typeof developer;
   plugin: typeof plugin;
   dashboard: typeof dashboard;
-  aiChat: typeof aiChat;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  'ai-chat': typeof aiChat;
 }
