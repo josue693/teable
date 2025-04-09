@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import {
@@ -15,6 +16,8 @@ import * as csvParser from 'csv-parser';
 import { Knex } from 'knex';
 import { InjectModel } from 'nest-knexjs';
 import * as unzipper from 'unzipper';
+import { InjectDbProvider } from '../../../db-provider/db.provider';
+import { IDbProvider } from '../../../db-provider/db.provider.interface';
 import StorageAdapter from '../../attachments/plugins/adapter';
 import { InjectStorageAdapter } from '../../attachments/plugins/storage';
 import { createFieldInstanceByRaw } from '../../field/model/factory';
@@ -39,7 +42,8 @@ export class BaseImportJunctionCsvQueueProcessor extends WorkerHost {
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
     @InjectStorageAdapter() private readonly storageAdapter: StorageAdapter,
     @InjectQueue(BASE_IMPORT_JUNCTION_CSV_QUEUE)
-    public readonly queue: Queue<IBaseImportJunctionCsvJob>
+    public readonly queue: Queue<IBaseImportJunctionCsvJob>,
+    @InjectDbProvider() private readonly dbProvider: IDbProvider
   ) {
     super();
   }
@@ -209,6 +213,42 @@ export class BaseImportJunctionCsvQueueProcessor extends WorkerHost {
     results: Record<string, unknown>[],
     targetFkHostTableName: string
   ) {
+    const allForeignKeyInfos = [] as {
+      constraint_name: string;
+      column_name: string;
+      referenced_table_schema: string;
+      referenced_table_name: string;
+      referenced_column_name: string;
+      dbTableName: string;
+    }[];
+
+    // delete foreign keys if(exist) then duplicate table data
+    const foreignKeysInfoSql = this.dbProvider.getForeignKeysInfo(targetFkHostTableName);
+    const foreignKeysInfo = await this.prismaService.txClient().$queryRawUnsafe<
+      {
+        constraint_name: string;
+        column_name: string;
+        referenced_table_schema: string;
+        referenced_table_name: string;
+        referenced_column_name: string;
+      }[]
+    >(foreignKeysInfoSql);
+    const newForeignKeyInfos = foreignKeysInfo.map((info) => ({
+      ...info,
+      dbTableName: targetFkHostTableName,
+    }));
+    allForeignKeyInfos.push(...newForeignKeyInfos);
+
+    for (const { constraint_name, column_name, dbTableName } of allForeignKeyInfos) {
+      const dropForeignKeyQuery = this.knex.schema
+        .alterTable(dbTableName, (table) => {
+          table.dropForeign(column_name, constraint_name);
+        })
+        .toQuery();
+
+      await this.prismaService.$executeRawUnsafe(dropForeignKeyQuery);
+    }
+
     const sql = this.knex.table(targetFkHostTableName).insert(results).toQuery();
     try {
       await this.prismaService.$executeRawUnsafe(sql);
@@ -226,6 +266,16 @@ export class BaseImportJunctionCsvQueueProcessor extends WorkerHost {
           (error as Error)?.stack
         );
       }
+    }
+
+    // add foreign keys
+    for (const { constraint_name, column_name, dbTableName } of allForeignKeyInfos) {
+      const addForeignKeyQuery = this.knex.schema
+        .alterTable(dbTableName, (table) => {
+          table.foreign(column_name, constraint_name);
+        })
+        .toQuery();
+      await this.prismaService.$executeRawUnsafe(addForeignKeyQuery);
     }
   }
 }

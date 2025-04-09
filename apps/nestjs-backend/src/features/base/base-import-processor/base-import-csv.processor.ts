@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import type { IAttachmentCellValue } from '@teable/core';
@@ -166,6 +167,43 @@ export class BaseImportCsvQueueProcessor extends WorkerHost {
         dbTableName: true,
       },
     });
+
+    const allForeignKeyInfos = [] as {
+      constraint_name: string;
+      column_name: string;
+      referenced_table_schema: string;
+      referenced_table_name: string;
+      referenced_column_name: string;
+      dbTableName: string;
+    }[];
+
+    // delete foreign keys if(exist) then duplicate table data
+    const foreignKeysInfoSql = this.dbProvider.getForeignKeysInfo(dbTableName);
+    const foreignKeysInfo = await this.prismaService.txClient().$queryRawUnsafe<
+      {
+        constraint_name: string;
+        column_name: string;
+        referenced_table_schema: string;
+        referenced_table_name: string;
+        referenced_column_name: string;
+      }[]
+    >(foreignKeysInfoSql);
+    const newForeignKeyInfos = foreignKeysInfo.map((info) => ({
+      ...info,
+      dbTableName,
+    }));
+    allForeignKeyInfos.push(...newForeignKeyInfos);
+
+    for (const { constraint_name, column_name, dbTableName } of allForeignKeyInfos) {
+      const dropForeignKeyQuery = this.knex.schema
+        .alterTable(dbTableName, (table) => {
+          table.dropForeign(column_name, constraint_name);
+        })
+        .toQuery();
+
+      await this.prismaService.$executeRawUnsafe(dropForeignKeyQuery);
+    }
+
     const columnInfoQuery = this.dbProvider.columnInfo(dbTableName);
     const columnInfo =
       await this.prismaService.$queryRawUnsafe<{ name: string }[]>(columnInfoQuery);
@@ -242,6 +280,16 @@ export class BaseImportCsvQueueProcessor extends WorkerHost {
     const sql = this.knex.table(dbTableName).insert(recordsToInsert).toQuery();
     await this.prismaService.$executeRawUnsafe(sql);
     await this.updateAttachmentTable(userId, attachmentsTableData);
+
+    // add foreign keys
+    for (const { constraint_name, column_name, dbTableName } of allForeignKeyInfos) {
+      const addForeignKeyQuery = this.knex.schema
+        .alterTable(dbTableName, (table) => {
+          table.foreign(column_name, constraint_name);
+        })
+        .toQuery();
+      await this.prismaService.$executeRawUnsafe(addForeignKeyQuery);
+    }
   }
 
   // when insert table data relative to attachment, we need to update the attachment table
