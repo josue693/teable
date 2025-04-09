@@ -7,6 +7,7 @@ export abstract class DuplicateTableQueryAbstract {
     sourceTable: string,
     targetTable: string,
     newColumns: string[],
-    oldColumns: string[]
+    oldColumns: string[],
+    crossBaseLinkDbFieldNames: { dbFieldName: string; isMultipleCellValue: boolean }[]
   ): Knex.QueryBuilder;
 }

@@ -179,7 +179,7 @@ export class TemplateOpenApiService {
 
     return await this.prismaService.$tx(
       async (prisma) => {
-        const res = await this.baseService.duplicateBase({
+        const res = await this.baseService.duplicateBaseForTemplate({
           fromBaseId: templateRaw.baseId!,
           spaceId: templateSpaceId.id,
           withRecords: true,

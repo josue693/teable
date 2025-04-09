@@ -223,13 +223,13 @@ export class BaseExportService {
     fieldRaws,
     viewRaws,
     // whether support cross base link fields
-    crossBase = false,
+    allowCrossBase = false,
   }: {
     baseRaw: Base;
     tableRaws: TableMeta[];
     fieldRaws: Field[];
     viewRaws: View[];
-    crossBase?: boolean;
+    allowCrossBase?: boolean;
   }) {
     const { name: baseName, icon: baseIcon, id: baseId } = baseRaw;
     const tables = [] as IBaseJson['tables'];
@@ -243,7 +243,7 @@ export class BaseExportService {
         icon,
       } as IBaseJson['tables'][number];
       const currentTableFields = fieldRaws.filter(({ tableId }) => tableId === id);
-      tableObject.fields = this.generateFieldConfig(currentTableFields, crossBase);
+      tableObject.fields = this.generateFieldConfig(currentTableFields, allowCrossBase);
       tableObject.views = this.generateViewConfig(viewRaws.filter(({ tableId }) => tableId === id));
       tables.push(tableObject);
     }
@@ -649,7 +649,7 @@ export class BaseExportService {
   }
 
   // cross base link field and relative fields should convert to text as well
-  private generateFieldConfig(fieldRaws: Field[], crossBase = false) {
+  private generateFieldConfig(fieldRaws: Field[], allowCrossBase = false) {
     const fields = fieldRaws.map((fieldRaw) => createFieldInstanceByRaw(fieldRaw));
     const createTimeMap = fieldRaws.reduce(
       (acc, field) => {
@@ -659,7 +659,7 @@ export class BaseExportService {
       {} as Record<string, string>
     );
 
-    const crossBaseRelativeFields = this.getCrossBaseFields(fieldRaws, crossBase);
+    const crossBaseRelativeFields = this.getCrossBaseFields(fieldRaws, allowCrossBase);
 
     const otherFields = fields
       .filter(({ id }) => !crossBaseRelativeFields.map(({ id }) => id).includes(id))
@@ -672,7 +672,7 @@ export class BaseExportService {
     return [...otherFields, ...crossBaseRelativeFields] as IBaseJson['tables'][number]['fields'];
   }
 
-  private getCrossBaseFields(fieldRaws: Field[], crossBase = false) {
+  private getCrossBaseFields(fieldRaws: Field[], allowCrossBase = false) {
     const fields = fieldRaws.map((fieldRaw) => createFieldInstanceByRaw(fieldRaw));
     const createTimeMap = fieldRaws.reduce(
       (acc, field) => {
@@ -687,12 +687,12 @@ export class BaseExportService {
       .map((field, index) => {
         const res = {
           ...pick(field, BaseExportService.EXPORT_FIELD_COLUMNS),
-          type: crossBase ? field.type : FieldType.SingleLineText,
+          type: allowCrossBase ? field.type : FieldType.SingleLineText,
           createTime: createTimeMap[field.id],
           order: fieldRaws[index].order,
         };
 
-        return crossBase ? res : omit(res, ['options', 'lookupOptions']);
+        return allowCrossBase ? res : omit(res, ['options', 'lookupOptions']);
       });
 
     // fields which rely on the cross base link fields
@@ -705,7 +705,7 @@ export class BaseExportService {
       )
       .map((field, index) => ({
         ...pick(field, BaseExportService.EXPORT_FIELD_COLUMNS),
-        type: crossBase ? field.type : FieldType.SingleLineText,
+        type: allowCrossBase ? field.type : FieldType.SingleLineText,
         order: fieldRaws[index].order,
       }));
 

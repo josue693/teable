@@ -527,7 +527,7 @@ export class BaseImportService {
     fields: IFieldWithTableIdJson[],
     tableIdMap: Record<string, string>,
     fieldMap: Record<string, string>,
-    crossBase: boolean = false
+    allowCrossBase: boolean = false
   ) {
     const oneWayFields = fields.filter(({ options }) => (options as ILinkFieldOptions).isOneWay);
     const twoWayFields = fields.filter(({ options }) => !(options as ILinkFieldOptions).isOneWay);
@@ -550,7 +550,7 @@ export class BaseImportService {
         type,
         description,
         options: {
-          foreignTableId: crossBase ? foreignTableId : tableIdMap[foreignTableId],
+          foreignTableId: allowCrossBase ? foreignTableId : tableIdMap[foreignTableId],
           relationship,
           isOneWay: true,
         },

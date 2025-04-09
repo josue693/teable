@@ -1,11 +1,15 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 import { Injectable, Logger } from '@nestjs/common';
+import type { ILinkFieldOptions } from '@teable/core';
+import { FieldType } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { ICreateBaseVo, IDuplicateBaseRo } from '@teable/openapi';
 import { Knex } from 'knex';
+import { groupBy } from 'lodash';
 import { InjectModel } from 'nest-knexjs';
 import { InjectDbProvider } from '../../db-provider/db.provider';
 import { IDbProvider } from '../../db-provider/db.provider.interface';
+import { createFieldInstanceByRaw } from '../field/model/factory';
 import { TableDuplicateService } from '../table/table-duplicate.service';
 import { BaseExportService } from './base-export.service';
 import { BaseImportService } from './base-import.service';
@@ -23,25 +27,86 @@ export class BaseDuplicateService {
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex
   ) {}
 
-  async duplicateBase(duplicateBaseRo: IDuplicateBaseRo) {
+  async duplicateBase(duplicateBaseRo: IDuplicateBaseRo, allowCrossBase: boolean = true) {
     const { fromBaseId, spaceId, withRecords, name } = duplicateBaseRo;
 
     const { base, tableIdMap, fieldIdMap, viewIdMap } = await this.duplicateStructure(
       fromBaseId,
       spaceId,
-      name
+      name,
+      allowCrossBase
     );
 
+    const crossBaseLinkFieldTableMap = allowCrossBase
+      ? ({} as Record<
+          string,
+          {
+            dbFieldName: string;
+            selfKeyName: string;
+            isMultipleCellValue: boolean;
+          }[]
+        >)
+      : await this.getCrossBaseLinkFieldTableMap(tableIdMap);
+
     if (withRecords) {
-      await this.duplicateTableData(tableIdMap, fieldIdMap, viewIdMap);
+      await this.duplicateTableData(tableIdMap, fieldIdMap, viewIdMap, crossBaseLinkFieldTableMap);
       await this.duplicateAttachments(tableIdMap, fieldIdMap);
-      await this.duplicateLinkJunction(tableIdMap, fieldIdMap);
+      await this.duplicateLinkJunction(tableIdMap, fieldIdMap, allowCrossBase);
     }
 
     return base as ICreateBaseVo;
   }
 
-  protected async duplicateStructure(fromBaseId: string, spaceId: string, baseName?: string) {
+  private async getCrossBaseLinkFieldTableMap(tableIdMap: Record<string, string>) {
+    const tableId2DbFieldNameMap: Record<
+      string,
+      { dbFieldName: string; selfKeyName: string; isMultipleCellValue: boolean }[]
+    > = {};
+    const prisma = this.prismaService.txClient();
+    const allFieldRaws = await prisma.field.findMany({
+      where: {
+        tableId: { in: Object.keys(tableIdMap) },
+        deletedTime: null,
+      },
+    });
+
+    const crossBaseLinkFields = allFieldRaws
+      .filter(({ type, isLookup }) => type === FieldType.Link && !isLookup)
+      .map((f) => ({ ...createFieldInstanceByRaw(f), tableId: f.tableId }))
+      .filter((f) => (f.options as ILinkFieldOptions).baseId);
+
+    const groupedCrossBaseLinkFields = groupBy(crossBaseLinkFields, 'tableId');
+
+    Object.entries(groupedCrossBaseLinkFields).map(([tableId, fields]) => {
+      tableId2DbFieldNameMap[tableId] = fields.map(
+        ({ dbFieldName, options, isMultipleCellValue }) => {
+          return {
+            dbFieldName,
+            selfKeyName: (options as ILinkFieldOptions).selfKeyName,
+            isMultipleCellValue: !!isMultipleCellValue,
+          };
+        }
+      );
+      tableId2DbFieldNameMap[tableIdMap[tableId]] = fields.map(
+        ({ dbFieldName, options, isMultipleCellValue }) => {
+          return {
+            dbFieldName,
+            selfKeyName: (options as ILinkFieldOptions).selfKeyName,
+            isMultipleCellValue: !!isMultipleCellValue,
+          };
+        }
+      );
+    });
+
+    return tableId2DbFieldNameMap;
+  }
+
+  protected async duplicateStructure(
+    fromBaseId: string,
+    spaceId: string,
+    baseName?: string,
+    allowCrossBase?: boolean
+  ) {
     const prisma = this.prismaService.txClient();
     const baseRaw = await prisma.base.findUniqueOrThrow({
       where: {
@@ -85,8 +150,9 @@ export class BaseDuplicateService {
       tableRaws,
       fieldRaws,
       viewRaws,
-      crossBase: true,
+      allowCrossBase,
     });
+
     const {
       base: newBase,
       tableIdMap,
@@ -100,7 +166,11 @@ export class BaseDuplicateService {
   private async duplicateTableData(
     tableIdMap: Record<string, string>,
     fieldIdMap: Record<string, string>,
-    viewIdMap: Record<string, string>
+    viewIdMap: Record<string, string>,
+    crossBaseLinkFieldTableMap: Record<
+      string,
+      { dbFieldName: string; selfKeyName: string; isMultipleCellValue: boolean }[]
+    >
   ) {
     const prisma = this.prismaService.txClient();
     const tableId2DbTableNameMap: Record<string, string> = {};
@@ -136,6 +206,7 @@ export class BaseDuplicateService {
       dbTableName: string;
     }[];
 
+    // delete foreign keys if(exist) then duplicate table data
     for (const dbTableName of dbTableNames) {
       const foreignKeysInfoSql = this.dbProvider.getForeignKeysInfo(dbTableName);
       const foreignKeysInfo = await this.prismaService.txClient().$queryRawUnsafe<
@@ -172,7 +243,8 @@ export class BaseDuplicateService {
         oldDbTableName,
         newDbTableName,
         viewIdMap,
-        fieldIdMap
+        fieldIdMap,
+        crossBaseLinkFieldTableMap[tableId] || []
       );
     }
 
@@ -212,8 +284,9 @@ export class BaseDuplicateService {
 
   private async duplicateLinkJunction(
     tableIdMap: Record<string, string>,
-    fieldIdMap: Record<string, string>
+    fieldIdMap: Record<string, string>,
+    allowCrossBase: boolean = true
   ) {
-    await this.tableDuplicateService.duplicateLinkJunction(tableIdMap, fieldIdMap);
+    await this.tableDuplicateService.duplicateLinkJunction(tableIdMap, fieldIdMap, allowCrossBase);
   }
 }

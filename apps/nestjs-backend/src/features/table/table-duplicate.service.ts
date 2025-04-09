@@ -76,7 +76,8 @@ export class TableDuplicateService {
             dbTableName,
             newTableVo.dbTableName,
             sourceToTargetViewMap,
-            sourceToTargetFieldMap
+            sourceToTargetFieldMap,
+            []
           );
 
           await this.duplicateAttachments(sourceTableId, newTableVo.id, sourceToTargetFieldMap);
@@ -121,7 +122,8 @@ export class TableDuplicateService {
     sourceDbTableName: string,
     targetDbTableName: string,
     sourceToTargetViewMap: Record<string, string>,
-    sourceToTargetFieldMap: Record<string, string>
+    sourceToTargetFieldMap: Record<string, string>,
+    crossBaseLinkInfo: { dbFieldName: string; selfKeyName: string; isMultipleCellValue: boolean }[]
   ) {
     const prisma = this.prismaService.txClient();
     const qb = this.knex.queryBuilder();
@@ -130,20 +132,32 @@ export class TableDuplicateService {
 
     const newColumnsInfoQuery = this.dbProvider.columnInfo(targetDbTableName);
 
-    const oldOriginColumns = (
-      await prisma.$queryRawUnsafe<{ name: string }[]>(columnInfoQuery)
-    ).map(({ name }) => name);
+    const oldOriginColumns = (await prisma.$queryRawUnsafe<{ name: string }[]>(columnInfoQuery))
+      .map(({ name }) => name)
+      .filter((name) =>
+        crossBaseLinkInfo
+          .map(({ selfKeyName }) => selfKeyName)
+          .filter((selfKeyName) => selfKeyName !== '__id' && selfKeyName)
+          .includes(name)
+      );
+
+    const crossBaseLinkDbFieldNames = crossBaseLinkInfo.map(
+      ({ dbFieldName, isMultipleCellValue }) => ({
+        dbFieldName,
+        isMultipleCellValue,
+      })
+    );
 
     const newOriginColumns = (
       await prisma.$queryRawUnsafe<{ name: string }[]>(newColumnsInfoQuery)
     ).map(({ name }) => name);
 
-    const newFieldColumns = newOriginColumns.filter(
-      (name) => !name.startsWith(ROW_ORDER_FIELD_PREFIX) && !name.startsWith('__fk_fld')
-    );
-
     const oldRowColumns = oldOriginColumns.filter((name) =>
       name.startsWith(ROW_ORDER_FIELD_PREFIX)
+    );
+
+    const newFieldColumns = newOriginColumns.filter(
+      (name) => !name.startsWith(ROW_ORDER_FIELD_PREFIX) && !name.startsWith('__fk_fld')
     );
 
     const oldFkColumns = oldOriginColumns.filter((name) => name.startsWith('__fk_fld'));
@@ -186,7 +200,13 @@ export class TableDuplicateService {
 
     const sql = this.dbProvider
       .duplicateTableQuery(qb)
-      .duplicateTableData(sourceDbTableName, targetDbTableName, newColumns, oldColumns)
+      .duplicateTableData(
+        sourceDbTableName,
+        targetDbTableName,
+        newColumns,
+        oldColumns,
+        crossBaseLinkDbFieldNames
+      )
       .toQuery();
 
     await prisma.$executeRawUnsafe(sql);
@@ -1021,10 +1041,11 @@ export class TableDuplicateService {
   // duplicate link junction table
   async duplicateLinkJunction(
     tableIdMap: Record<string, string>,
-    fieldIdMap: Record<string, string>
+    fieldIdMap: Record<string, string>,
+    allowCrossBase: boolean = true
   ) {
     const prisma = this.prismaService.txClient();
-    const sourceFieldRaws = await this.prismaService.txClient().field.findMany({
+    const sourceLinkFieldRaws = await prisma.field.findMany({
       where: {
         tableId: { in: Object.keys(tableIdMap) },
         type: FieldType.Link,
@@ -1032,7 +1053,7 @@ export class TableDuplicateService {
       },
     });
 
-    const targetFieldRaws = await this.prismaService.txClient().field.findMany({
+    const targetLinkFieldRaws = await prisma.field.findMany({
       where: {
         tableId: { in: Object.values(tableIdMap) },
         type: FieldType.Link,
@@ -1040,8 +1061,17 @@ export class TableDuplicateService {
       },
     });
 
-    const sourceFields = sourceFieldRaws.map((f) => createFieldInstanceByRaw(f));
-    const targetFields = targetFieldRaws.map((f) => createFieldInstanceByRaw(f));
+    const sourceFields = sourceLinkFieldRaws
+      .filter(({ isLookup }) => !isLookup)
+      .map((f) => createFieldInstanceByRaw(f))
+      .filter((field) => {
+        if (allowCrossBase) {
+          return true;
+        }
+        // if not allow cross base, filter out it.
+        return Boolean((field.options as ILinkFieldOptions).baseId);
+      });
+    const targetFields = targetLinkFieldRaws.map((f) => createFieldInstanceByRaw(f));
 
     const junctionDbTableNameMap = {} as Record<
       string,
