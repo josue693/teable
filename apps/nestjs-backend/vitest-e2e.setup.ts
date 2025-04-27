@@ -3,7 +3,6 @@ import path from 'path';
 import type { INestApplication } from '@nestjs/common';
 import { DriverClient, getRandomString, parseDsn } from '@teable/core';
 import dotenv from 'dotenv-flow';
-import { buildSync } from 'esbuild';
 
 interface ITestConfig {
   driver: string;
@@ -62,19 +61,6 @@ function prepareSqliteEnv() {
   fs.copyFileSync(path.join(dbPath, baseName), path.join(testDbPath, newFileName));
 }
 
-function compileWorkerFile() {
-  const entryFile = path.join(__dirname, 'src/worker/**.ts');
-  const outFile = path.join(__dirname, 'dist/worker');
-
-  buildSync({
-    entryPoints: [entryFile],
-    outdir: outFile,
-    bundle: true,
-    platform: 'node',
-    target: 'node20',
-  });
-}
-
 async function setup() {
   dotenv.config({ path: '../nextjs-app' });
 
@@ -87,8 +73,6 @@ async function setup() {
   globalThis.testConfig.driver = driver;
 
   prepareSqliteEnv();
-
-  compileWorkerFile();
 }
 
 export default setup();

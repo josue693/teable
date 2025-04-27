@@ -1,13 +1,6 @@
-import { Worker } from 'worker_threads';
 import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { IFieldRo } from '@teable/core';
-import {
-  FieldType,
-  FieldKeyType,
-  getRandomString,
-  getActionTriggerChannel,
-  getTableImportChannel,
-} from '@teable/core';
+import { FieldType, getTableImportChannel, getRandomString } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type {
   IAnalyzeRo,
@@ -16,9 +9,8 @@ import type {
   IImportColumn,
   ITableFullVo,
 } from '@teable/openapi';
-import { difference, toString } from 'lodash';
+import { difference } from 'lodash';
 import { ClsService } from 'nestjs-cls';
-import type { CreateOp } from 'sharedb';
 import type { LocalPresence } from 'sharedb/lib/client';
 
 import { ShareDbService } from '../../../share-db/share-db.service';
@@ -27,7 +19,8 @@ import { NotificationService } from '../../notification/notification.service';
 import { RecordOpenApiService } from '../../record/open-api/record-open-api.service';
 import { DEFAULT_VIEWS, DEFAULT_FIELDS } from '../../table/constant';
 import { TableOpenApiService } from '../../table/open-api/table-open-api.service';
-import { importerFactory, getWorkerPath, parseBoolean } from './import.class';
+import { TableImportCsvQueueProcessor } from './import-csv.processor';
+import { importerFactory } from './import.class';
 import type { CsvImporter, ExcelImporter } from './import.class';
 
 @Injectable()
@@ -39,7 +32,8 @@ export class ImportOpenApiService {
     private readonly prismaService: PrismaService,
     private readonly recordOpenApiService: RecordOpenApiService,
     private readonly notificationService: NotificationService,
-    private readonly shareDbService: ShareDbService
+    private readonly shareDbService: ShareDbService,
+    private readonly tableImportCsvQueueProcessor: TableImportCsvQueueProcessor
   ) {}
 
   async analyze(analyzeRo: IAnalyzeRo) {
@@ -210,148 +204,60 @@ export class ImportOpenApiService {
     const localPresence = this.createImportPresence(table.id);
     this.setImportStatus(localPresence, true);
 
-    const workerId = `worker_${getRandomString(8)}`;
-    const path = getWorkerPath('parse');
+    // mark this import all jobs
+    const jobIdPrefix = `import-table-csv:${getRandomString(10)}`;
 
-    const worker = new Worker(path, {
-      workerData: {
-        config: importer.getConfig(),
-        options: {
-          key: options.sheetKey,
-          notification: options.notification,
-          skipFirstNLines: options.skipFirstNLines,
-        },
-        id: workerId,
+    let recordCursor = 1;
+    importer.parse(
+      {
+        key: options.sheetKey,
+        skipFirstNLines: options.skipFirstNLines,
       },
-    });
-    // record count for error notification
-    let recordCount = 1;
-    worker.on('message', async (result) => {
-      const { type, data, chunkId, id } = result;
-      switch (type) {
-        case 'chunk': {
-          this.setImportStatus(localPresence, true);
-          const currentResult = (data as Record<string, unknown[][]>)[sheetKey];
-          // fill data
-          const records = currentResult.map((row) => {
-            const res: { fields: Record<string, unknown> } = {
-              fields: {},
-            };
-            // import new table
-            if (columnInfo) {
-              columnInfo.forEach((col, index) => {
-                const { sourceColumnIndex, type } = col;
-                // empty row will be return void row value
-                const value = Array.isArray(row) ? row[sourceColumnIndex] : null;
-                res.fields[fields[index].id] =
-                  type === FieldType.Checkbox ? parseBoolean(value) : value?.toString();
-              });
-            }
-            // inplace records
-            if (sourceColumnMap) {
-              for (const [key, value] of Object.entries(sourceColumnMap)) {
-                if (value !== null) {
-                  const { type } = fields.find((f) => f.id === key) || {};
-                  // link value should be string
-                  res.fields[key] = type === FieldType.Link ? toString(row[value]) : row[value];
-                }
-              }
-            }
-            return res;
+      async (chunk: Record<string, unknown[][]>, lastChunk?: boolean) => {
+        const currentRecords = chunk[sheetKey];
+        const currentRange = [recordCursor, recordCursor + currentRecords.length - 1] as [
+          number,
+          number,
+        ];
+        recordCursor += currentRecords.length;
+        const jobId = `${jobIdPrefix}_${+new Date()}`;
+        await this.tableImportCsvQueueProcessor.queue.add(
+          'table-import-csv-queue',
+          {
+            userId,
+            chunk,
+            columnInfo,
+            fields,
+            sourceColumnMap,
+            sheetKey,
+            table,
+            baseId,
+            range: currentRange,
+            notification,
+            lastChunk,
+          },
+          {
+            jobId,
+          }
+        );
+      },
+      // finished add job to queue
+      () => {
+        this.logger.log(`All chunk tasks have been added to queue for ${table.id}:${table.name}`);
+      },
+      // error, now for queue way to import, mostly causing by over plan row count
+      (message: string) => {
+        this.logger.error(`Import ${table.id}:${table.name} failed causing: ${message}`);
+        this.setImportStatus(localPresence, false);
+        notification &&
+          this.notificationService.sendImportResultNotify({
+            baseId,
+            tableId: table.id,
+            toUserId: userId,
+            message: `❌ ${table.name} import failed: ${message}`,
           });
-          recordCount += records.length;
-          if (records.length === 0) {
-            return;
-          }
-          try {
-            const createFn = columnInfo
-              ? this.recordOpenApiService.createRecordsOnlySql.bind(this.recordOpenApiService)
-              : this.recordOpenApiService.multipleCreateRecords.bind(this.recordOpenApiService);
-            workerId === id &&
-              (await createFn(table.id, {
-                fieldKeyType: FieldKeyType.Id,
-                typecast: true,
-                records,
-              }));
-            worker.postMessage({ type: 'done', chunkId });
-            this.updateRowCount(table.id);
-          } catch (e: unknown) {
-            const error = e as Error;
-            this.logger.error(error?.message, error?.stack);
-            notification &&
-              this.notificationService.sendImportResultNotify({
-                baseId,
-                tableId: table.id,
-                toUserId: userId,
-                message: `❌ ${table.name} import aborted: ${error.message} fail row range: [${recordCount - records.length}, ${recordCount - 1}]. Please check the data for this range and retry.
-                `,
-              });
-            worker.terminate();
-            throw e;
-          }
-          break;
-        }
-        case 'finished':
-          workerId === id &&
-            notification &&
-            this.notificationService.sendImportResultNotify({
-              baseId,
-              tableId: table.id,
-              toUserId: userId,
-              message: `🎉 ${table.name} ${sourceColumnMap ? 'inplace' : ''} imported successfully`,
-            });
-          worker.terminate();
-          break;
-        case 'error':
-          workerId === id &&
-            notification &&
-            this.notificationService.sendImportResultNotify({
-              baseId,
-              tableId: table.id,
-              toUserId: userId,
-              message: `❌ ${table.name} import failed: ${data}`,
-            });
-          worker.terminate();
-          break;
       }
-    });
-    worker.on('error', (e) => {
-      notification &&
-        this.notificationService.sendImportResultNotify({
-          baseId,
-          tableId: table.id,
-          toUserId: userId,
-          message: `❌ ${table.name} import failed: ${e.message}`,
-        });
-      worker.terminate();
-    });
-    worker.on('exit', (code) => {
-      this.logger.log(`Worker stopped with exit code ${code}`);
-      this.setImportStatus(localPresence, false);
-    });
-  }
-
-  private updateRowCount(tableId: string) {
-    const channel = getActionTriggerChannel(tableId);
-    const presence = this.shareDbService.connect().getPresence(channel);
-    const localPresence = presence.create(tableId);
-    localPresence.submit([{ actionKey: 'addRecord' }], (error) => {
-      error && this.logger.error(error);
-    });
-
-    const updateEmptyOps = {
-      src: 'unknown',
-      seq: 1,
-      m: {
-        ts: Date.now(),
-      },
-      create: {
-        type: 'json0',
-        data: undefined,
-      },
-      v: 0,
-    } as CreateOp;
-    this.shareDbService.publishRecordChannel(tableId, updateEmptyOps);
+    );
   }
 
   private setImportStatus(
