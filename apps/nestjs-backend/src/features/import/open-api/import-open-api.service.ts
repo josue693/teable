@@ -1,6 +1,11 @@
 import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { IFieldRo } from '@teable/core';
-import { FieldType, getTableImportChannel, getRandomString } from '@teable/core';
+import {
+  FieldType,
+  getTableImportChannel,
+  getRandomString,
+  getActionTriggerChannel,
+} from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type {
   IAnalyzeRo,
@@ -11,15 +16,15 @@ import type {
 } from '@teable/openapi';
 import { difference } from 'lodash';
 import { ClsService } from 'nestjs-cls';
+import type { CreateOp } from 'sharedb';
 import type { LocalPresence } from 'sharedb/lib/client';
 
 import { ShareDbService } from '../../../share-db/share-db.service';
 import type { IClsStore } from '../../../types/cls';
 import { NotificationService } from '../../notification/notification.service';
-import { RecordOpenApiService } from '../../record/open-api/record-open-api.service';
 import { DEFAULT_VIEWS, DEFAULT_FIELDS } from '../../table/constant';
 import { TableOpenApiService } from '../../table/open-api/table-open-api.service';
-import { TableImportCsvQueueProcessor } from './import-csv.processor';
+import { TABLE_IMPORT_CSV_QUEUE, ImportTableCsvQueueProcessor } from './import-csv.processor';
 import { importerFactory } from './import.class';
 import type { CsvImporter, ExcelImporter } from './import.class';
 
@@ -30,10 +35,9 @@ export class ImportOpenApiService {
     private readonly tableOpenApiService: TableOpenApiService,
     private readonly cls: ClsService<IClsStore>,
     private readonly prismaService: PrismaService,
-    private readonly recordOpenApiService: RecordOpenApiService,
     private readonly notificationService: NotificationService,
     private readonly shareDbService: ShareDbService,
-    private readonly tableImportCsvQueueProcessor: TableImportCsvQueueProcessor
+    private readonly importTableCsvQueueProcessor: ImportTableCsvQueueProcessor
   ) {}
 
   async analyze(analyzeRo: IAnalyzeRo) {
@@ -205,7 +209,7 @@ export class ImportOpenApiService {
     this.setImportStatus(localPresence, true);
 
     // mark this import all jobs
-    const jobIdPrefix = `import-table-csv:${getRandomString(10)}`;
+    const jobIdPrefix = `${ImportTableCsvQueueProcessor.JOB_ID_PREFIX}:${getRandomString(10)}`;
 
     let recordCursor = 1;
     importer.parse(
@@ -220,9 +224,9 @@ export class ImportOpenApiService {
           number,
         ];
         recordCursor += currentRecords.length;
-        const jobId = `${jobIdPrefix}_${+new Date()}`;
-        await this.tableImportCsvQueueProcessor.queue.add(
-          'table-import-csv-queue',
+        const jobId = `${jobIdPrefix}_${getRandomString(6)}`;
+        await this.importTableCsvQueueProcessor.queue.add(
+          `${TABLE_IMPORT_CSV_QUEUE}_job`,
           {
             userId,
             chunk,
@@ -256,6 +260,7 @@ export class ImportOpenApiService {
             toUserId: userId,
             message: `❌ ${table.name} import failed: ${message}`,
           });
+        this.updateRowCount(table.id);
       }
     );
   }
@@ -273,6 +278,29 @@ export class ImportOpenApiService {
         error && this.logger.error(error);
       }
     );
+  }
+
+  private updateRowCount(tableId: string) {
+    const channel = getActionTriggerChannel(tableId);
+    const presence = this.shareDbService.connect().getPresence(channel);
+    const localPresence = presence.create(tableId);
+    localPresence.submit([{ actionKey: 'addRecord' }], (error) => {
+      error && this.logger.error(error);
+    });
+
+    const updateEmptyOps = {
+      src: 'unknown',
+      seq: 1,
+      m: {
+        ts: Date.now(),
+      },
+      create: {
+        type: 'json0',
+        data: undefined,
+      },
+      v: 0,
+    } as CreateOp;
+    this.shareDbService.publishRecordChannel(tableId, updateEmptyOps);
   }
 
   private createImportPresence(tableId: string) {

@@ -35,14 +35,16 @@ interface ITableImportCsvJob {
   lastChunk?: boolean;
 }
 
-export const TABLE_IMPORT_CSV_QUEUE = 'import-csv-queue';
+export const TABLE_IMPORT_CSV_QUEUE = 'import-table-csv-queue';
 
 @Injectable()
 @Processor(TABLE_IMPORT_CSV_QUEUE)
-export class TableImportCsvQueueProcessor extends WorkerHost {
-  private logger = new Logger(TableImportCsvQueueProcessor.name);
+export class ImportTableCsvQueueProcessor extends WorkerHost {
+  public static readonly JOB_ID_PREFIX = 'import-table-csv';
 
-  private processedJobs = new Set<string>();
+  private logger = new Logger(ImportTableCsvQueueProcessor.name);
+  private timer: NodeJS.Timeout | null = null;
+  private readonly TIMER_INTERVAL = 5000;
 
   constructor(
     private readonly recordOpenApiService: RecordOpenApiService,
@@ -53,6 +55,32 @@ export class TableImportCsvQueueProcessor extends WorkerHost {
     @InjectQueue(TABLE_IMPORT_CSV_QUEUE) public readonly queue: Queue<ITableImportCsvJob>
   ) {
     super();
+  }
+
+  private startQueueTimer() {
+    if (this.timer) {
+      return;
+    }
+    this.logger.log(`Starting import table queue timer with interval: ${this.TIMER_INTERVAL}ms`);
+    this.timer = setInterval(async () => await this.refreshTableRowCount(), this.TIMER_INTERVAL);
+  }
+
+  private async refreshTableRowCount() {
+    // it means there still processing, so they need update rowCount
+    const waitList = [
+      ...new Set(
+        (await this.queue.getJobs('waiting'))
+          .filter((job) => job.id?.startsWith(ImportTableCsvQueueProcessor.JOB_ID_PREFIX))
+          .map((job) => job.data.table.id)
+          .filter((id) => id)
+      ),
+    ];
+
+    if (waitList.length) {
+      waitList.forEach((tableId) => {
+        this.updateRowCount(tableId);
+      });
+    }
   }
 
   public async process(job: Job<ITableImportCsvJob>) {
@@ -77,6 +105,7 @@ export class TableImportCsvQueueProcessor extends WorkerHost {
           tableId: table.id,
         });
         this.setImportStatus(localPresence, false);
+        this.updateRowCount(table.id);
       }
     } catch (error) {
       const err = error as Error;
@@ -88,17 +117,17 @@ export class TableImportCsvQueueProcessor extends WorkerHost {
           message: `❌ ${table.name} import aborted: ${err.message} fail row range: [${range}]. Please check the data for this range and retry.`,
         });
 
-      this.cleanRelativeTask(jobId);
+      await this.cleanRelativeTask(jobId);
 
       throw err;
     }
   }
 
   private async cleanRelativeTask(jobId: string) {
-    const [jobIdPrefix] = jobId.split('_');
+    const [sameBatchJobPrefix] = jobId.split('_');
     const waitingJobs = await this.queue.getJobs('waiting');
     await Promise.all(
-      waitingJobs.filter((job) => job.id?.startsWith(jobIdPrefix)).map((job) => job.remove())
+      waitingJobs.filter((job) => job.id?.startsWith(sameBatchJobPrefix)).map((job) => job.remove())
     );
   }
 
@@ -176,11 +205,7 @@ export class TableImportCsvQueueProcessor extends WorkerHost {
     this.shareDbService.publishRecordChannel(tableId, updateEmptyOps);
   }
 
-  private setImportStatus(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    presence: LocalPresence<any>,
-    loading: boolean
-  ) {
+  private setImportStatus(presence: LocalPresence<unknown>, loading: boolean) {
     presence.submit(
       {
         loading,
@@ -201,6 +226,7 @@ export class TableImportCsvQueueProcessor extends WorkerHost {
   onWorkerEvent(job: Job) {
     const { table, range } = job.data;
     this.logger.log(`import data to ${table.id} job started, range: [${range}]`);
+    this.startQueueTimer();
   }
 
   @OnWorkerEvent('error')
@@ -212,7 +238,25 @@ export class TableImportCsvQueueProcessor extends WorkerHost {
   @OnWorkerEvent('completed')
   async onCompleted(job: Job) {
     const { table, range } = job.data;
-    this.updateRowCount(table.id);
     this.logger.log(`import data to ${table.id} job completed, range: [${range}]`);
+    const waitList = [
+      ...new Set(
+        (await this.queue.getJobs('waiting'))
+          .filter((job) => job.id?.startsWith(ImportTableCsvQueueProcessor.JOB_ID_PREFIX))
+          .map((job) => job.data.table.id)
+      ),
+    ];
+    const activeList = [
+      ...new Set(
+        (await this.queue.getJobs('active'))
+          .filter((job) => job.id?.startsWith(ImportTableCsvQueueProcessor.JOB_ID_PREFIX))
+          .map((job) => job.data.table.id)
+      ),
+    ];
+    if (!waitList.length && !activeList.length && this.timer) {
+      this.logger.log('No more import tasks, clearing timer...');
+      // last task, clear timer
+      clearInterval(this.timer);
+    }
   }
 }
