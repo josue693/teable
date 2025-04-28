@@ -218,7 +218,6 @@ export class ImportOpenApiService {
         skipFirstNLines: options.skipFirstNLines,
       },
       async (chunk: Record<string, unknown[][]>, lastChunk?: boolean) => {
-        console.log('chunkchunkchunkchunk', lastChunk);
         const currentRecords = chunk[sheetKey];
         const currentRange = [recordCursor, recordCursor + currentRecords.length - 1] as [
           number,
@@ -243,6 +242,8 @@ export class ImportOpenApiService {
           },
           {
             jobId,
+            removeOnComplete: true,
+            removeOnFail: true,
           }
         );
       },

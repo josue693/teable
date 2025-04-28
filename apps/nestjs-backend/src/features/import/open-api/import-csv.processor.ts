@@ -125,7 +125,7 @@ export class ImportTableCsvQueueProcessor extends WorkerHost {
 
   private async cleanRelativeTask(jobId: string) {
     const [sameBatchJobPrefix] = jobId.split('_');
-    const waitingJobs = await this.queue.getJobs('waiting');
+    const waitingJobs = await this.queue.getJobs(['waiting', 'active']);
     await Promise.all(
       waitingJobs.filter((job) => job.id?.startsWith(sameBatchJobPrefix)).map((job) => job.remove())
     );
@@ -239,21 +239,12 @@ export class ImportTableCsvQueueProcessor extends WorkerHost {
   async onCompleted(job: Job) {
     const { table, range } = job.data;
     this.logger.log(`import data to ${table.id} job completed, range: [${range}]`);
-    const waitList = [
-      ...new Set(
-        (await this.queue.getJobs('waiting'))
-          .filter((job) => job.id?.startsWith(ImportTableCsvQueueProcessor.JOB_ID_PREFIX))
-          .map((job) => job.data.table.id)
-      ),
-    ];
-    const activeList = [
-      ...new Set(
-        (await this.queue.getJobs('active'))
-          .filter((job) => job.id?.startsWith(ImportTableCsvQueueProcessor.JOB_ID_PREFIX))
-          .map((job) => job.data.table.id)
-      ),
-    ];
-    if (!waitList.length && !activeList.length && this.timer) {
+
+    const allJobs = (await this.queue.getJobs(['waiting', 'active'])).filter((job) =>
+      job.id?.startsWith(ImportTableCsvQueueProcessor.JOB_ID_PREFIX)
+    );
+
+    if (!allJobs.length && this.timer) {
       this.logger.log('No more import tasks, clearing timer...');
       // last task, clear timer
       clearInterval(this.timer);
