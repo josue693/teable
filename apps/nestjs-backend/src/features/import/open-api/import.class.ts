@@ -386,8 +386,9 @@ export class ExcelImporter extends Importer {
         if (i === 0 && skipFirstNLines) {
           currentChunk.splice(0, 1);
         }
+        const lastChunk = i === parseResults.length - 1;
         try {
-          await chunk({ [key]: currentChunk }, true);
+          await chunk({ [key]: currentChunk }, lastChunk);
         } catch (e) {
           onError?.((e as Error)?.message || Importer.DEFAULT_ERROR_MESSAGE);
         }
