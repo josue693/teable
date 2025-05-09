@@ -69,4 +69,6 @@ export enum Events {
 
   // following make no sense just for testing
   BASE_EXPORT_COMPLETE = 'base.export.complete',
+
+  AUDIT_LOG_SAVED = 'audit-log.saved',
 }
