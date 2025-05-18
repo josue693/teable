@@ -118,6 +118,9 @@ const PureToolsResultRenderer = ({
       }
       case McpToolInvocationName.GetTableFields:
       case McpToolInvocationName.GetTablesMeta:
+      case McpToolInvocationName.CreateFields:
+      case McpToolInvocationName.CreateRecords:
+      case McpToolInvocationName.CreateTable:
         return result;
       default:
         return JSON.stringify(toolInvocation.result, null, 2);

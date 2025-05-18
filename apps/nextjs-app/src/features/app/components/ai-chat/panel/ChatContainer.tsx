@@ -1,9 +1,10 @@
 import { useChat, type UseChatHelpers } from '@ai-sdk/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { generateChatId } from '@teable/core';
-import { getAIConfig, getChatMessages } from '@teable/openapi';
+import { getAIConfig, getChatMessages, McpToolInvocationName } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
+import { useRouter } from 'next/router';
 import { useEffect, useMemo, useRef } from 'react';
 import { generateModelKeyList } from '@/features/app/blocks/admin/setting/components/ai-config/utils';
 import { MessageInput } from '../components/MessageInput';
@@ -16,11 +17,18 @@ import { useChatStore } from '../store/useChatStore';
 export const ChatContainer = ({ baseId }: { baseId: string }) => {
   const chatIdRef = useRef(generateChatId());
   const { modelKey, setModelKey } = useChatStore();
+  const tableIdRef = useRef<string | undefined>();
   const activeChat = useActiveChat(baseId);
   const queryClient = useQueryClient();
   const { context, setActiveChatId } = useChatContext();
   const isActiveChat = Boolean(activeChat);
   const chatId = isActiveChat ? activeChat!.id : chatIdRef.current;
+  const router = useRouter();
+  const tableId = router.query.tableId as string | undefined;
+
+  useEffect(() => {
+    tableIdRef.current = tableId;
+  }, [tableId]);
 
   const { data: baseAiConfig, isLoading: isBaseAiConfigLoading } = useQuery({
     queryKey: ['ai-config', baseId],
@@ -105,6 +113,19 @@ export const ChatContainer = ({ baseId }: { baseId: string }) => {
         setActiveChatId(chatId);
         chatIdRef.current = generateChatId();
       });
+    },
+    onToolCall: ({ toolCall }) => {
+      const args = toolCall.args as Record<string, unknown>;
+      const currentTableId = tableIdRef.current;
+      switch (toolCall.toolName) {
+        case McpToolInvocationName.CreateFields:
+        case McpToolInvocationName.CreateRecords:
+        case McpToolInvocationName.CreateView:
+          if ('tableId' in args && args.tableId !== currentTableId) {
+            router.push(`/base/${baseId}/${args.tableId}/`);
+          }
+          break;
+      }
     },
     onError: (error) => {
       toast.error(error.message);

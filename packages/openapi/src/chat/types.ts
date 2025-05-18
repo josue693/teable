@@ -7,6 +7,14 @@ export enum McpToolInvocationName {
   GenerateScriptAction = 'generate-script-action',
   GetScriptInput = 'get-script-input',
   GetTeableApi = 'get-teable-api',
+  CreateFields = 'create-fields',
+  CreateView = 'create-view',
+  CreateRecords = 'create-records',
+  CreateTable = 'create-table',
+}
+
+export enum ChatToolInvocationName {
+  Finish = 'finish',
 }
 
 export const chatContextSchema = z.object({
