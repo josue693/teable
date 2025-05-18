@@ -604,5 +604,23 @@
     "title": "Tabelle Papierkorb",
     "resourceType": "Typ der Ressource",
     "deletedResource": "Gelöschte Ressource"
+  },
+  "prompt": {
+    "crm": {
+      "title": "CRM-System",
+      "description": "Helfen Sie mir, ein CRM-System zur Verwaltung von Kundeninformationen, Verkaufsleads, Chancen und Verträgen aufzubauen. Fügen Sie Kommunikationsprotokolle, Erinnerungen an wichtige Termine und Vertriebstrichteranalysen mit Konversionsverfolgung hinzu."
+    },
+    "projectManagement": {
+      "title": "Projektmanagement",
+      "description": "Benötige ein Projektmanagementsystem zur Verfolgung mehrerer Projekte. Inklusive Task-Board, Meilenstein-Tracking, Ressourcenzuweisung, Zeiterfassung und Risikomanagement."
+    },
+    "marketingCampaign": {
+      "title": "Marketing-Kampagne",
+      "description": "Richten Sie ein Verwaltungssystem für Marketingkampagnen ein, um die Kanalleistung, den Inhaltskalender und die Social-Media-Analyse zu verfolgen. Inklusive Budgetkontrolle, ROI-Berechnung und Marktfeedback-Analyse."
+    },
+    "teamCollaboration": {
+      "title": "Team-Zusammenarbeit",
+      "description": "Erstellen Sie einen Teamarbeitsbereich zur Verwaltung täglicher Aufgaben, Besprechungsnotizen, Teamdokumente und Wissensdatenbank. Inklusive Aufgabenabhängigkeiten, Terminerinnerungen und Arbeitsbelastungsanalysen."
+    }
   }
 }

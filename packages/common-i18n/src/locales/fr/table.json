@@ -580,5 +580,23 @@
     "title": "Corbeille de Table",
     "resourceType": "Type de Ressource",
     "deletedResource": "Ressource Supprimée"
+  },
+  "prompt": {
+    "crm": {
+      "title": "Système CRM",
+      "description": "Aidez-moi à construire un système CRM pour gérer les informations clients, les prospects commerciaux, les opportunités et les contrats. Incluez des journaux de communication, des rappels de dates clés et une analyse de l'entonnoir de vente avec suivi des conversions."
+    },
+    "projectManagement": {
+      "title": "Gestion de Projet",
+      "description": "Besoin d'un système de gestion de projet pour suivre plusieurs projets. Incluez un tableau de tâches, un suivi des jalons, une allocation des ressources, un suivi du temps et une gestion des risques."
+    },
+    "marketingCampaign": {
+      "title": "Campagne Marketing",
+      "description": "Mettez en place un système de gestion de campagne marketing pour suivre la performance des canaux, le calendrier de contenu et l'analyse des médias sociaux. Incluez le contrôle budgétaire, le calcul du ROI et l'analyse des retours du marché."
+    },
+    "teamCollaboration": {
+      "title": "Collaboration d'Équipe",
+      "description": "Créez un espace de collaboration d'équipe pour gérer les tâches quotidiennes, les notes de réunion, les documents d'équipe et la base de connaissances. Incluez les dépendances des tâches, les rappels d'échéance et les analyses de charge de travail."
+    }
   }
 }

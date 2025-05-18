@@ -65,9 +65,5 @@
     "importWayTip": "点击或拖拽文件到此区域上传",
     "baseImportTips": "点击或者拖拽 .tea 文件到此区域上传",
     "confirm": "确认并继续"
-  },
-  "template": {
-    "title": "模板中心",
-    "description": "快速从模板创建一个新数据库"
   }
 }

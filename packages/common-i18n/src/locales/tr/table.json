@@ -564,5 +564,23 @@
   "pasteNewRecords": {
     "title": "Birden fazla kayıt eklemek istiyor musunuz?",
     "description": "{{count}} kayıt tabloya eklenecek."
+  },
+  "prompt": {
+    "crm": {
+      "title": "CRM Sistemi",
+      "description": "Müşteri bilgilerini, satış adaylarını, fırsatları ve sözleşmeleri yönetmek için bir CRM sistemi oluşturmama yardım edin. İletişim kayıtları, önemli tarih hatırlatıcıları ve dönüşüm takibi ile satış hunisi analizi ekleyin."
+    },
+    "projectManagement": {
+      "title": "Proje Yönetimi",
+      "description": "Birden fazla projeyi takip etmek için bir proje yönetim sistemine ihtiyacım var. Görev panosu, kilometre taşı takibi, kaynak tahsisi, zaman takibi ve risk yönetimi dahil edin."
+    },
+    "marketingCampaign": {
+      "title": "Pazarlama Kampanyası",
+      "description": "Kanal performansını, içerik takvimini ve sosyal medya analizini takip etmek için bir pazarlama kampanyası yönetim sistemi kurun. Bütçe kontrolü, ROI hesaplaması ve pazar geri bildirim analizi dahil edin."
+    },
+    "teamCollaboration": {
+      "title": "Takım İşbirliği",
+      "description": "Günlük görevleri, toplantı notlarını, takım belgelerini ve bilgi tabanını yönetmek için bir takım işbirliği alanı oluşturun. Görev bağımlılıkları, son tarih hatırlatıcıları ve iş yükü analitiği dahil edin."
+    }
   }
 }

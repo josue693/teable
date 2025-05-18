@@ -595,5 +595,23 @@
   "plugin": {
     "recent": "Frases",
     "more": "Explorar más ..."
+  },
+  "prompt": {
+    "crm": {
+      "title": "Sistema CRM",
+      "description": "Ayúdame a construir un sistema CRM para gestionar información de clientes, leads de ventas, oportunidades y contratos. Incluye registros de comunicación, recordatorios de fechas clave y análisis del embudo de ventas con seguimiento de conversión."
+    },
+    "projectManagement": {
+      "title": "Gestión de Proyectos",
+      "description": "Necesito un sistema de gestión de proyectos para seguir múltiples proyectos. Incluye tablero de tareas, seguimiento de hitos, asignación de recursos, seguimiento de tiempo y gestión de riesgos."
+    },
+    "marketingCampaign": {
+      "title": "Campaña de Marketing",
+      "description": "Configura un sistema de gestión de campañas de marketing para seguir el rendimiento de canales, calendario de contenido y análisis de redes sociales. Incluye control de presupuesto, cálculo de ROI y análisis de retroalimentación del mercado."
+    },
+    "teamCollaboration": {
+      "title": "Colaboración de Equipo",
+      "description": "Crea un espacio de colaboración para equipos para gestionar tareas diarias, notas de reuniones, documentos del equipo y base de conocimientos. Incluye dependencias de tareas, recordatorios de plazos y análisis de carga de trabajo."
+    }
   }
 }

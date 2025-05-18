@@ -65,9 +65,5 @@
     "importWayTip": "Click or drag and drop the file to upload in this area",
     "baseImportTips": "Click or drag and drop .tea file to upload in this area",
     "confirm": "Confirm and continue"
-  },
-  "template": {
-    "title": "Template",
-    "description": "Create a new base from a template quickly"
   }
 }

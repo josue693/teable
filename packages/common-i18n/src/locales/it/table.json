@@ -608,5 +608,23 @@
   "plugin": {
     "recent": "Recenti",
     "more": "Esplora di più..."
+  },
+  "prompt": {
+    "crm": {
+      "title": "Sistema CRM",
+      "description": "Aiutami a costruire un sistema CRM per gestire informazioni sui clienti, lead di vendita, opportunità e contratti. Includi registri di comunicazione, promemoria di date chiave e analisi del funnel di vendita con tracciamento delle conversioni."
+    },
+    "projectManagement": {
+      "title": "Gestione Progetti",
+      "description": "Ho bisogno di un sistema di gestione progetti per monitorare più progetti. Includi bacheca attività, monitoraggio delle milestone, allocazione delle risorse, tracciamento del tempo e gestione dei rischi."
+    },
+    "marketingCampaign": {
+      "title": "Campagna Marketing",
+      "description": "Configura un sistema di gestione campagne marketing per monitorare le prestazioni dei canali, il calendario dei contenuti e l'analisi dei social media. Includi controllo del budget, calcolo del ROI e analisi dei feedback di mercato."
+    },
+    "teamCollaboration": {
+      "title": "Collaborazione di Team",
+      "description": "Crea uno spazio di collaborazione per team per gestire attività quotidiane, note di riunioni, documenti di team e base di conoscenza. Includi dipendenze tra attività, promemoria di scadenze e analisi del carico di lavoro."
+    }
   }
 }
