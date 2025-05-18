@@ -54,6 +54,12 @@
   "password": {
     "setInvalid": "设置的密码无效，至少需要8个字符，且必须包含至少一个字母和一个数字。"
   },
+  "template": {
+    "aiTitle": "从你的场景开始搭建",
+    "title": "模板中心",
+    "description": "快速从模板创建一个新数据库",
+    "browseAll": "浏览全部"
+  },
   "settings": {
     "title": "设置",
     "templateAdmin": {

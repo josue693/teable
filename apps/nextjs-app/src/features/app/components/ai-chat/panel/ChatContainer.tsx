@@ -1,11 +1,12 @@
-import { useChat, type UseChatHelpers } from '@ai-sdk/react';
+import { useChat } from '@ai-sdk/react';
+import type { UseChatOptions, UseChatHelpers } from '@ai-sdk/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { generateChatId } from '@teable/core';
 import { getAIConfig, getChatMessages, McpToolInvocationName } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { useRouter } from 'next/router';
-import { useEffect, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { generateModelKeyList } from '@/features/app/blocks/admin/setting/components/ai-config/utils';
 import { MessageInput } from '../components/MessageInput';
 import { Messages } from '../components/Messages';
@@ -14,7 +15,20 @@ import { useChatContext } from '../context/useChatContext';
 import { useActiveChat } from '../hooks/useActiveChat';
 import { useChatStore } from '../store/useChatStore';
 
-export const ChatContainer = ({ baseId }: { baseId: string }) => {
+export interface ChatContainerRef {
+  setInputValue: (value: string) => void;
+}
+
+export const ChatContainer = forwardRef<
+  ChatContainerRef,
+  {
+    baseId: string;
+    autoOpen?: boolean;
+    onToolCall?: (
+      toolCall: Parameters<Required<UseChatOptions>['onToolCall']>[0] & { chatId: string }
+    ) => void;
+  }
+>(({ baseId, autoOpen = false, onToolCall }, ref) => {
   const chatIdRef = useRef(generateChatId());
   const { modelKey, setModelKey } = useChatStore();
   const tableIdRef = useRef<string | undefined>();
@@ -116,13 +130,26 @@ export const ChatContainer = ({ baseId }: { baseId: string }) => {
     },
     onToolCall: ({ toolCall }) => {
       const args = toolCall.args as Record<string, unknown>;
+      onToolCall?.({ toolCall, chatId });
       const currentTableId = tableIdRef.current;
       switch (toolCall.toolName) {
         case McpToolInvocationName.CreateFields:
         case McpToolInvocationName.CreateRecords:
         case McpToolInvocationName.CreateView:
           if ('tableId' in args && args.tableId !== currentTableId) {
-            router.push(`/base/${baseId}/${args.tableId}/`);
+            router.push(
+              {
+                pathname: `/base/[baseId]/[tableId]/`,
+                query: {
+                  baseId,
+                  tableId: args.tableId as string,
+                },
+              },
+              undefined,
+              {
+                shallow: Boolean(currentTableId),
+              }
+            );
           }
           break;
       }
@@ -141,6 +168,12 @@ export const ChatContainer = ({ baseId }: { baseId: string }) => {
       });
     }
   }, [status, setActiveChatId, chatId, isActiveChat, queryClient, baseId]);
+
+  useImperativeHandle(ref, () => ({
+    setInputValue: (value: string) => {
+      setInput(value);
+    },
+  }));
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden pb-3">
@@ -166,4 +199,6 @@ export const ChatContainer = ({ baseId }: { baseId: string }) => {
       </form>
     </div>
   );
-};
+});
+
+ChatContainer.displayName = 'ChatContainer';
