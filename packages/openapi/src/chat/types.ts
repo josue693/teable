@@ -5,6 +5,14 @@ export enum McpToolInvocationName {
   GetTableFields = 'get-table-fields',
   GetTablesMeta = 'get-tables-meta',
   SqlQuery = 'sql-query',
+  CreateFields = 'create-fields',
+  CreateView = 'create-view',
+  CreateRecords = 'create-records',
+  CreateTable = 'create-table',
+}
+
+export enum ChatToolInvocationName {
+  Finish = 'finish',
 }
 
 export const chatContextSchema = z.object({
