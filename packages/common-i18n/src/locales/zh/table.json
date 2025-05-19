@@ -645,6 +645,11 @@
       "getTableFields": "获取表格字段",
       "getTablesMeta": "获取表格元数据",
       "sqlQuery": "执行 SQL 查询",
+      "createFields": "创建字段",
+      "createRecords": "创建记录",
+      "createTable": "创建表格",
+      "createView": "创建视图",
+      "runScripts": "执行脚本",
       "args": "参数",
       "result": "结果"
     },

@@ -645,6 +645,11 @@
       "getTableFields": "Get table fields",
       "getTablesMeta": "Get tables meta",
       "sqlQuery": "Execute SQL query",
+      "createFields": "Create fields",
+      "createRecords": "Create records",
+      "createTable": "Create table",
+      "createView": "Create view",
+      "runScripts": "Run scripts",
       "args": "Arguments",
       "result": "Result"
     },
