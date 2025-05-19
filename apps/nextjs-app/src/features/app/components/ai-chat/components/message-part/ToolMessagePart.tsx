@@ -43,6 +43,16 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
         return t('aiChat.tool.getScriptInput');
       case McpToolInvocationName.GetTeableApi:
         return t('aiChat.tool.getTeableApi');
+      case McpToolInvocationName.CreateFields:
+        return t('aiChat.tool.createFields');
+      case McpToolInvocationName.CreateRecords:
+        return t('aiChat.tool.createRecords');
+      case McpToolInvocationName.CreateTable:
+        return t('aiChat.tool.createTable');
+      case McpToolInvocationName.CreateView:
+        return t('aiChat.tool.createView');
+      case McpToolInvocationName.RunScripts:
+        return t('aiChat.tool.runScripts');
       default:
         return toolInvocation.toolName;
     }
@@ -107,6 +117,10 @@ const PureToolsResultRenderer = ({
 
   const content = useMemo(() => {
     switch (toolInvocation.toolName) {
+      case McpToolInvocationName.CreateFields:
+      case McpToolInvocationName.CreateRecords:
+      case McpToolInvocationName.CreateTable:
+      case McpToolInvocationName.RunScripts:
       case McpToolInvocationName.SqlQuery: {
         let res = result;
         try {
@@ -118,9 +132,6 @@ const PureToolsResultRenderer = ({
       }
       case McpToolInvocationName.GetTableFields:
       case McpToolInvocationName.GetTablesMeta:
-      case McpToolInvocationName.CreateFields:
-      case McpToolInvocationName.CreateRecords:
-      case McpToolInvocationName.CreateTable:
         return result;
       default:
         return JSON.stringify(toolInvocation.result, null, 2);

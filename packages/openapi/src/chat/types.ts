@@ -11,6 +11,7 @@ export enum McpToolInvocationName {
   CreateView = 'create-view',
   CreateRecords = 'create-records',
   CreateTable = 'create-table',
+  RunScripts = 'run-scripts',
 }
 
 export enum ChatToolInvocationName {

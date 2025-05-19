@@ -648,6 +648,11 @@
       "generateScriptAction": "Generate script action",
       "getScriptInput": "Get script input",
       "getTeableApi": "Get API",
+      "createFields": "Create fields",
+      "createRecords": "Create records",
+      "createTable": "Create table",
+      "createView": "Create view",
+      "runScripts": "Run scripts",
       "args": "Arguments",
       "result": "Result"
     },

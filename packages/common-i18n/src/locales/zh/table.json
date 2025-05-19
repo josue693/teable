@@ -648,6 +648,11 @@
       "generateScriptAction": "生成脚本",
       "getScriptInput": "获取脚本输入",
       "getTeableApi": "获取 API",
+      "createFields": "创建字段",
+      "createRecords": "创建记录",
+      "createTable": "创建表格",
+      "createView": "创建视图",
+      "runScripts": "执行脚本",
       "args": "参数",
       "result": "结果"
     },
