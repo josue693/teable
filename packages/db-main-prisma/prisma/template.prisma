@@ -145,7 +145,6 @@ model View {
 }
 
 model Ops {
-  id          String   @id @default(cuid())
   collection  String
   docId       String   @map("doc_id")
   docType     String   @map("doc_type")
@@ -157,6 +156,17 @@ model Ops {
   @@unique([collection, docId, version])
   @@index([collection, createdTime])
   @@map("ops")
+}
+
+model Snapshots {
+  collection String
+  docId      String @map("doc_id")
+  docType    String @map("doc_type")
+  version    Int
+  data       String
+
+  @@unique([collection, docId])
+  @@map("snapshots")
 }
 
 model Reference {
@@ -504,7 +514,6 @@ model Comment {
 }
 
 model CommentSubscription {
-  id               String     @id @default(cuid())
   tableId          String     @map("table_id")
   recordId         String     @map("record_id")
   createdBy        String     @map("created_by")
@@ -543,7 +552,6 @@ model PluginPanel {
 }
 
 model PluginContextMenu {
-  id               String    @id @default(cuid())
   tableId          String    @map("table_id")
   pluginInstallId  String    @map("plugin_install_id") @unique
   order            Float     @map("order")
