@@ -264,8 +264,8 @@ export class BaseImportService {
         description,
       });
       tableIdMap[tableId] = newTableVo.id;
-      this.logger.log(`base-duplicate-service: duplicate table item successfully`);
     }
+    this.logger.log(`base-duplicate-service: duplicate tables successfully`);
 
     const { fieldMap: fieldIdMap, fkMap } = await this.createFields(tables, tableIdMap);
     this.logger.log(`base-duplicate-service: Duplicate table fields successfully`);

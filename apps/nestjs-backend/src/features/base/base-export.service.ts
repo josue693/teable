@@ -689,6 +689,13 @@ export class BaseExportService {
 
   private getCrossBaseFields(fieldRaws: Field[], allowCrossBase = false) {
     const fields = fieldRaws.map((fieldRaw) => createFieldInstanceByRaw(fieldRaw));
+    const fieldOrderMap = fieldRaws.reduce(
+      (acc, field) => {
+        acc[field.id] = field.order;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
     const createdTimeMap = fieldRaws.reduce(
       (acc, field) => {
         acc[field.id] = field.createdTime.toISOString();
@@ -699,12 +706,12 @@ export class BaseExportService {
     const crossBaseLinkFields = fields
       .filter(({ type, isLookup }) => type === FieldType.Link && !isLookup)
       .filter(({ options }) => Boolean((options as ILinkFieldOptions)?.baseId))
-      .map((field, index) => {
+      .map((field) => {
         const res = {
           ...pick(field, BaseExportService.EXPORT_FIELD_COLUMNS),
           type: allowCrossBase ? field.type : FieldType.SingleLineText,
           createdTime: createdTimeMap[field.id],
-          order: fieldRaws[index].order,
+          order: fieldOrderMap[field.id],
         };
 
         return allowCrossBase ? res : omit(res, ['options', 'lookupOptions']);
@@ -718,11 +725,25 @@ export class BaseExportService {
           .map(({ id }) => id)
           .includes((lookupOptions as ILookupOptionsVo)?.linkFieldId)
       )
-      .map((field, index) => ({
-        ...pick(field, BaseExportService.EXPORT_FIELD_COLUMNS),
+      .map((field) => ({
+        ...pick(
+          field,
+          allowCrossBase
+            ? BaseExportService.EXPORT_FIELD_COLUMNS
+            : BaseExportService.EXPORT_FIELD_COLUMNS.filter(
+                (property) =>
+                  ![
+                    // remove isLookup, options, lookupOptions for cross base link fields
+                    'isComputed',
+                    'isLookup',
+                    'options',
+                    'lookupOptions',
+                  ].includes(property)
+              )
+        ),
         type: allowCrossBase ? field.type : FieldType.SingleLineText,
         createdTime: createdTimeMap[field.id],
-        order: fieldRaws[index].order,
+        order: fieldOrderMap[field.id],
       }));
 
     return [...crossBaseLinkFields, ...relativeFields] as IBaseJson['tables'][number]['fields'];
