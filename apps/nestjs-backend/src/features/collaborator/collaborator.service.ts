@@ -88,7 +88,7 @@ export class CollaboratorService {
     const query = this.knex
       .insert(
         collaborators.map((collaborator) => ({
-          id: getRandomString(16),
+          id: getRandomString(25),
           resource_id: spaceId,
           resource_type: CollaboratorType.Space,
           role_name: role,
@@ -659,7 +659,7 @@ export class CollaboratorService {
     const query = this.knex
       .insert(
         collaborators.map((collaborator) => ({
-          id: getRandomString(16),
+          id: getRandomString(25),
           resource_id: baseId,
           resource_type: CollaboratorType.Base,
           role_name: role,
