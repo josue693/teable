@@ -19,10 +19,11 @@ interface IFilerDatePickerProps {
   field: DateField;
   operator: string;
   onSelect: (value: IDateFilter | null) => void;
+  modal?: boolean;
 }
 
 function FilterDatePicker(props: IFilerDatePickerProps) {
-  const { value: initValue, operator, onSelect, field } = props;
+  const { value: initValue, operator, onSelect, field, modal } = props;
   const [innerValue, setInnerValue] = useState<IDateFilter | null>(initValue);
   const { t } = useTranslation();
   const dateMap = useDateI18nMap();
@@ -143,6 +144,7 @@ function FilterDatePicker(props: IFilerDatePickerProps) {
         value={innerValue?.mode || null}
         className="max-w-xs"
         popoverClassName="w-max"
+        modal={modal}
       />
       {inputCreator}
     </div>

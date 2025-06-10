@@ -133,6 +133,7 @@ export function BaseFieldValue(props: IBaseFieldValue) {
           value={value as IDateFilter}
           onSelect={onSelect}
           operator={operator}
+          modal={modal}
         />
       );
     case FieldType.Checkbox:
