@@ -195,8 +195,9 @@ describe('OpenAPI ViewController view order sort (e2e)', () => {
       },
     });
 
+    // asc
     const ascOrders: IGetRecordsRo['orderBy'] = [
-      { fieldId: createdTimeField.id, order: SortFunc.Desc },
+      { fieldId: createdTimeField.id, order: SortFunc.Asc },
     ];
 
     const originRecords = await getSortRecords(tableId, {
@@ -207,7 +208,7 @@ describe('OpenAPI ViewController view order sort (e2e)', () => {
     const assertSort = orderBy(
       originRecords,
       ['createdTime', 'autoNumber'],
-      [SortFunc.Desc, SortFunc.Asc]
+      [SortFunc.Asc, SortFunc.Asc]
     );
 
     const originId = originRecords.map((record) => record.id);
@@ -215,6 +216,28 @@ describe('OpenAPI ViewController view order sort (e2e)', () => {
     const assertId = assertSort.map((record) => record.id);
 
     expect(originId).toEqual(assertId);
+
+    // desc
+    const descOrders: IGetRecordsRo['orderBy'] = [
+      { fieldId: createdTimeField.id, order: SortFunc.Desc },
+    ];
+
+    const descOriginRecords = await getSortRecords(tableId, {
+      viewId,
+      orderBy: descOrders,
+    });
+
+    const assertDescSort = orderBy(
+      descOriginRecords,
+      ['createdTime', 'autoNumber'],
+      [SortFunc.Desc, SortFunc.Asc]
+    );
+
+    const originDescId = descOriginRecords.map((record) => record.id);
+
+    const assertDescId = assertDescSort.map((record) => record.id);
+
+    expect(originDescId).toEqual(assertDescId);
   });
 });
 

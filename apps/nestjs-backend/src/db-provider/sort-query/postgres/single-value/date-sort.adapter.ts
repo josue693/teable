@@ -3,7 +3,7 @@ import { SortFunctionPostgres } from '../sort-query.function';
 
 export class DateSortAdapter extends SortFunctionPostgres {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
-    builderClient.orderBy(this.columnName, 'desc', 'first');
+    builderClient.orderBy(this.columnName, 'asc', 'first');
     return builderClient;
   }
 
