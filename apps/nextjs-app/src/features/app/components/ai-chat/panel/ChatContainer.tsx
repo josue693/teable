@@ -2,7 +2,7 @@ import { useChat } from '@ai-sdk/react';
 import type { UseChatOptions, UseChatHelpers } from '@ai-sdk/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { generateChatId } from '@teable/core';
-import { getAIConfig, getChatMessages, McpToolInvocationName } from '@teable/openapi';
+import { getAIConfig, getChatMessages } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { useRouter } from 'next/router';
@@ -11,6 +11,7 @@ import { generateModelKeyList } from '@/features/app/blocks/admin/setting/compon
 import { MessageInput } from '../components/MessageInput';
 import { Messages } from '../components/Messages';
 import type { IMessageMeta } from '../components/types';
+import { ChatContext } from '../context/ChatContext';
 import { useChatContext } from '../context/useChatContext';
 import { useActiveChat } from '../hooks/useActiveChat';
 import { useChatStore } from '../store/useChatStore';
@@ -34,7 +35,8 @@ export const ChatContainer = forwardRef<
   const tableIdRef = useRef<string | undefined>();
   const activeChat = useActiveChat(baseId);
   const queryClient = useQueryClient();
-  const { context, setActiveChatId } = useChatContext();
+  const chatContext = useChatContext();
+  const { context, setActiveChatId } = chatContext;
   const isActiveChat = Boolean(activeChat);
   const chatId = isActiveChat ? activeChat!.id : chatIdRef.current;
   const router = useRouter();
@@ -108,56 +110,34 @@ export const ChatContainer = forwardRef<
     };
   }, [isActiveChat, chatId]);
 
-  const { messages, setMessages, handleSubmit, input, setInput, status, stop } = useChat({
-    id: chatId,
-    api: `/api/base/${baseId}/chat`,
-    initialMessages: convertToUIMessages,
-    body: {
-      chatId,
-      model: validModelKey,
-      context,
-    },
-    onFinish: () => {
-      const { isActiveChat, chatId } = useChatRef.current;
-      if (isActiveChat) {
-        queryClient.invalidateQueries({ queryKey: ['chat-message', chatId] });
-        return;
-      }
-      queryClient.refetchQueries({ queryKey: ReactQueryKeys.chatHistory(baseId) }).then(() => {
-        setActiveChatId(chatId);
-        chatIdRef.current = generateChatId();
-      });
-    },
-    onToolCall: ({ toolCall }) => {
-      const args = toolCall.args as Record<string, unknown>;
-      onToolCall?.({ toolCall, chatId });
-      const currentTableId = tableIdRef.current;
-      switch (toolCall.toolName) {
-        case McpToolInvocationName.CreateFields:
-        case McpToolInvocationName.CreateRecords:
-        case McpToolInvocationName.CreateView:
-          if ('tableId' in args && args.tableId !== currentTableId) {
-            router.push(
-              {
-                pathname: `/base/[baseId]/[tableId]/`,
-                query: {
-                  baseId,
-                  tableId: args.tableId as string,
-                },
-              },
-              undefined,
-              {
-                shallow: Boolean(currentTableId),
-              }
-            );
-          }
-          break;
-      }
-    },
-    onError: (error) => {
-      toast.error(error.message);
-    },
-  });
+  const { messages, setMessages, handleSubmit, input, setInput, status, stop, addToolResult } =
+    useChat({
+      id: chatId,
+      api: `/api/base/${baseId}/chat`,
+      initialMessages: convertToUIMessages,
+      body: {
+        chatId,
+        model: validModelKey,
+        context,
+      },
+      onFinish: () => {
+        const { isActiveChat, chatId } = useChatRef.current;
+        if (isActiveChat) {
+          queryClient.invalidateQueries({ queryKey: ['chat-message', chatId] });
+          return;
+        }
+        queryClient.refetchQueries({ queryKey: ReactQueryKeys.chatHistory(baseId) }).then(() => {
+          setActiveChatId(chatId);
+          chatIdRef.current = generateChatId();
+        });
+      },
+      onToolCall: ({ toolCall }) => {
+        onToolCall?.({ toolCall, chatId });
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    });
 
   useEffect(() => {
     if (status === 'streaming' && !isActiveChat) {
@@ -176,27 +156,36 @@ export const ChatContainer = forwardRef<
   }));
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden pb-3">
-      <Messages
-        messages={messages}
-        messageMetaMap={messageMetaMap}
-        chatId={chatId}
-        status={status}
-      />
-      <form className="px-2">
-        <MessageInput
-          modelKey={validModelKey}
-          models={models}
-          input={input}
-          setInput={setInput}
-          status={status}
-          stop={stop}
-          setModelKey={setModelKey}
-          setMessages={setMessages}
-          handleSubmit={handleSubmit}
-          modelLoading={isBaseAiConfigLoading}
-        />
-      </form>
+    <div className="flex w-full flex-1 flex-col overflow-hidden pb-3">
+      {(messages.length > 0 || !autoOpen) && (
+        <ChatContext.Provider
+          value={{
+            ...chatContext,
+            addToolResult,
+          }}
+        >
+          <div className="flex flex-1 flex-col overflow-hidden pb-3">
+            <Messages
+              messages={messages}
+              messageMetaMap={messageMetaMap}
+              chatId={chatId}
+              status={status}
+            />
+            <MessageInput
+              modelKey={validModelKey}
+              models={models}
+              input={input}
+              setInput={setInput}
+              status={status}
+              stop={stop}
+              setModelKey={setModelKey}
+              setMessages={setMessages}
+              handleSubmit={handleSubmit}
+              modelLoading={isBaseAiConfigLoading}
+            />
+          </div>
+        </ChatContext.Provider>
+      )}
     </div>
   );
 });
