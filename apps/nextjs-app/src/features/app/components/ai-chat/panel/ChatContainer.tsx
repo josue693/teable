@@ -9,6 +9,7 @@ import { generateModelKeyList } from '@/features/app/blocks/admin/setting/compon
 import { MessageInput } from '../components/MessageInput';
 import { Messages } from '../components/Messages';
 import type { IMessageMeta } from '../components/types';
+import { ChatContext } from '../context/ChatContext';
 import { useChatContext } from '../context/useChatContext';
 import { useActiveChat } from '../hooks/useActiveChat';
 import { useChatStore } from '../store/useChatStore';
@@ -18,7 +19,8 @@ export const ChatContainer = ({ baseId }: { baseId: string }) => {
   const { modelKey } = useChatStore();
   const activeChat = useActiveChat(baseId);
   const queryClient = useQueryClient();
-  const { context, setActiveChatId } = useChatContext();
+  const chatContext = useChatContext();
+  const { context, setActiveChatId } = chatContext;
   const isActiveChat = Boolean(activeChat);
   const chatId = isActiveChat ? activeChat!.id : chatIdRef.current;
 
@@ -86,30 +88,31 @@ export const ChatContainer = ({ baseId }: { baseId: string }) => {
     };
   }, [isActiveChat, chatId]);
 
-  const { messages, setMessages, handleSubmit, input, setInput, status, stop } = useChat({
-    id: chatId,
-    api: `/api/base/${baseId}/chat`,
-    initialMessages: convertToUIMessages,
-    body: {
-      chatId,
-      model: validModelKey,
-      context,
-    },
-    onFinish: () => {
-      const { isActiveChat, chatId } = useChatRef.current;
-      if (isActiveChat) {
-        queryClient.invalidateQueries({ queryKey: ['chat-message', chatId] });
-        return;
-      }
-      queryClient.refetchQueries({ queryKey: ReactQueryKeys.chatHistory(baseId) }).then(() => {
-        setActiveChatId(chatId);
-        chatIdRef.current = generateChatId();
-      });
-    },
-    onError: (error) => {
-      toast.error(error.message);
-    },
-  });
+  const { messages, setMessages, handleSubmit, input, setInput, status, stop, addToolResult } =
+    useChat({
+      id: chatId,
+      api: `/api/base/${baseId}/chat`,
+      initialMessages: convertToUIMessages,
+      body: {
+        chatId,
+        model: validModelKey,
+        context,
+      },
+      onFinish: () => {
+        const { isActiveChat, chatId } = useChatRef.current;
+        if (isActiveChat) {
+          queryClient.invalidateQueries({ queryKey: ['chat-message', chatId] });
+          return;
+        }
+        queryClient.refetchQueries({ queryKey: ReactQueryKeys.chatHistory(baseId) }).then(() => {
+          setActiveChatId(chatId);
+          chatIdRef.current = generateChatId();
+        });
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    });
 
   useEffect(() => {
     if (status === 'streaming' && !isActiveChat) {
@@ -122,24 +125,31 @@ export const ChatContainer = ({ baseId }: { baseId: string }) => {
   }, [status, setActiveChatId, chatId, isActiveChat, queryClient, baseId]);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden pb-3">
-      <Messages
-        messages={messages}
-        messageMetaMap={messageMetaMap}
-        chatId={chatId}
-        status={status}
-      />
-      <MessageInput
-        modelKey={validModelKey}
-        models={models}
-        input={input}
-        setInput={setInput}
-        status={status}
-        stop={stop}
-        setMessages={setMessages}
-        handleSubmit={handleSubmit}
-        modelLoading={isBaseAiConfigLoading}
-      />
-    </div>
+    <ChatContext.Provider
+      value={{
+        ...chatContext,
+        addToolResult,
+      }}
+    >
+      <div className="flex flex-1 flex-col overflow-hidden pb-3">
+        <Messages
+          messages={messages}
+          messageMetaMap={messageMetaMap}
+          chatId={chatId}
+          status={status}
+        />
+        <MessageInput
+          modelKey={validModelKey}
+          models={models}
+          input={input}
+          setInput={setInput}
+          status={status}
+          stop={stop}
+          setMessages={setMessages}
+          handleSubmit={handleSubmit}
+          modelLoading={isBaseAiConfigLoading}
+        />
+      </div>
+    </ChatContext.Provider>
   );
 };

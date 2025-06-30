@@ -1,0 +1,341 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { IConvertFieldRo, IFieldRo, IViewRo } from '@teable/core';
+import type {
+  ICreateRecordsRo,
+  ICreateTableRo,
+  ITableVo,
+  IUpdateRecordsRo,
+  IViewNameRo,
+} from '@teable/openapi';
+import {
+  convertField,
+  createField,
+  createRecords,
+  createTable,
+  createView,
+  deleteFields,
+  deleteRecords,
+  deleteTable,
+  deleteView,
+  McpToolInvocationName,
+  updateRecords,
+  updateViewName,
+} from '@teable/openapi';
+import { ReactQueryKeys } from '@teable/sdk/config';
+import { useBaseId, useTableId } from '@teable/sdk/hooks';
+import router from 'next/router';
+import { useCallback } from 'react';
+
+export const useMcpToolExecution = () => {
+  const queryClient = useQueryClient();
+
+  const baseId = useBaseId();
+
+  const tableId = useTableId();
+
+  const callBack = useCallback(
+    (toolName: McpToolInvocationName, result: unknown, args: unknown) => {
+      switch (toolName) {
+        case McpToolInvocationName.CreateField:
+        case McpToolInvocationName.CreateRecords:
+        case McpToolInvocationName.CreateView: {
+          const { tableId: newTableId } = args as {
+            tableId: string;
+          };
+          if (tableId !== newTableId) {
+            router.push(
+              {
+                pathname: `/base/[baseId]/[tableId]/`,
+                query: {
+                  baseId,
+                  tableId: newTableId,
+                },
+              },
+              undefined,
+              {
+                shallow: Boolean(tableId),
+              }
+            );
+          }
+          break;
+        }
+        case McpToolInvocationName.CreateTable:
+          {
+            const res = result as ITableVo;
+            const newTableId = res.id;
+            if (tableId !== newTableId) {
+              router.push(
+                {
+                  pathname: `/base/[baseId]/[tableId]/`,
+                  query: {
+                    baseId,
+                    tableId: newTableId,
+                  },
+                },
+                undefined,
+                {
+                  shallow: Boolean(tableId),
+                }
+              );
+            }
+          }
+          break;
+        default:
+          break;
+      }
+    },
+    [baseId, tableId]
+  );
+
+  const { mutateAsync: createTableMutate } = useMutation({
+    mutationFn: ({ baseId, tableRo }: { baseId: string; tableRo: ICreateTableRo }) =>
+      createTable(baseId, tableRo),
+  });
+
+  const { mutateAsync: createViewMutate } = useMutation({
+    mutationFn: ({ tableId, viewRo }: { tableId: string; viewRo: IViewRo }) =>
+      createView(tableId, viewRo),
+  });
+
+  const { mutateAsync: createRecordsMutate } = useMutation({
+    mutationFn: ({
+      tableId,
+      createRecordsRo,
+    }: {
+      tableId: string;
+      createRecordsRo: ICreateRecordsRo;
+    }) => createRecords(tableId, createRecordsRo),
+  });
+
+  const { mutateAsync: createFieldMutate } = useMutation({
+    mutationFn: ({ tableId, fieldRo }: { tableId: string; fieldRo: IFieldRo }) =>
+      createField(tableId, fieldRo),
+    onSuccess: (res, query) => {
+      queryClient.invalidateQueries(ReactQueryKeys.fieldList(query.tableId));
+    },
+  });
+
+  const { mutateAsync: convertFieldMutate } = useMutation({
+    mutationFn: ({
+      tableId,
+      fieldId,
+      fieldRo,
+    }: {
+      tableId: string;
+      fieldId: string;
+      fieldRo: IConvertFieldRo;
+    }) => convertField(tableId, fieldId, fieldRo),
+    onSuccess: (_, query) => {
+      queryClient.invalidateQueries(ReactQueryKeys.fieldList(query.tableId));
+    },
+  });
+
+  const { mutateAsync: deleteFieldsMutate } = useMutation({
+    mutationFn: ({ tableId, fieldIds }: { tableId: string; fieldIds: string[] }) =>
+      deleteFields(tableId, fieldIds),
+    onSuccess: (_, query) => {
+      queryClient.invalidateQueries(ReactQueryKeys.fieldList(query.tableId));
+    },
+  });
+
+  const { mutateAsync: updateRecordsMutate } = useMutation({
+    mutationFn: ({
+      tableId,
+      updateRecordsRo,
+    }: {
+      tableId: string;
+      updateRecordsRo: IUpdateRecordsRo;
+    }) => updateRecords(tableId, updateRecordsRo),
+  });
+
+  const { mutateAsync: updateViewNameMutate } = useMutation({
+    mutationFn: ({
+      tableId,
+      viewId,
+      updateViewNameRo,
+    }: {
+      tableId: string;
+      viewId: string;
+      updateViewNameRo: IViewNameRo;
+    }) => updateViewName(tableId, viewId, updateViewNameRo),
+  });
+
+  const { mutateAsync: deleteTableMutate } = useMutation({
+    mutationFn: ({ tableId, baseId }: { baseId: string; tableId: string }) =>
+      deleteTable(baseId, tableId),
+  });
+
+  const { mutateAsync: deleteRecordsMutate } = useMutation({
+    mutationFn: ({ tableId, recordIds }: { tableId: string; recordIds: string[] }) =>
+      deleteRecords(tableId, recordIds),
+  });
+
+  const { mutateAsync: deleteViewsMutate } = useMutation({
+    mutationFn: ({ tableId, viewId }: { tableId: string; viewId: string }) =>
+      deleteView(tableId, viewId),
+  });
+
+  if (!baseId) {
+    return {} as Record<
+      string,
+      {
+        execute: (params: unknown) => Promise<unknown>;
+        callBack: (result: unknown, args: unknown) => void;
+      }
+    >;
+  }
+
+  return {
+    [McpToolInvocationName.CreateTable]: {
+      execute: async (params: unknown) => {
+        const { tableRo } = params as {
+          tableRo: ICreateTableRo;
+        };
+        return (await createTableMutate({ baseId, tableRo })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.CreateTable, result, args);
+      },
+    },
+    [McpToolInvocationName.CreateView]: {
+      execute: async (params: unknown) => {
+        const { tableId, viewRo } = params as {
+          tableId: string;
+          viewRo: IViewRo;
+        };
+        return (await createViewMutate({ tableId, viewRo })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.CreateView, result, args);
+      },
+    },
+    [McpToolInvocationName.CreateRecords]: {
+      execute: async (params: unknown) => {
+        const { tableId, createRecordsRo } = params as {
+          tableId: string;
+          createRecordsRo: ICreateRecordsRo;
+        };
+        return (await createRecordsMutate({ tableId, createRecordsRo })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.CreateRecords, result, args);
+      },
+    },
+    [McpToolInvocationName.CreateField]: {
+      execute: async (params: unknown) => {
+        const { tableId, fieldRo } = params as {
+          tableId: string;
+          fieldRo: IFieldRo;
+        };
+        return (await createFieldMutate({ tableId, fieldRo })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.CreateField, result, args);
+      },
+    },
+    [McpToolInvocationName.UpdateField]: {
+      execute: async (params: unknown) => {
+        const { tableId, fieldId, updateFieldRo } = params as {
+          tableId: string;
+          fieldId: string;
+          updateFieldRo: IConvertFieldRo;
+        };
+        return (
+          await convertFieldMutate({
+            tableId,
+            fieldId,
+            fieldRo: updateFieldRo,
+          })
+        ).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.UpdateField, result, args);
+      },
+    },
+    [McpToolInvocationName.UpdateRecords]: {
+      execute: async (params: unknown) => {
+        const { tableId, updateRecordsRo } = params as {
+          tableId: string;
+          updateRecordsRo: IUpdateRecordsRo;
+        };
+        return (await updateRecordsMutate({ tableId, updateRecordsRo })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.UpdateRecords, result, args);
+      },
+    },
+    [McpToolInvocationName.DeleteRecords]: {
+      execute: async (params: unknown) => {
+        const { tableId, recordIds } = params as {
+          tableId: string;
+          recordIds: string[];
+        };
+        return (await deleteRecordsMutate({ tableId, recordIds })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.DeleteFields, result, args);
+      },
+    },
+    [McpToolInvocationName.DeleteFields]: {
+      execute: async (params: unknown) => {
+        const { tableId, fieldIds } = params as {
+          tableId: string;
+          fieldIds: string[];
+        };
+        return (await deleteFieldsMutate({ tableId, fieldIds })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.DeleteFields, result, args);
+      },
+    },
+    [McpToolInvocationName.DeleteTable]: {
+      execute: async (params: unknown) => {
+        const { baseId, tableId } = params as {
+          baseId: string;
+          tableId: string;
+        };
+        return (await deleteTableMutate({ baseId, tableId })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.DeleteTable, result, args);
+      },
+    },
+    [McpToolInvocationName.UpdateViewName]: {
+      execute: async (params: unknown) => {
+        const { tableId, updateViewNameRo, viewId } = params as {
+          tableId: string;
+          viewId: string;
+          updateViewNameRo: { name: string };
+        };
+        return (
+          await updateViewNameMutate({
+            tableId,
+            viewId,
+            updateViewNameRo,
+          })
+        ).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.UpdateViewName, result, args);
+      },
+    },
+    [McpToolInvocationName.DeleteView]: {
+      execute: async (params: unknown) => {
+        const { tableId, viewId } = params as {
+          tableId: string;
+          viewId: string;
+        };
+        return (await deleteViewsMutate({ tableId, viewId })).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.DeleteView, result, args);
+      },
+    },
+  } as Record<
+    string,
+    {
+      execute: (params: unknown) => Promise<unknown>;
+      callBack: (result: unknown, args: unknown) => void;
+    }
+  >;
+};
