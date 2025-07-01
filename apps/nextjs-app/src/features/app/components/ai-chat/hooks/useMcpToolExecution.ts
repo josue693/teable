@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { IConvertFieldRo, IFieldRo, IViewRo } from '@teable/core';
+import type { IConvertFieldRo, IFieldRo, IViewRo, IViewVo } from '@teable/core';
 import type {
   ICreateRecordsRo,
   ICreateTableRo,
@@ -37,8 +37,7 @@ export const useMcpToolExecution = () => {
     (toolName: McpToolInvocationName, result: unknown, args: unknown) => {
       switch (toolName) {
         case McpToolInvocationName.CreateField:
-        case McpToolInvocationName.CreateRecords:
-        case McpToolInvocationName.CreateView: {
+        case McpToolInvocationName.CreateRecords: {
           const { tableId: newTableId } = args as {
             tableId: string;
           };
@@ -49,6 +48,29 @@ export const useMcpToolExecution = () => {
                 query: {
                   baseId,
                   tableId: newTableId,
+                },
+              },
+              undefined,
+              {
+                shallow: Boolean(tableId),
+              }
+            );
+          }
+          break;
+        }
+        case McpToolInvocationName.CreateView: {
+          const { tableId: newTableId } = args as {
+            tableId: string;
+          };
+          const { id: newViewId } = result as IViewVo;
+          if (tableId !== newTableId) {
+            router.push(
+              {
+                pathname: `/base/[baseId]/[tableId]/[viewId]`,
+                query: {
+                  baseId,
+                  tableId: newTableId,
+                  viewId: newViewId,
                 },
               },
               undefined,
