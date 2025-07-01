@@ -3,10 +3,7 @@ import { LastVisitResourceType, type ITableVo } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import type { GetServerSideProps } from 'next';
 import type { ReactElement } from 'react';
-import { ChatPage } from '@/features/app/base/ChatPage';
 import { CommunityPage } from '@/features/app/base/CommunityPage';
-import { useIsCloud } from '@/features/app/hooks/useIsCloud';
-import { useIsEE } from '@/features/app/hooks/useIsEE';
 import { BaseLayout } from '@/features/app/layouts/BaseLayout';
 import ensureLogin from '@/lib/ensureLogin';
 import { getTranslationsProps } from '@/lib/i18n';
@@ -15,13 +12,6 @@ import withAuthSSR from '@/lib/withAuthSSR';
 import withEnv from '@/lib/withEnv';
 
 const Node: NextPageWithLayout = () => {
-  const isCloud = useIsCloud();
-  const isEE = useIsEE();
-
-  if (isCloud || isEE) {
-    return <ChatPage />;
-  }
-
   return <CommunityPage />;
 };
 

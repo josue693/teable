@@ -119,10 +119,14 @@ export const TableListDiffPreview = (props: ITableListPreviewProps) => {
     return (
       <div
         style={style}
-        className={'flex h-7 items-center gap-2 rounded border p-1 text-foreground'}
+        className={'flex h-7 items-center gap-2 rounded border p-1 px-2 text-foreground'}
         ref={ref}
       >
-        {icon ? <Emoji emoji={icon} size={'1rem'} /> : <Table2 className="size-4 shrink-0" />}
+        {icon ? (
+          <Emoji emoji={icon} size={'1rem'} className="size-4 shrink-0" />
+        ) : (
+          <Table2 className="size-4 shrink-0" />
+        )}
         <p className="grow truncate text-sm">{' ' + name}</p>
       </div>
     );
