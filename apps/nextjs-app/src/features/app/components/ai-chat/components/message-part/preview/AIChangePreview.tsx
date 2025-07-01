@@ -1,5 +1,10 @@
 import { McpToolInvocationName } from '@teable/openapi';
-import { AnchorContext, FieldProvider, TablePermissionProvider } from '@teable/sdk/context';
+import {
+  AnchorContext,
+  FieldProvider,
+  RowCountProvider,
+  TablePermissionProvider,
+} from '@teable/sdk/context';
 import { useBaseId } from '@teable/sdk/hooks/use-base-id';
 import type { IToolMessagePart } from '../ToolMessagePart';
 import { GridPreView } from './GridPreview';
@@ -18,20 +23,22 @@ export const AIChangePreview = (props: IAIChangePreviewProps) => {
 
   const previewRender = () => {
     switch (toolName) {
+      case McpToolInvocationName.CreateTable:
       case McpToolInvocationName.DeleteTable:
-      case McpToolInvocationName.UpdateTableName:
-      case McpToolInvocationName.CreateTable: {
+      case McpToolInvocationName.UpdateTableName: {
         return <TableListDiffPreview toolInvocation={toolInvocation} />;
       }
+      case McpToolInvocationName.CreateView:
       case McpToolInvocationName.DeleteView:
-      case McpToolInvocationName.UpdateViewName:
-      case McpToolInvocationName.CreateView: {
+      case McpToolInvocationName.UpdateViewName: {
         return <ViewListDiffPreview toolInvocation={toolInvocation} />;
       }
       default: {
         return (
           <div className="relative h-48">
-            <GridPreView rowCount={3} toolInvocation={toolInvocation} />
+            <RowCountProvider>
+              <GridPreView toolInvocation={toolInvocation} />
+            </RowCountProvider>
           </div>
         );
       }

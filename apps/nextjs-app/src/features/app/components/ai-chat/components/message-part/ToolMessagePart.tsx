@@ -26,6 +26,7 @@ import { useMcpToolExecution } from '../../hooks/useMcpToolExecution';
 import { useChatControlStore } from '../../store/useChatControl';
 import { Markdown } from './Markdown';
 import { AIChangePreview } from './preview/AIChangePreview';
+import { PreviewMcpToolInvocationNames } from './preview/constant';
 
 export interface IToolMessagePart {
   id: string;
@@ -49,6 +50,10 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
   const { addToolResult } = useContext(ChatContext);
 
   const needConfirm = toolInvocation.state === 'call';
+
+  const previewVisible = PreviewMcpToolInvocationNames.includes(
+    toolInvocation.toolName as McpToolInvocationName
+  );
 
   const { gridRef, recordMap } = useGridSearchStore();
 
@@ -85,12 +90,14 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
         return t('aiChat.tool.getScriptInput');
       case McpToolInvocationName.GetTeableApi:
         return t('aiChat.tool.getTeableApi');
-      case McpToolInvocationName.CreateFields:
-        return t('aiChat.tool.createFields');
       case McpToolInvocationName.CreateTable:
         return t('aiChat.tool.createTable');
+      case McpToolInvocationName.CreateViews:
       case McpToolInvocationName.CreateView:
         return t('aiChat.tool.createView');
+      case McpToolInvocationName.CreateFields:
+      case McpToolInvocationName.CreateField:
+        return t('aiChat.tool.createField');
       case McpToolInvocationName.CreateRecords:
         return t('aiChat.tool.createRecords');
       case McpToolInvocationName.RunScripts:
@@ -330,7 +337,7 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
         </AccordionTrigger>
         <AccordionContent>
           <div className="space-y-2 px-3 text-muted-foreground">
-            {needConfirm ? (
+            {previewVisible ? (
               <AIChangePreview toolInvocation={toolInvocation} />
             ) : (
               <>

@@ -21,6 +21,8 @@ export enum McpToolInvocationName {
   CreateView = 'create-view',
   CreateField = 'create-field',
   CreateRecords = 'create-records',
+  CreateFields = 'create-fields',
+  CreateViews = 'create-views',
 
   RunScripts = 'run-scripts',
 

@@ -26,7 +26,7 @@ import {
   useGridIcons,
   useGridTheme,
 } from '@teable/sdk/components';
-import { useFields } from '@teable/sdk/hooks';
+import { useFields, useRowCount } from '@teable/sdk/hooks';
 import type { IFieldInstance, Record as IRecordInstance } from '@teable/sdk/model';
 import type { ForwardRefRenderFunction } from 'react';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
@@ -34,7 +34,6 @@ import type { IToolMessagePart } from '../ToolMessagePart';
 import { PreviewActionColorMap } from './constant';
 
 interface IGridPreviewProps {
-  rowCount: number;
   hiddenFieldIds?: string[];
   readonly?: boolean;
   isMultiple?: boolean;
@@ -55,7 +54,8 @@ const GridPreviewBase: ForwardRefRenderFunction<IGridPreviewRef, IGridPreviewPro
   props,
   forwardRef
 ) => {
-  const { rowCount, recordQuery, hiddenFieldIds, toolInvocation } = props;
+  const { recordQuery, hiddenFieldIds, toolInvocation } = props;
+  const rowCount = useRowCount() || 0;
   useImperativeHandle(forwardRef, () => ({
     onReset,
     onForceUpdate,
@@ -215,17 +215,17 @@ const GridPreviewBase: ForwardRefRenderFunction<IGridPreviewRef, IGridPreviewPro
           };
         });
       }
-      case McpToolInvocationName.CreateField: {
-        const createField = toolInvocation.args?.['fieldRo'] as {
+      case McpToolInvocationName.CreateFields: {
+        const createFields = toolInvocation.args?.['fields'] as {
           name: string;
           type: FieldType;
-          id: string;
-        };
-        const newColumns = [createField].map((column) => {
+          id?: string;
+        }[];
+        const newColumns = createFields.map((column) => {
           return {
             ...column,
-            name: [createField].find(({ id }) => id === column.id)?.name,
-            icon: [createField].find(({ id }) => id === column.id)?.type,
+            name: createFields.find(({ id }) => id === column.id)?.name,
+            icon: createFields.find(({ id }) => id === column.id)?.type,
             id: generateFieldId(),
             customTheme: {
               columnHeaderBgHovered: hexToRGBA(PreviewActionColorMap['create'], 0.5),
@@ -293,6 +293,32 @@ const GridPreviewBase: ForwardRefRenderFunction<IGridPreviewRef, IGridPreviewPro
       }
     }
   }, [columns, toolInvocation]);
+
+  useEffect(() => {
+    switch (toolInvocation.toolName) {
+      case McpToolInvocationName.CreateFields: {
+        const columnIndex = columns.length + 1;
+        gridRef.current?.scrollToItem([columnIndex, 0]);
+        break;
+      }
+      case McpToolInvocationName.DeleteFields: {
+        const fieldIds = toolInvocation.args?.['fieldIds'];
+        const firstFieldId = fieldIds[0];
+        const columnIndex = finalColumns.findIndex((column) => column.id === firstFieldId);
+        columnIndex > -1 && gridRef.current?.scrollToItem([columnIndex, 0]);
+        break;
+      }
+      case McpToolInvocationName.UpdateField: {
+        const { fieldId } = toolInvocation.args;
+        const columnIndex = finalColumns.findIndex((column) => column.id === fieldId);
+        gridRef.current?.scrollToItem([columnIndex, 0]);
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }, [columns.length, finalColumns, toolInvocation.args, toolInvocation.toolName]);
 
   const finalRecordMap = useMemo(() => {
     const toolName = toolInvocation.toolName as McpToolInvocationName;
@@ -439,6 +465,8 @@ const GridPreviewBase: ForwardRefRenderFunction<IGridPreviewRef, IGridPreviewPro
     },
     [finalRecordMap, finalColumns, cellValue2GridDisplay]
   );
+
+  if (columns?.length === 0) return null;
 
   return (
     <>

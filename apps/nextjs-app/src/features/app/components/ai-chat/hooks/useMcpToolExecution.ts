@@ -3,6 +3,7 @@ import type { IConvertFieldRo, IFieldRo, IViewRo, IViewVo } from '@teable/core';
 import type {
   ICreateRecordsRo,
   ICreateTableRo,
+  ITableNameRo,
   ITableVo,
   IUpdateRecordsRo,
   IViewNameRo,
@@ -19,10 +20,12 @@ import {
   deleteView,
   McpToolInvocationName,
   updateRecords,
+  updateTableName,
   updateViewName,
 } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
-import { useBaseId, useTableId } from '@teable/sdk/hooks';
+import { useBaseId, useTableId, useTables } from '@teable/sdk/hooks';
+import { pick } from 'lodash';
 import router from 'next/router';
 import { useCallback } from 'react';
 
@@ -32,6 +35,8 @@ export const useMcpToolExecution = () => {
   const baseId = useBaseId();
 
   const tableId = useTableId();
+
+  const tables = useTables();
 
   const callBack = useCallback(
     (toolName: McpToolInvocationName, result: unknown, args: unknown) => {
@@ -109,34 +114,6 @@ export const useMcpToolExecution = () => {
     [baseId, tableId]
   );
 
-  const { mutateAsync: createTableMutate } = useMutation({
-    mutationFn: ({ baseId, tableRo }: { baseId: string; tableRo: ICreateTableRo }) =>
-      createTable(baseId, tableRo),
-  });
-
-  const { mutateAsync: createViewMutate } = useMutation({
-    mutationFn: ({ tableId, viewRo }: { tableId: string; viewRo: IViewRo }) =>
-      createView(tableId, viewRo),
-  });
-
-  const { mutateAsync: createRecordsMutate } = useMutation({
-    mutationFn: ({
-      tableId,
-      createRecordsRo,
-    }: {
-      tableId: string;
-      createRecordsRo: ICreateRecordsRo;
-    }) => createRecords(tableId, createRecordsRo),
-  });
-
-  const { mutateAsync: createFieldMutate } = useMutation({
-    mutationFn: ({ tableId, fieldRo }: { tableId: string; fieldRo: IFieldRo }) =>
-      createField(tableId, fieldRo),
-    onSuccess: (res, query) => {
-      queryClient.invalidateQueries(ReactQueryKeys.fieldList(query.tableId));
-    },
-  });
-
   const { mutateAsync: convertFieldMutate } = useMutation({
     mutationFn: ({
       tableId,
@@ -182,6 +159,18 @@ export const useMcpToolExecution = () => {
     }) => updateViewName(tableId, viewId, updateViewNameRo),
   });
 
+  const { mutateAsync: updateTableNameMutate } = useMutation({
+    mutationFn: ({
+      baseId,
+      tableId,
+      updateTableNameRo,
+    }: {
+      baseId: string;
+      tableId: string;
+      updateTableNameRo: ITableNameRo;
+    }) => updateTableName(baseId, tableId, updateTableNameRo),
+  });
+
   const { mutateAsync: deleteTableMutate } = useMutation({
     mutationFn: ({ tableId, baseId }: { baseId: string; tableId: string }) =>
       deleteTable(baseId, tableId),
@@ -208,53 +197,6 @@ export const useMcpToolExecution = () => {
   }
 
   return {
-    [McpToolInvocationName.CreateTable]: {
-      execute: async (params: unknown) => {
-        const { tableRo } = params as {
-          tableRo: ICreateTableRo;
-        };
-        return (await createTableMutate({ baseId, tableRo })).data;
-      },
-      callBack: (result: unknown, args: unknown) => {
-        callBack(McpToolInvocationName.CreateTable, result, args);
-      },
-    },
-    [McpToolInvocationName.CreateView]: {
-      execute: async (params: unknown) => {
-        const { tableId, viewRo } = params as {
-          tableId: string;
-          viewRo: IViewRo;
-        };
-        return (await createViewMutate({ tableId, viewRo })).data;
-      },
-      callBack: (result: unknown, args: unknown) => {
-        callBack(McpToolInvocationName.CreateView, result, args);
-      },
-    },
-    [McpToolInvocationName.CreateRecords]: {
-      execute: async (params: unknown) => {
-        const { tableId, createRecordsRo } = params as {
-          tableId: string;
-          createRecordsRo: ICreateRecordsRo;
-        };
-        return (await createRecordsMutate({ tableId, createRecordsRo })).data;
-      },
-      callBack: (result: unknown, args: unknown) => {
-        callBack(McpToolInvocationName.CreateRecords, result, args);
-      },
-    },
-    [McpToolInvocationName.CreateField]: {
-      execute: async (params: unknown) => {
-        const { tableId, fieldRo } = params as {
-          tableId: string;
-          fieldRo: IFieldRo;
-        };
-        return (await createFieldMutate({ tableId, fieldRo })).data;
-      },
-      callBack: (result: unknown, args: unknown) => {
-        callBack(McpToolInvocationName.CreateField, result, args);
-      },
-    },
     [McpToolInvocationName.UpdateField]: {
       execute: async (params: unknown) => {
         const { tableId, fieldId, updateFieldRo } = params as {
@@ -284,6 +226,43 @@ export const useMcpToolExecution = () => {
       },
       callBack: (result: unknown, args: unknown) => {
         callBack(McpToolInvocationName.UpdateRecords, result, args);
+      },
+    },
+    [McpToolInvocationName.UpdateViewName]: {
+      execute: async (params: unknown) => {
+        const { tableId, updateViewNameRo, viewId } = params as {
+          tableId: string;
+          viewId: string;
+          updateViewNameRo: { name: string };
+        };
+        return (
+          await updateViewNameMutate({
+            tableId,
+            viewId,
+            updateViewNameRo,
+          })
+        ).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.UpdateViewName, result, args);
+      },
+    },
+    [McpToolInvocationName.UpdateTableName]: {
+      execute: async (params: unknown) => {
+        const { tableId, updateTableNameRo } = params as {
+          tableId: string;
+          updateTableNameRo: { name: string };
+        };
+        return (
+          await updateTableNameMutate({
+            tableId,
+            baseId,
+            updateTableNameRo,
+          })
+        ).data;
+      },
+      callBack: (result: unknown, args: unknown) => {
+        callBack(McpToolInvocationName.UpdateViewName, result, args);
       },
     },
     [McpToolInvocationName.DeleteRecords]: {
@@ -316,29 +295,12 @@ export const useMcpToolExecution = () => {
           baseId: string;
           tableId: string;
         };
-        return (await deleteTableMutate({ baseId, tableId })).data;
+        const deletedTable = tables.find((table) => table.id === tableId);
+        await deleteTableMutate({ baseId, tableId });
+        return pick(deletedTable, ['id', 'name', 'icon', 'order']);
       },
       callBack: (result: unknown, args: unknown) => {
         callBack(McpToolInvocationName.DeleteTable, result, args);
-      },
-    },
-    [McpToolInvocationName.UpdateViewName]: {
-      execute: async (params: unknown) => {
-        const { tableId, updateViewNameRo, viewId } = params as {
-          tableId: string;
-          viewId: string;
-          updateViewNameRo: { name: string };
-        };
-        return (
-          await updateViewNameMutate({
-            tableId,
-            viewId,
-            updateViewNameRo,
-          })
-        ).data;
-      },
-      callBack: (result: unknown, args: unknown) => {
-        callBack(McpToolInvocationName.UpdateViewName, result, args);
       },
     },
     [McpToolInvocationName.DeleteView]: {

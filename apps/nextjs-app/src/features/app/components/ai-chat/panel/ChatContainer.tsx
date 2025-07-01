@@ -2,7 +2,7 @@ import { useChat } from '@ai-sdk/react';
 import type { UseChatOptions, UseChatHelpers } from '@ai-sdk/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { generateChatId } from '@teable/core';
-import { getAIConfig, getChatMessages } from '@teable/openapi';
+import { getAIConfig, getChatMessages, McpToolInvocationName } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { useRouter } from 'next/router';
@@ -132,7 +132,30 @@ export const ChatContainer = forwardRef<
         });
       },
       onToolCall: ({ toolCall }) => {
+        const args = toolCall.args as Record<string, unknown>;
         onToolCall?.({ toolCall, chatId });
+        const currentTableId = tableIdRef.current;
+        switch (toolCall.toolName) {
+          case McpToolInvocationName.CreateFields:
+          case McpToolInvocationName.CreateRecords:
+          case McpToolInvocationName.CreateTable:
+            if ('tableId' in args && args.tableId !== currentTableId) {
+              router.push(
+                {
+                  pathname: `/base/[baseId]/[tableId]/`,
+                  query: {
+                    baseId,
+                    tableId: args.tableId as string,
+                  },
+                },
+                undefined,
+                {
+                  shallow: Boolean(currentTableId),
+                }
+              );
+            }
+            break;
+        }
       },
       onError: (error) => {
         toast.error(error.message);
