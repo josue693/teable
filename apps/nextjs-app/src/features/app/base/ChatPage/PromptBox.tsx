@@ -15,36 +15,20 @@ export const PromptBox: React.FC<IPromptBoxProps> = ({ onEnter }) => {
   const { open } = useChatPanelStore();
   const suggestions = [
     {
-      title: t('common:template.promptBox.ideasList.CRM.title'),
-      prompt: t('common:template.promptBox.ideasList.CRM.prompt'),
+      title: t('common:template.promptBox.ideasList.crm.title'),
+      prompt: t('common:template.promptBox.ideasList.crm.prompt'),
     },
     {
-      title: t('common:template.promptBox.ideasList.Educational.title'),
-      prompt: t('common:template.promptBox.ideasList.Educational.prompt'),
+      title: t('common:template.promptBox.ideasList.projectManagement.title'),
+      prompt: t('common:template.promptBox.ideasList.projectManagement.prompt'),
     },
     {
-      title: t('common:template.promptBox.ideasList.PersonalFinance.title'),
-      prompt: t('common:template.promptBox.ideasList.PersonalFinance.prompt'),
+      title: t('common:template.promptBox.ideasList.marketingCampaign.title'),
+      prompt: t('common:template.promptBox.ideasList.marketingCampaign.prompt'),
     },
     {
-      title: t('common:template.promptBox.ideasList.Productivity.title'),
-      prompt: t('common:template.promptBox.ideasList.Productivity.prompt'),
-    },
-    {
-      title: t('common:template.promptBox.ideasList.HealthAndWellness.title'),
-      prompt: t('common:template.promptBox.ideasList.HealthAndWellness.prompt'),
-    },
-    {
-      title: t('common:template.promptBox.ideasList.ContentGenerationAndEditing.title'),
-      prompt: t('common:template.promptBox.ideasList.ContentGenerationAndEditing.prompt'),
-    },
-    {
-      title: t('common:template.promptBox.ideasList.TravelPlanning.title'),
-      prompt: t('common:template.promptBox.ideasList.TravelPlanning.prompt'),
-    },
-    {
-      title: t('common:template.promptBox.ideasList.Entertainment.title'),
-      prompt: t('common:template.promptBox.ideasList.Entertainment.prompt'),
+      title: t('common:template.promptBox.ideasList.teamCollaboration.title'),
+      prompt: t('common:template.promptBox.ideasList.teamCollaboration.prompt'),
     },
   ];
   return (

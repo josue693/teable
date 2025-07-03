@@ -13,8 +13,8 @@ export interface PanelContainerRef {
   submit: () => void;
 }
 
-export const PanelContainer = forwardRef<PanelContainerRef, { baseId: string }>(
-  ({ baseId }, ref) => {
+export const PanelContainer = forwardRef<PanelContainerRef, { baseId: string; maxWidth?: string }>(
+  ({ baseId, maxWidth = '60%' }, ref) => {
     const { width = DEFAULT_PANEL_WIDTH, updateWidth } = useChatPanelStore();
     const isMobile = useIsMobile();
     const chatContainerRef = useRef<ChatContainerRef>(null);
@@ -42,7 +42,7 @@ export const PanelContainer = forwardRef<PanelContainerRef, { baseId: string }>(
         className="ml-1 flex h-full flex-col overflow-hidden bg-background px-1"
         size={{ width, height: '100%' }}
         defaultSize={{ width: DEFAULT_PANEL_WIDTH, height: '100%' }}
-        maxWidth={'60%'}
+        maxWidth={maxWidth}
         minWidth={'300px'}
         enable={{
           left: true,

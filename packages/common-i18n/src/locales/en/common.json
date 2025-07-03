@@ -69,37 +69,21 @@
       "start": "Start it",
       "ideas": "Some ideas to get started:",
       "ideasList": {
-        "CRM": {
-          "title": "CRM",
+        "crm": {
+          "title": "CRM System",
           "prompt": "Help me build a CRM system to manage customer info, sales leads, opportunities and contracts. Include communication logs, key date reminders and sales funnel analysis with conversion tracking."
         },
-        "Educational": {
-          "title": "Educational",
+        "projectManagement": {
+          "title": "Project Management",
           "prompt": "Need a project management system to track multiple projects. Include task board, milestone tracking, resource allocation, time tracking and risk management."
         },
-        "PersonalFinance": {
-          "title": "Personal Finance",
+        "marketingCampaign": {
+          "title": "Marketing Campaign",
           "prompt": "Set up a marketing campaign management system to track channel performance, content calendar and social media analysis. Include budget control, ROI calculation and market feedback analysis."
         },
-        "Productivity": {
-          "title": "Productivity",
-          "prompt": "Create a project management system to track multiple projects. Include task board, milestone tracking, resource allocation, time tracking and risk management."
-        },
-        "HealthAndWellness": {
-          "title": "Health and Wellness",
-          "prompt": "Set up a marketing campaign management system to track channel performance, content calendar and social media analysis. Include budget control, ROI calculation and market feedback analysis."
-        },
-        "ContentGenerationAndEditing": {
-          "title": "Content Generation and Editing",
-          "prompt": "Create a content generation and editing tool to manage content creation, review and approval process. Include content calendar, workflow automation and team collaboration."
-        },
-        "TravelPlanning": {
-          "title": "Travel Planning",
-          "prompt": "Set up a travel planning system to manage itinerary, accommodation, transportation and activities. Include travel expense tracking and itinerary sharing."
-        },
-        "Entertainment": {
-          "title": "Entertainment",
-          "prompt": "Create a entertainment system to manage content creation, review and approval process. Include content calendar, workflow automation and team collaboration."
+        "teamCollaboration": {
+          "title": "Team Collaboration",
+          "prompt": "Create a team collaboration space for managing daily tasks, meeting notes, team docs and knowledge base. Include task dependencies, deadline reminders and workload analytics."
         }
       }
     }

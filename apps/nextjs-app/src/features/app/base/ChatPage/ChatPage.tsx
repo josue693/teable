@@ -11,6 +11,8 @@ import { useChatPanelStore } from '../../components/ai-chat/store/useChatPanelSt
 import { PromptBox } from './PromptBox';
 import { Template } from './Template';
 
+const DEFAULT_PANEL_WIDTH = '400px';
+
 export const ChatPage = () => {
   const { t } = useTranslation(['common']);
   const { data: TemplateCategoryList } = useQuery({
@@ -21,11 +23,12 @@ export const ChatPage = () => {
   const baseId = useBaseId();
   const chatContainerRef = useRef<ChatContainerRef>(null);
 
-  const { isVisible, close } = useChatPanelStore();
+  const { isVisible, close, updateWidth } = useChatPanelStore();
 
   useEffect(() => {
     close();
-  }, [close]);
+    updateWidth(DEFAULT_PANEL_WIDTH);
+  }, [close, updateWidth]);
 
   const { data: TemplateList } = useQuery({
     queryKey: ReactQueryKeys.templateList(),
@@ -56,12 +59,12 @@ export const ChatPage = () => {
 
       {baseId && (
         <div
-          className={cn('fixed top-0 right-0 flex h-full bg-card overflow-hidden', {
+          className={cn('fixed top-0 right-0 flex h-full bg-card overflow-hidden max-w-[60%]', {
             'opacity-0 size-0': !isVisible,
             'opacity-100 z-50': isVisible,
           })}
         >
-          <PanelContainer ref={chatContainerRef} baseId={baseId} />
+          <PanelContainer ref={chatContainerRef} baseId={baseId} maxWidth="100%" />
         </div>
       )}
     </div>

@@ -5,7 +5,7 @@ import { generateChatId } from '@teable/core';
 import type { IToolInvocationUIPart } from '@teable/openapi';
 import { getAIConfig, getChatMessages, McpToolInvocationName } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
-
+import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { useRouter } from 'next/router';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { generateModelKeyList } from '@/features/app/blocks/admin/setting/components/ai-config/utils';
@@ -168,7 +168,10 @@ export const ChatContainer = forwardRef<
                     (part as unknown as IToolInvocationUIPart)?.toolInvocation?.toolCallId ===
                     toolCallId
                 );
-              const toolInvocation = (partItem as IToolInvocationUIPart).toolInvocation;
+              const toolInvocation = (partItem as IToolInvocationUIPart)?.toolInvocation;
+              if (!toolInvocation) {
+                return;
+              }
               let createdTableId: string | undefined;
               try {
                 const { result } = toolInvocation;
