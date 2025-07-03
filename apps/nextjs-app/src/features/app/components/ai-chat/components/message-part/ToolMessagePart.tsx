@@ -60,8 +60,8 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
   const { setToolCallInfo } = useChatControlStore();
 
   const rejectedTool =
-    (toolInvocation as unknown as IToolInvocationUIPart)?.toolInvocation?.result?.toolCallStatus ===
-    'rejected';
+    (toolInvocation as unknown as IToolInvocationUIPart['toolInvocation'])?.result
+      ?.toolCallStatus === 'rejected';
 
   const shouldLocateDiffPosition = useMemo(() => {
     const locatePositionActions = [
@@ -234,7 +234,7 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
     >
       <AccordionItem
         value="expanded"
-        className="font-sm rounded-lg border bg-neutral-50 px-2 dark:bg-neutral-900/80"
+        className="font-sm rounded-lg border px-2 dark:bg-neutral-900/80"
       >
         <AccordionTrigger
           headerClassName="flex-1"
@@ -413,8 +413,10 @@ const ContentRenderer = ({ id, content }: { id: string; content: string }) => {
           return (
             <pre
               {...rest}
+              className="bg-card"
               style={{
                 padding: 0,
+                backgroundColor: 'var(--card-background)',
               }}
             >
               {children}

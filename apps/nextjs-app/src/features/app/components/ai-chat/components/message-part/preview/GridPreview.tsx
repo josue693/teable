@@ -309,8 +309,6 @@ const GridPreviewBase: ForwardRefRenderFunction<IGridPreviewRef, IGridPreviewPro
     }
   }, [columns, toolInvocation]);
 
-  console.log('finalColumns', finalColumns);
-
   useEffect(() => {
     switch (toolInvocation.toolName) {
       case McpToolInvocationName.CreateFields: {

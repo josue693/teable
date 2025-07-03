@@ -100,9 +100,7 @@ export const Template: React.FC<TemplateProps> = ({ initialTemplates: templates,
     return (
       <div className="flex w-full items-center justify-center py-20">
         <div className="text-center">
-          <div className="mb-2 text-zinc-500 dark:text-zinc-400">
-            {t('common:template.noTemplates')}
-          </div>
+          <div className="mb-2 dark:text-zinc-400">{t('common:template.noTemplates')}</div>
         </div>
       </div>
     );

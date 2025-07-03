@@ -1,11 +1,12 @@
-import type { IViewOptions } from '@teable/core';
+import { useQuery } from '@tanstack/react-query';
+import type { IViewOptions, IViewVo } from '@teable/core';
 import { ViewType } from '@teable/core';
 import { Lock } from '@teable/icons';
 import type { IToolInvocationUIPart } from '@teable/openapi';
-import { McpToolInvocationName } from '@teable/openapi';
+import { getViewList, McpToolInvocationName } from '@teable/openapi';
 import { hexToRGBA } from '@teable/sdk/components';
 import { VIEW_ICON_MAP } from '@teable/sdk/components/view/constant';
-import { useViews } from '@teable/sdk/hooks';
+import { ReactQueryKeys } from '@teable/sdk/config';
 import { Button } from '@teable/ui-lib/shadcn';
 import Image from 'next/image';
 import { useRouter } from 'next/router';
@@ -25,10 +26,10 @@ const ViewItem = (props: {
   options?: IViewOptions;
   style?: React.CSSProperties;
   changeViewIdId?: string;
+  views: IViewVo[];
 }) => {
-  const { id, name, type, isLocked, style, options, changeViewIdId } = props;
+  const { id, name, type, isLocked, style, options, changeViewIdId, views } = props;
   const ref = useRef<HTMLButtonElement>(null);
-  const views = useViews();
   useEffect(() => {
     if (!changeViewIdId) {
       return;
@@ -99,7 +100,13 @@ const ViewItem = (props: {
 export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
   const { toolInvocation } = props;
 
-  const views = useViews();
+  const tableId = toolInvocation?.args?.tableId;
+
+  const { data: views = [] as IViewVo[] } = useQuery({
+    queryKey: ReactQueryKeys.viewList(tableId),
+    queryFn: () => getViewList(tableId).then((res) => res.data),
+    enabled: !!tableId,
+  });
 
   const changeViewIdId = useMemo(() => {
     switch (toolInvocation.toolName) {
@@ -206,7 +213,7 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
   return (
     <div className="flex gap-2 overflow-x-auto p-2">
       {viewList.map((view) => (
-        <ViewItem key={view.id} {...view} changeViewIdId={changeViewIdId} />
+        <ViewItem key={view.id} {...view} changeViewIdId={changeViewIdId} views={views} />
       ))}
     </div>
   );

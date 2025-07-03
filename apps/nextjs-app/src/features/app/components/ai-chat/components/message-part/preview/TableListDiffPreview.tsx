@@ -1,9 +1,9 @@
+import { useQuery } from '@tanstack/react-query';
 import { Table2 } from '@teable/icons';
-import type { ITableFullVo, IToolInvocationUIPart } from '@teable/openapi';
-import { McpToolInvocationName } from '@teable/openapi';
+import type { ITableFullVo, ITableListVo, IToolInvocationUIPart } from '@teable/openapi';
+import { getTableList, McpToolInvocationName } from '@teable/openapi';
 import { hexToRGBA } from '@teable/sdk/components';
-import { useTables } from '@teable/sdk/hooks';
-import type { Table } from '@teable/sdk/model';
+import { ReactQueryKeys } from '@teable/sdk/config';
 import { Button } from '@teable/ui-lib/shadcn';
 import { useRouter } from 'next/router';
 import { useEffect, useMemo, useRef } from 'react';
@@ -21,9 +21,9 @@ const TableItem = (props: {
   icon: string | undefined;
   style?: React.CSSProperties;
   changeTableId?: string;
-  tables: Table[];
+  tables: ITableListVo;
 }) => {
-  const { id, name, icon, style, changeTableId } = props;
+  const { id, name, icon, style, changeTableId, tables } = props;
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!changeTableId) {
@@ -36,7 +36,6 @@ const TableItem = (props: {
   const router = useRouter();
   const baseId = router.query.baseId as string;
   const currentTableId = router.query.tableId as string;
-  const tables = useTables();
   const isExpired = !tables.find((table) => table.id === id);
 
   return (
@@ -78,7 +77,14 @@ const TableItem = (props: {
 
 export const TableListDiffPreview = (props: ITableListPreviewProps) => {
   const { toolInvocation } = props;
-  const tables = useTables();
+
+  const tableId = toolInvocation?.args?.tableId;
+
+  const { data: tables = [] as ITableListVo } = useQuery({
+    queryKey: ReactQueryKeys.tableList(tableId),
+    queryFn: () => getTableList(tableId).then((res) => res.data),
+    enabled: !!tableId,
+  });
 
   const changeTableId = useMemo(() => {
     switch (toolInvocation.toolName) {

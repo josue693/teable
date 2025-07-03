@@ -15,7 +15,6 @@ export enum McpToolInvocationName {
   GenerateScriptAction = 'generate-script-action',
   GetScriptInput = 'get-script-input',
   GetTeableApi = 'get-teable-api',
-  CreateFields = 'create-fields',
 
   CreateTable = 'create-table',
   CreateView = 'create-view',
