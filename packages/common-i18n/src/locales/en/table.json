@@ -707,23 +707,5 @@
       "tokenDescription": "Tokens used: {{tokens}}"
     },
     "thought": "Thinking"
-  },
-  "prompt": {
-    "crm": {
-      "title": "CRM System",
-      "description": "Help me build a CRM system to manage customer info, sales leads, opportunities and contracts. Include communication logs, key date reminders and sales funnel analysis with conversion tracking."
-    },
-    "projectManagement": {
-      "title": "Project Management",
-      "description": "Need a project management system to track multiple projects. Include task board, milestone tracking, resource allocation, time tracking and risk management."
-    },
-    "marketingCampaign": {
-      "title": "Marketing Campaign",
-      "description": "Set up a marketing campaign management system to track channel performance, content calendar and social media analysis. Include budget control, ROI calculation and market feedback analysis."
-    },
-    "teamCollaboration": {
-      "title": "Team Collaboration",
-      "description": "Create a team collaboration space for managing daily tasks, meeting notes, team docs and knowledge base. Include task dependencies, deadline reminders and workload analytics."
-    }
   }
 }

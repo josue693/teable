@@ -55,10 +55,54 @@
     "setInvalid": "The password is invalid, at least 8 characters, and must contain at least one letter and one number."
   },
   "template": {
-    "aiTitle": "Start building from your daily scenario",
+    "aiTitle": "Build your internal tool",
+    "aiSubTitle": "The first AI platform where teams collaborate on data and generate production apps.",
     "title": "Template",
     "description": "Create a new base from a template",
-    "browseAll": "Browse All"
+    "browseAll": "Browse All",
+    "templateTitle": "Start with template",
+    "loadMore": "Load More",
+    "allTemplatesLoaded": "All templates loaded",
+    "noTemplates": "No templates available",
+    "promptBox": {
+      "placeholder": "Build your business app with Teable",
+      "start": "Start it",
+      "ideas": "Some ideas to get started:",
+      "ideasList": {
+        "CRM": {
+          "title": "CRM",
+          "prompt": "Help me build a CRM system to manage customer info, sales leads, opportunities and contracts. Include communication logs, key date reminders and sales funnel analysis with conversion tracking."
+        },
+        "Educational": {
+          "title": "Educational",
+          "prompt": "Need a project management system to track multiple projects. Include task board, milestone tracking, resource allocation, time tracking and risk management."
+        },
+        "PersonalFinance": {
+          "title": "Personal Finance",
+          "prompt": "Set up a marketing campaign management system to track channel performance, content calendar and social media analysis. Include budget control, ROI calculation and market feedback analysis."
+        },
+        "Productivity": {
+          "title": "Productivity",
+          "prompt": "Create a project management system to track multiple projects. Include task board, milestone tracking, resource allocation, time tracking and risk management."
+        },
+        "HealthAndWellness": {
+          "title": "Health and Wellness",
+          "prompt": "Set up a marketing campaign management system to track channel performance, content calendar and social media analysis. Include budget control, ROI calculation and market feedback analysis."
+        },
+        "ContentGenerationAndEditing": {
+          "title": "Content Generation and Editing",
+          "prompt": "Create a content generation and editing tool to manage content creation, review and approval process. Include content calendar, workflow automation and team collaboration."
+        },
+        "TravelPlanning": {
+          "title": "Travel Planning",
+          "prompt": "Set up a travel planning system to manage itinerary, accommodation, transportation and activities. Include travel expense tracking and itinerary sharing."
+        },
+        "Entertainment": {
+          "title": "Entertainment",
+          "prompt": "Create a entertainment system to manage content creation, review and approval process. Include content calendar, workflow automation and team collaboration."
+        }
+      }
+    }
   },
   "settings": {
     "title": "Settings",

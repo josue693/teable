@@ -1,19 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { IConvertFieldRo, IFieldRo, IViewRo, IViewVo } from '@teable/core';
-import type {
-  ICreateRecordsRo,
-  ICreateTableRo,
-  ITableNameRo,
-  ITableVo,
-  IUpdateRecordsRo,
-  IViewNameRo,
-} from '@teable/openapi';
+import type { IConvertFieldRo, IViewVo } from '@teable/core';
+import type { ITableNameRo, ITableVo, IUpdateRecordsRo, IViewNameRo } from '@teable/openapi';
 import {
   convertField,
-  createField,
-  createRecords,
-  createTable,
-  createView,
   deleteFields,
   deleteRecords,
   deleteTable,
@@ -235,6 +224,7 @@ export const useMcpToolExecution = () => {
           viewId: string;
           updateViewNameRo: { name: string };
         };
+
         return (
           await updateViewNameMutate({
             tableId,

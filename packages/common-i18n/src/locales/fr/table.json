@@ -580,6 +580,7 @@
     "title": "Corbeille de Table",
     "resourceType": "Type de Ressource",
     "deletedResource": "Ressource Supprimée"
+<<<<<<< HEAD
   },
 <<<<<<< HEAD
   "aiChat": {
@@ -642,5 +643,7 @@
       "description": "Créez un espace de collaboration d'équipe pour gérer les tâches quotidiennes, les notes de réunion, les documents d'équipe et la base de connaissances. Incluez les dépendances des tâches, les rappels d'échéance et les analyses de charge de travail."
 >>>>>>> 6bb91c3f (feat: ai create base)
     }
+=======
+>>>>>>> b75f0167 (perf: optimise create base layout)
   }
 }

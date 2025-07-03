@@ -11,6 +11,7 @@ export const createBaseFromTemplateRoSchema = z.object({
   spaceId: z.string(),
   templateId: z.string(),
   withRecords: z.boolean().optional(),
+  baseId: z.string().optional(),
 });
 
 export type ICreateBaseFromTemplateRo = z.infer<typeof createBaseFromTemplateRoSchema>;

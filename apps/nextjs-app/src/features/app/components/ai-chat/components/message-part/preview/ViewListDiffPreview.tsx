@@ -5,7 +5,9 @@ import { McpToolInvocationName } from '@teable/openapi';
 import { hexToRGBA } from '@teable/sdk/components';
 import { VIEW_ICON_MAP } from '@teable/sdk/components/view/constant';
 import { useViews } from '@teable/sdk/hooks';
+import { Button } from '@teable/ui-lib/shadcn';
 import Image from 'next/image';
+import { useRouter } from 'next/router';
 import { Fragment, useEffect, useMemo, useRef } from 'react';
 import type { IToolMessagePart } from '../ToolMessagePart';
 import { PreviewActionColorMap } from './constant';
@@ -125,7 +127,7 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
     style?: React.CSSProperties;
   }) => {
     const { id, name, type, isLocked, style, options } = props;
-    const ref = useRef<HTMLDivElement>(null);
+    const ref = useRef<HTMLButtonElement>(null);
     useEffect(() => {
       if (!changeViewIdId) {
         return;
@@ -135,14 +137,42 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
       }
     }, [id]);
     const ViewIcon = VIEW_ICON_MAP[type];
+    const router = useRouter();
+    const baseId = router.query.baseId as string;
+    const tableId = router.query.tableId as string;
+    const currentViewId = router.query.viewId as string;
+
+    const isExpired = !views.find((view) => view.id === id);
 
     return (
-      <div
+      <Button
         style={style}
+        variant="ghost"
         className={
           'flex h-7 min-w-20 shrink-0 items-center gap-2 overflow-hidden rounded border p-1 text-foreground'
         }
         ref={ref}
+        disabled={isExpired}
+        onClick={() => {
+          if (isExpired || id === currentViewId) {
+            return;
+          }
+
+          router.push(
+            {
+              pathname: `/base/[baseId]/[tableId]/[viewId]`,
+              query: {
+                baseId,
+                tableId,
+                viewId: id,
+              },
+            },
+            undefined,
+            {
+              shallow: Boolean(id),
+            }
+          );
+        }}
       >
         {type === ViewType.Plugin ? (
           <Image
@@ -161,7 +191,7 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
         <div className="flex flex-1 items-center justify-center overflow-hidden">
           <div className="truncate text-xs font-medium leading-5">{name}</div>
         </div>
-      </div>
+      </Button>
     );
   };
 

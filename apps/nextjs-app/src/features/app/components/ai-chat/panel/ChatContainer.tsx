@@ -2,9 +2,10 @@ import { useChat } from '@ai-sdk/react';
 import type { UseChatOptions, UseChatHelpers } from '@ai-sdk/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { generateChatId } from '@teable/core';
+import type { IToolInvocationUIPart } from '@teable/openapi';
 import { getAIConfig, getChatMessages, McpToolInvocationName } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
-import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
+
 import { useRouter } from 'next/router';
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { generateModelKeyList } from '@/features/app/blocks/admin/setting/components/ai-config/utils';
@@ -18,6 +19,7 @@ import { useChatStore } from '../store/useChatStore';
 
 export interface ChatContainerRef {
   setInputValue: (value: string) => void;
+  submit: () => void;
 }
 
 export const ChatContainer = forwardRef<
@@ -137,8 +139,7 @@ export const ChatContainer = forwardRef<
         const currentTableId = tableIdRef.current;
         switch (toolCall.toolName) {
           case McpToolInvocationName.CreateFields:
-          case McpToolInvocationName.CreateRecords:
-          case McpToolInvocationName.CreateTable:
+          case McpToolInvocationName.CreateRecords: {
             if ('tableId' in args && args.tableId !== currentTableId) {
               router.push(
                 {
@@ -155,12 +156,60 @@ export const ChatContainer = forwardRef<
               );
             }
             break;
+          }
+          case McpToolInvocationName.CreateTable: {
+            setTimeout(() => {
+              const { toolCallId } = toolCall;
+              const partItem = messagesRef?.current
+                ?.map(({ parts }) => parts)
+                .flat()
+                ?.find(
+                  (part) =>
+                    (part as unknown as IToolInvocationUIPart)?.toolInvocation?.toolCallId ===
+                    toolCallId
+                );
+              const toolInvocation = (partItem as IToolInvocationUIPart).toolInvocation;
+              let createdTableId: string | undefined;
+              try {
+                const { result } = toolInvocation;
+                const createdTable = JSON.parse(result?.content?.[0]?.text);
+                createdTableId = createdTable?.table.id;
+              } catch (error) {
+                console.error('parse created table error', error);
+              }
+              if (!createdTableId) {
+                return;
+              }
+              if (createdTableId !== currentTableId) {
+                router.push(
+                  {
+                    pathname: `/base/[baseId]/[tableId]/`,
+                    query: {
+                      baseId,
+                      tableId: createdTableId,
+                    },
+                  },
+                  undefined,
+                  {
+                    shallow: Boolean(currentTableId),
+                  }
+                );
+              }
+            }, 3000);
+            break;
+          }
         }
       },
       onError: (error) => {
         toast.error(error.message);
       },
     });
+
+  const messagesRef = useRef(messages);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     if (status === 'streaming' && !isActiveChat) {
@@ -175,6 +224,9 @@ export const ChatContainer = forwardRef<
   useImperativeHandle(ref, () => ({
     setInputValue: (value: string) => {
       setInput(value);
+    },
+    submit: () => {
+      handleSubmit();
     },
   }));
 

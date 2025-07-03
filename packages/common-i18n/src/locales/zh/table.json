@@ -707,24 +707,5 @@
       "tokenDescription": "本次消耗：{{tokens}} tokens"
     },
     "thought": "深度思考"
-  },
-
-  "prompt": {
-    "crm": {
-      "title": "CRM 系统",
-      "description": "帮助我构建一个 CRM 系统来管理客户信息、销售线索、机会和合同。包括沟通记录、关键日期提醒和销售漏斗分析，并跟踪转化率。"
-    },
-    "projectManagement": {
-      "title": "项目管理",
-      "description": "需要一个项目管理系统来跟踪多个项目。包括任务板、里程碑跟踪、资源分配、时间跟踪和风险管理。"
-    },
-    "marketingCampaign": {
-      "title": "营销活动",
-      "description": "设置一个营销活动管理系统，用于跟踪渠道表现、内容日历和社交媒体分析。包括预算控制、ROI 计算和市场反馈分析。"
-    },
-    "teamCollaboration": {
-      "title": "团队协作",
-      "description": "创建一个团队协作空间，用于管理日常任务、会议记录、团队文档和知识库。包括任务依赖关系、截止日期提醒和负荷分析。"
-    }
   }
 }
