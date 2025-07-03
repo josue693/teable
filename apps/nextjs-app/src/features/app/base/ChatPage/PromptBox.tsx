@@ -32,13 +32,13 @@ export const PromptBox: React.FC<IPromptBoxProps> = ({ onEnter }) => {
     },
   ];
   return (
-    <div className="mx-auto flex px-4 sm:px-6 lg:px-8">
+    <div className="mx-auto flex w-full justify-center px-4 sm:px-6 lg:px-8">
       <div className="shadow-black/6 w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm">
         <div className="relative space-y-2 rounded-2xl bg-gray-50 px-6 py-3">
           <textarea
             id="prompt-box"
             className="h-[60px] w-full resize-none bg-gray-50 text-sm focus:outline-none focus:ring-0"
-            placeholder="Build your business app with Teable"
+            placeholder={t('common:template.promptBox.placeholder')}
             rows={3}
             value={prompt}
             onKeyDown={(e) => {

@@ -672,6 +672,9 @@
         "description": "Current view type does not support positioning, only grid view is supported"
       }
     },
+    "fallback": {
+      "previewLoadFailed": "Preview load failed, please try again later"
+    },
     "codeBlock": {
       "hiddenLines": "{{count}} lines hidden",
       "collapseCode": "Collapse code",

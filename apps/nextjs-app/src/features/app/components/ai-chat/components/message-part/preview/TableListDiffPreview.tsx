@@ -3,6 +3,7 @@ import type { ITableFullVo, IToolInvocationUIPart } from '@teable/openapi';
 import { McpToolInvocationName } from '@teable/openapi';
 import { hexToRGBA } from '@teable/sdk/components';
 import { useTables } from '@teable/sdk/hooks';
+import type { Table } from '@teable/sdk/model';
 import { Button } from '@teable/ui-lib/shadcn';
 import { useRouter } from 'next/router';
 import { useEffect, useMemo, useRef } from 'react';
@@ -13,6 +14,67 @@ import { PreviewActionColorMap } from './constant';
 interface ITableListPreviewProps {
   toolInvocation: IToolMessagePart['part']['toolInvocation'];
 }
+
+const TableItem = (props: {
+  id: string;
+  name: string;
+  icon: string | undefined;
+  style?: React.CSSProperties;
+  changeTableId?: string;
+  tables: Table[];
+}) => {
+  const { id, name, icon, style, changeTableId } = props;
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!changeTableId) {
+      return;
+    }
+    if (ref.current && id === changeTableId) {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [changeTableId, id]);
+  const router = useRouter();
+  const baseId = router.query.baseId as string;
+  const currentTableId = router.query.tableId as string;
+  const tables = useTables();
+  const isExpired = !tables.find((table) => table.id === id);
+
+  return (
+    <Button
+      style={style}
+      variant={'ghost'}
+      className={'flex h-7 items-center gap-2 rounded border p-1 px-2 text-foreground'}
+      ref={ref}
+      disabled={isExpired}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (id === currentTableId || isExpired) {
+          return;
+        }
+        router.push(
+          {
+            pathname: `/base/[baseId]/[tableId]/`,
+            query: {
+              baseId,
+              tableId: id,
+            },
+          },
+          undefined,
+          {
+            shallow: Boolean(id),
+          }
+        );
+      }}
+    >
+      {icon ? (
+        <Emoji emoji={icon} size={'1rem'} className="size-4 shrink-0" />
+      ) : (
+        <Table2 className="size-4 shrink-0" />
+      )}
+      <p className="grow truncate text-left text-xs">{' ' + name}</p>
+    </Button>
+  );
+};
 
 export const TableListDiffPreview = (props: ITableListPreviewProps) => {
   const { toolInvocation } = props;
@@ -215,68 +277,10 @@ export const TableListDiffPreview = (props: ITableListPreviewProps) => {
     }
   }, [changeTableId, tables, toolInvocation]);
 
-  const TableItem = (props: {
-    id: string;
-    name: string;
-    icon: string | undefined;
-    style?: React.CSSProperties;
-  }) => {
-    const { id, name, icon, style } = props;
-    const ref = useRef<HTMLButtonElement>(null);
-    useEffect(() => {
-      if (!changeTableId) {
-        return;
-      }
-      if (ref.current && id === changeTableId) {
-        ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, [id]);
-    const router = useRouter();
-    const baseId = router.query.baseId as string;
-    const currentTableId = router.query.tableId as string;
-    const isExpired = !tables.find((table) => table.id === id);
-
-    return (
-      <Button
-        style={style}
-        variant={'ghost'}
-        className={'flex h-7 items-center gap-2 rounded border p-1 px-2 text-foreground'}
-        ref={ref}
-        disabled={isExpired}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (id === currentTableId || isExpired) {
-            return;
-          }
-          router.push(
-            {
-              pathname: `/base/[baseId]/[tableId]/`,
-              query: {
-                baseId,
-                tableId: id,
-              },
-            },
-            undefined,
-            {
-              shallow: Boolean(id),
-            }
-          );
-        }}
-      >
-        {icon ? (
-          <Emoji emoji={icon} size={'1rem'} className="size-4 shrink-0" />
-        ) : (
-          <Table2 className="size-4 shrink-0" />
-        )}
-        <p className="grow truncate text-left text-xs">{' ' + name}</p>
-      </Button>
-    );
-  };
-
   return (
-    <div className="flex max-h-48 max-w-48 flex-col gap-2 overflow-y-auto">
+    <div className="flex max-h-48 flex-col gap-2 overflow-y-auto">
       {tableList.map((table) => (
-        <TableItem key={table.id} {...table} />
+        <TableItem key={table.id} {...table} tables={tables} changeTableId={changeTableId} />
       ))}
     </div>
   );

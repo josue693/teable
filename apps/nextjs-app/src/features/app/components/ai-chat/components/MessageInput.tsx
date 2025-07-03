@@ -1,15 +1,18 @@
-import type { UseChatHelpers } from '@ai-sdk/react';
+import type { UseChatHelpers, Message } from '@ai-sdk/react';
 import { ArrowUpRight, Plus } from '@teable/icons';
+import type { IToolInvocationUIPart } from '@teable/openapi';
 import { useBase } from '@teable/sdk/hooks';
 import { Button, cn, Textarea } from '@teable/ui-lib/shadcn';
 import { PauseIcon } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
+import { useMemo } from 'react';
 import { LoadingDot } from './LoadingDot';
 import { MessageContext } from './MessageContext';
 import { ModelSelector } from './ModelSelector';
 
 export const MessageInput = ({
+  messages,
   modelKey,
   models,
   modelLoading,
@@ -22,6 +25,7 @@ export const MessageInput = ({
   setMessages,
   handleSubmit,
 }: {
+  messages: Message[];
   modelKey: string;
   models: { modelKey: string; isInstance?: boolean }[];
   modelLoading?: boolean;
@@ -42,7 +46,14 @@ export const MessageInput = ({
 
   const hasRequesting = ['submitted', 'streaming'].includes(status);
 
-  const disabledSubmit = input.length === 0 || !hasModel || hasRequesting;
+  const hasUnCallTools = useMemo(() => {
+    return messages
+      ?.map((m) => m.parts)
+      .flat()
+      .some((p) => (p as IToolInvocationUIPart)?.toolInvocation?.state === 'call');
+  }, [messages]);
+
+  const disabledSubmit = input.length === 0 || !hasModel || hasRequesting || hasUnCallTools;
 
   const onLinkIntegration = () => {
     router.push({

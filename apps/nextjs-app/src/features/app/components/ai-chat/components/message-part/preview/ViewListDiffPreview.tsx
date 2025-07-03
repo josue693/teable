@@ -1,6 +1,7 @@
 import type { IViewOptions } from '@teable/core';
-import { generateViewId, ViewType } from '@teable/core';
+import { ViewType } from '@teable/core';
 import { Lock } from '@teable/icons';
+import type { IToolInvocationUIPart } from '@teable/openapi';
 import { McpToolInvocationName } from '@teable/openapi';
 import { hexToRGBA } from '@teable/sdk/components';
 import { VIEW_ICON_MAP } from '@teable/sdk/components/view/constant';
@@ -16,14 +17,102 @@ interface IViewListPreviewProps {
   toolInvocation: IToolMessagePart['part']['toolInvocation'];
 }
 
+const ViewItem = (props: {
+  id: string;
+  name: string;
+  type: ViewType;
+  isLocked?: boolean;
+  options?: IViewOptions;
+  style?: React.CSSProperties;
+  changeViewIdId?: string;
+}) => {
+  const { id, name, type, isLocked, style, options, changeViewIdId } = props;
+  const ref = useRef<HTMLButtonElement>(null);
+  const views = useViews();
+  useEffect(() => {
+    if (!changeViewIdId) {
+      return;
+    }
+    if (ref.current && id === changeViewIdId) {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [changeViewIdId, id]);
+  const ViewIcon = VIEW_ICON_MAP[type];
+  const router = useRouter();
+  const baseId = router.query.baseId as string;
+  const tableId = router.query.tableId as string;
+  const currentViewId = router.query.viewId as string;
+
+  const isExpired = !views.find((view) => view.id === id);
+
+  return (
+    <Button
+      style={style}
+      variant="ghost"
+      className={
+        'flex h-7 min-w-20 shrink-0 items-center gap-2 overflow-hidden rounded border p-1 text-foreground'
+      }
+      ref={ref}
+      disabled={isExpired}
+      onClick={() => {
+        if (isExpired || id === currentViewId) {
+          return;
+        }
+
+        router.push(
+          {
+            pathname: `/base/[baseId]/[tableId]/[viewId]`,
+            query: {
+              baseId,
+              tableId,
+              viewId: id,
+            },
+          },
+          undefined,
+          {
+            shallow: Boolean(id),
+          }
+        );
+      }}
+    >
+      {type === ViewType.Plugin ? (
+        <Image
+          className="mr-1 size-4 shrink-0"
+          width={16}
+          height={16}
+          src={(options as IViewOptions & { pluginLogo: string })?.pluginLogo}
+          alt={name}
+        />
+      ) : (
+        <Fragment>
+          {isLocked && <Lock className="mr-[2px] size-4 shrink-0" />}
+          <ViewIcon className="mr-1 size-4 shrink-0" />
+        </Fragment>
+      )}
+      <div className="flex flex-1 items-center justify-center overflow-hidden">
+        <div className="truncate text-xs font-medium leading-5">{name}</div>
+      </div>
+    </Button>
+  );
+};
+
 export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
   const { toolInvocation } = props;
+
   const views = useViews();
 
   const changeViewIdId = useMemo(() => {
     switch (toolInvocation.toolName) {
       case McpToolInvocationName.CreateView: {
-        return generateViewId();
+        const resultString = (toolInvocation as unknown as IToolInvocationUIPart['toolInvocation'])
+          ?.result?.content?.[0]?.text;
+        try {
+          const result = JSON.parse(resultString);
+          return result?.view?.id;
+        } catch (err) {
+          console.error('createView parse error', err);
+          return null;
+        }
       }
       case McpToolInvocationName.UpdateViewName:
       case McpToolInvocationName.DeleteView: {
@@ -34,7 +123,7 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
         return null;
       }
     }
-  }, [toolInvocation.args, toolInvocation.toolName]);
+  }, [toolInvocation]);
 
   const viewList = useMemo<
     {
@@ -48,26 +137,22 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
   >(() => {
     switch (toolInvocation.toolName) {
       case McpToolInvocationName.CreateView: {
-        const { viewRo } = toolInvocation.args;
-        const newTables = views.map((view) => {
+        return views.map((view) => {
           return {
             id: view.id,
             name: view.name,
             type: view.type,
             isLocked: view.isLocked,
             options: view.options,
+            style:
+              view?.id === changeViewIdId
+                ? {
+                    backgroundColor: hexToRGBA(PreviewActionColorMap['create'], 0.5),
+                    borderColor: PreviewActionColorMap['create'],
+                  }
+                : undefined,
           };
         });
-        newTables.push({
-          id: changeViewIdId,
-          style: {
-            backgroundColor: hexToRGBA(PreviewActionColorMap['create'], 0.5),
-            borderColor: PreviewActionColorMap['create'],
-          },
-          ...viewRo,
-        });
-
-        return newTables;
       }
       case McpToolInvocationName.UpdateViewName: {
         const { viewId, updateViewNameRo } = toolInvocation.args;
@@ -118,87 +203,10 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
     }
   }, [toolInvocation.toolName, toolInvocation.args, views, changeViewIdId]);
 
-  const ViewItem = (props: {
-    id: string;
-    name: string;
-    type: ViewType;
-    isLocked?: boolean;
-    options?: IViewOptions;
-    style?: React.CSSProperties;
-  }) => {
-    const { id, name, type, isLocked, style, options } = props;
-    const ref = useRef<HTMLButtonElement>(null);
-    useEffect(() => {
-      if (!changeViewIdId) {
-        return;
-      }
-      if (ref.current && id === changeViewIdId) {
-        ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, [id]);
-    const ViewIcon = VIEW_ICON_MAP[type];
-    const router = useRouter();
-    const baseId = router.query.baseId as string;
-    const tableId = router.query.tableId as string;
-    const currentViewId = router.query.viewId as string;
-
-    const isExpired = !views.find((view) => view.id === id);
-
-    return (
-      <Button
-        style={style}
-        variant="ghost"
-        className={
-          'flex h-7 min-w-20 shrink-0 items-center gap-2 overflow-hidden rounded border p-1 text-foreground'
-        }
-        ref={ref}
-        disabled={isExpired}
-        onClick={() => {
-          if (isExpired || id === currentViewId) {
-            return;
-          }
-
-          router.push(
-            {
-              pathname: `/base/[baseId]/[tableId]/[viewId]`,
-              query: {
-                baseId,
-                tableId,
-                viewId: id,
-              },
-            },
-            undefined,
-            {
-              shallow: Boolean(id),
-            }
-          );
-        }}
-      >
-        {type === ViewType.Plugin ? (
-          <Image
-            className="mr-1 size-4 shrink-0"
-            width={16}
-            height={16}
-            src={(options as IViewOptions & { pluginLogo: string })?.pluginLogo}
-            alt={name}
-          />
-        ) : (
-          <Fragment>
-            {isLocked && <Lock className="mr-[2px] size-4 shrink-0" />}
-            <ViewIcon className="mr-1 size-4 shrink-0" />
-          </Fragment>
-        )}
-        <div className="flex flex-1 items-center justify-center overflow-hidden">
-          <div className="truncate text-xs font-medium leading-5">{name}</div>
-        </div>
-      </Button>
-    );
-  };
-
   return (
     <div className="flex gap-2 overflow-x-auto p-2">
       {viewList.map((view) => (
-        <ViewItem key={view.id} {...view} />
+        <ViewItem key={view.id} {...view} changeViewIdId={changeViewIdId} />
       ))}
     </div>
   );

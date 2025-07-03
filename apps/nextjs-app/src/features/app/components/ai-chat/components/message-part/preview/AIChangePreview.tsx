@@ -6,7 +6,9 @@ import {
   TablePermissionProvider,
 } from '@teable/sdk/context';
 import { useBaseId } from '@teable/sdk/hooks/use-base-id';
+import { ErrorBoundary } from 'react-error-boundary';
 import type { IToolMessagePart } from '../ToolMessagePart';
+import { ErrorFallback } from './ErrorFallback';
 import { GridPreView } from './GridPreview';
 import { TableListDiffPreview } from './TableListDiffPreview';
 import { ViewListDiffPreview } from './ViewListDiffPreview';
@@ -48,7 +50,9 @@ export const AIChangePreview = (props: IAIChangePreviewProps) => {
     <>
       <AnchorContext.Provider key={tableId} value={{ baseId, tableId }}>
         <TablePermissionProvider baseId={baseId}>
-          <FieldProvider>{previewRender()}</FieldProvider>
+          <FieldProvider>
+            <ErrorBoundary FallbackComponent={ErrorFallback}>{previewRender()}</ErrorBoundary>
+          </FieldProvider>
         </TablePermissionProvider>
       </AnchorContext.Provider>
     </>

@@ -216,11 +216,26 @@ const GridPreviewBase: ForwardRefRenderFunction<IGridPreviewRef, IGridPreviewPro
         });
       }
       case McpToolInvocationName.CreateFields: {
+        const { state } = toolInvocation;
         const createFields = toolInvocation.args?.['fields'] as {
           name: string;
           type: FieldType;
           id?: string;
         }[];
+        const names = createFields.map(({ name }) => name);
+        if (state === 'result') {
+          return columns.map((column) => {
+            return {
+              ...column,
+              customTheme: names?.includes(column.name)
+                ? {
+                    columnHeaderBgHovered: hexToRGBA(PreviewActionColorMap['create'], 0.5),
+                    columnHeaderBg: hexToRGBA(PreviewActionColorMap['create'], 0.3),
+                  }
+                : undefined,
+            };
+          });
+        }
         const newColumns = createFields.map((column) => {
           return {
             ...column,
@@ -248,8 +263,8 @@ const GridPreviewBase: ForwardRefRenderFunction<IGridPreviewRef, IGridPreviewPro
           return {
             ...column,
             customTheme: theme,
-            name: fieldId === column.id ? updateFieldRo?.name : column.name,
-            icon: fieldId === column.id ? updateFieldRo?.type : column.icon,
+            name: fieldId === column.id ? updateFieldRo?.name || column.name : column.name,
+            icon: fieldId === column.id ? updateFieldRo?.type || column.icon : column.icon,
           };
         });
       }
@@ -293,6 +308,8 @@ const GridPreviewBase: ForwardRefRenderFunction<IGridPreviewRef, IGridPreviewPro
       }
     }
   }, [columns, toolInvocation]);
+
+  console.log('finalColumns', finalColumns);
 
   useEffect(() => {
     switch (toolInvocation.toolName) {

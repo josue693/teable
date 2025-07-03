@@ -250,6 +250,7 @@ export const ChatContainer = forwardRef<
               status={status}
             />
             <MessageInput
+              messages={messages}
               modelKey={validModelKey}
               models={models}
               input={input}

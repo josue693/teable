@@ -672,6 +672,9 @@
         "description": "当前视图类型不支持定位, 暂只支持表格视图"
       }
     },
+    "fallback": {
+      "previewLoadFailed": "预览加载失败，请稍后重试"
+    },
     "codeBlock": {
       "hiddenLines": "{{count}}行已隐藏",
       "collapseCode": "收起代码",
