@@ -26,7 +26,14 @@ const ViewItem = (props: {
   options?: IViewOptions;
   style?: React.CSSProperties;
   changeViewIdId?: string;
-  views: IViewVo[];
+  views: {
+    id: string;
+    name: string;
+    type: ViewType;
+    isLocked?: boolean;
+    options?: IViewOptions;
+    style?: React.CSSProperties;
+  }[];
 }) => {
   const { id, name, type, isLocked, style, options, changeViewIdId, views } = props;
   const ref = useRef<HTMLButtonElement>(null);
@@ -45,6 +52,8 @@ const ViewItem = (props: {
   const currentViewId = router.query.viewId as string;
 
   const isExpired = !views.find((view) => view.id === id);
+
+  console.log('ViewItemViewItemViewItem', views, currentViewId);
 
   return (
     <Button
@@ -218,7 +227,7 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
   return (
     <div className="flex gap-2 overflow-x-auto p-2">
       {viewList.map((view) => (
-        <ViewItem key={view.id} {...view} changeViewIdId={changeViewIdId} views={views} />
+        <ViewItem key={view.id} {...view} changeViewIdId={changeViewIdId} views={viewList} />
       ))}
     </div>
   );

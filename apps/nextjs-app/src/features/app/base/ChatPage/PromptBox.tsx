@@ -439,10 +439,10 @@ export const PromptBox: React.FC<IPromptBoxProps> = ({ onEnter }) => {
         },
       ],
     },
-  ];
+  ] as const;
   return (
     <div className="mx-auto flex w-full justify-center px-4 sm:px-6 lg:px-8">
-      <div className="shadow-black/6 w-full max-w-3xl rounded-2xl border border-gray-200 bg-card p-4 text-left shadow-sm">
+      <div className="shadow-black/6 w-full max-w-3xl rounded-2xl border bg-card p-4 text-left shadow-sm">
         <div className="relative space-y-2 rounded-2xl bg-muted px-6 py-3">
           <textarea
             id="prompt-box"
@@ -493,7 +493,7 @@ export const PromptBox: React.FC<IPromptBoxProps> = ({ onEnter }) => {
                   <Button
                     variant={'ghost'}
                     size={'xs'}
-                    className="flex items-center gap-1 rounded-md bg-muted/30 p-1 py-1.5 text-xs transition-colors "
+                    className="bg-sc flex items-center gap-1 rounded-md bg-secondary/50 p-1 py-1.5 text-xs transition-colors"
                   >
                     <ChevronRight className="size-3" />
                     <span className="text-xs">{suggestion.title}</span>

@@ -35,6 +35,7 @@ export const ChatContainer = forwardRef<
   const chatIdRef = useRef(generateChatId());
   const { modelKey, setModelKey } = useChatStore();
   const tableIdRef = useRef<string | undefined>();
+  const viewIdRef = useRef<string | undefined>();
   const activeChat = useActiveChat(baseId);
   const queryClient = useQueryClient();
   const chatContext = useChatContext();
@@ -47,6 +48,10 @@ export const ChatContainer = forwardRef<
   useEffect(() => {
     tableIdRef.current = tableId;
   }, [tableId]);
+
+  useEffect(() => {
+    viewIdRef.current = router.query.viewId as string | undefined;
+  }, [router.query.viewId]);
 
   const { data: baseAiConfig, isLoading: isBaseAiConfigLoading } = useQuery({
     queryKey: ['ai-config', baseId],
@@ -157,6 +162,52 @@ export const ChatContainer = forwardRef<
             }
             break;
           }
+          case McpToolInvocationName.CreateView: {
+            setTimeout(() => {
+              const { toolCallId } = toolCall;
+              const { tableId } = toolCall.args as { tableId: string };
+              const partItem = messagesRef?.current
+                ?.map(({ parts }) => parts)
+                .flat()
+                ?.find(
+                  (part) =>
+                    (part as unknown as IToolInvocationUIPart)?.toolInvocation?.toolCallId ===
+                    toolCallId
+                );
+              const toolInvocation = (partItem as IToolInvocationUIPart)?.toolInvocation;
+              if (!toolInvocation) {
+                return;
+              }
+              let createdViewId: string | undefined;
+              try {
+                const { result } = toolInvocation;
+                const createdView = JSON.parse(result?.content?.[0]?.text);
+                createdViewId = createdView?.view.id;
+              } catch (error) {
+                console.error('parse created table error', error);
+              }
+              if (!createdViewId) {
+                return;
+              }
+              if (createdViewId !== currentTableId) {
+                router.push(
+                  {
+                    pathname: `/base/[baseId]/[tableId]/[viewId]`,
+                    query: {
+                      baseId,
+                      tableId,
+                      viewId: createdViewId,
+                    },
+                  },
+                  undefined,
+                  {
+                    shallow: Boolean(currentTableId),
+                  }
+                );
+              }
+            }, 3000);
+            break;
+          }
           case McpToolInvocationName.CreateTable: {
             setTimeout(() => {
               const { toolCallId } = toolCall;
@@ -177,7 +228,9 @@ export const ChatContainer = forwardRef<
                 const { result } = toolInvocation;
                 const createdTable = JSON.parse(result?.content?.[0]?.text);
                 createdTableId = createdTable?.table.id;
+                console.log('createdTablecreatedTablecreatedTable', createdTable);
               } catch (error) {
+                console.error('createdTablecreatedTablecreatedTable', error);
                 console.error('parse created table error', error);
               }
               if (!createdTableId) {

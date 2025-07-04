@@ -111,9 +111,7 @@ export const Template: React.FC<TemplateProps> = ({ initialTemplates: templates,
       <div className="relative mx-auto flex w-full max-w-[1158px] flex-col items-center justify-start gap-2 p-4 sm:px-6 lg:px-8">
         {/* Title */}
         <div className="flex items-start justify-start self-stretch">
-          <h1 className="text-2xl font-bold text-[#121827]">
-            {t('common:template.templateTitle')}
-          </h1>
+          <h1 className="text-2xl font-bold">{t('common:template.templateTitle')}</h1>
         </div>
 
         {/* Filter and Sort Header */}
@@ -127,10 +125,10 @@ export const Template: React.FC<TemplateProps> = ({ initialTemplates: templates,
                 size="xs"
                 onClick={() => setActiveCategory(category.id)}
                 className={cn(
-                  'flex justify-center items-center relative gap-1 px-3 py-2 rounded-lg border border-gray-200 transition-all duration-200 hover:bg-gray-50',
-                  activeCategory === category.id
-                    ? 'bg-gray-50 border-gray-200'
-                    : 'bg-white hover:bg-gray-25'
+                  'flex justify-center items-center relative gap-1 px-3 py-2 rounded-lg border transition-all duration-200 text-card-foreground bg-card',
+                  {
+                    'text-card-foreground bg-secondary': activeCategory === category.id,
+                  }
                 )}
               >
                 <p className="text-left text-xs">{category.name}</p>
