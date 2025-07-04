@@ -105,7 +105,7 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
   const { data: views = [] as IViewVo[] } = useQuery({
     queryKey: ReactQueryKeys.viewList(tableId),
     queryFn: () => getViewList(tableId).then((res) => res.data),
-    enabled: !!tableId,
+    enabled: !!tableId && toolInvocation.toolName !== McpToolInvocationName.CreateView,
   });
 
   const changeViewIdId = useMemo(() => {
@@ -144,22 +144,27 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
   >(() => {
     switch (toolInvocation.toolName) {
       case McpToolInvocationName.CreateView: {
-        return views.map((view) => {
-          return {
-            id: view.id,
-            name: view.name,
-            type: view.type,
-            isLocked: view.isLocked,
-            options: view.options,
-            style:
-              view?.id === changeViewIdId
-                ? {
-                    backgroundColor: hexToRGBA(PreviewActionColorMap['create'], 0.5),
-                    borderColor: PreviewActionColorMap['create'],
-                  }
-                : undefined,
-          };
-        });
+        const resultString = (toolInvocation as unknown as IToolInvocationUIPart['toolInvocation'])
+          ?.result?.content?.[0]?.text;
+        try {
+          const result = JSON.parse(resultString);
+          const createdView = result?.view;
+          return [
+            {
+              id: createdView.id,
+              name: createdView.name,
+              type: createdView.type,
+              isLocked: createdView.isLocked,
+              style: {
+                backgroundColor: hexToRGBA(PreviewActionColorMap['create'], 0.5),
+                borderColor: PreviewActionColorMap['create'],
+              },
+            },
+          ];
+        } catch (err) {
+          console.error('createView parse error', err);
+          return [];
+        }
       }
       case McpToolInvocationName.UpdateViewName: {
         const { viewId, updateViewNameRo } = toolInvocation.args;
@@ -208,7 +213,7 @@ export const ViewListDiffPreview = (props: IViewListPreviewProps) => {
         }));
       }
     }
-  }, [toolInvocation.toolName, toolInvocation.args, views, changeViewIdId]);
+  }, [toolInvocation, views, changeViewIdId]);
 
   return (
     <div className="flex gap-2 overflow-x-auto p-2">

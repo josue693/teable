@@ -1,9 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
 import { Table2 } from '@teable/icons';
 import type { ITableFullVo, ITableListVo, IToolInvocationUIPart } from '@teable/openapi';
-import { getTableList, McpToolInvocationName } from '@teable/openapi';
+import { McpToolInvocationName } from '@teable/openapi';
 import { hexToRGBA } from '@teable/sdk/components';
-import { ReactQueryKeys } from '@teable/sdk/config';
+import { useTables } from '@teable/sdk/hooks';
 import { Button } from '@teable/ui-lib/shadcn';
 import { useRouter } from 'next/router';
 import { useEffect, useMemo, useRef } from 'react';
@@ -78,13 +77,7 @@ const TableItem = (props: {
 export const TableListDiffPreview = (props: ITableListPreviewProps) => {
   const { toolInvocation } = props;
 
-  const tableId = toolInvocation?.args?.tableId;
-
-  const { data: tables = [] as ITableListVo } = useQuery({
-    queryKey: ReactQueryKeys.tableList(tableId),
-    queryFn: () => getTableList(tableId).then((res) => res.data),
-    enabled: !!tableId,
-  });
+  const tables = useTables();
 
   const changeTableId = useMemo(() => {
     switch (toolInvocation.toolName) {

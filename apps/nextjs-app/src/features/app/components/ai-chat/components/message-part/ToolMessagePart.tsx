@@ -2,21 +2,13 @@
 /* eslint-disable jsx-a11y/click-events-have-key-events */
 import type { UseChatHelpers } from '@ai-sdk/react';
 import { ViewType } from '@teable/core';
-import { Check, ChevronDown, X, LocateFixed } from '@teable/icons';
+import { Check, X, LocateFixed } from '@teable/icons';
 import type { IToolInvocationUIPart, IUpdateRecordsToolParams } from '@teable/openapi';
 import { McpToolInvocationName } from '@teable/openapi';
 import { useTables, useView } from '@teable/sdk/hooks';
 import { Spin } from '@teable/ui-lib/base';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-  cn,
-  useToast,
-} from '@teable/ui-lib/shadcn';
+import { cn, useToast } from '@teable/ui-lib/shadcn';
 import { isEqual } from 'lodash';
-import { ChevronRight } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import { memo, useContext, useMemo, useState } from 'react';
@@ -24,9 +16,7 @@ import { useGridSearchStore } from '@/features/app/blocks/view/grid/useGridSearc
 import { ChatContext } from '../../context/ChatContext';
 import { useMcpToolExecution } from '../../hooks/useMcpToolExecution';
 import { useChatControlStore } from '../../store/useChatControl';
-import { Markdown } from './Markdown';
-import { AIChangePreview } from './preview/AIChangePreview';
-import { PreviewMcpToolInvocationNames } from './preview/constant';
+import { PreviewRender } from './preview/PreviewRender';
 
 export interface IToolMessagePart {
   id: string;
@@ -41,7 +31,6 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
 
   const { toast } = useToast();
 
-  const [isExpanded, setIsExpanded] = useState(false);
   const { t } = useTranslation(['table']);
   const [loading, setLoading] = useState(false);
 
@@ -50,10 +39,6 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
   const { addToolResult } = useContext(ChatContext);
 
   const needConfirm = toolInvocation.state === 'call';
-
-  const previewVisible = PreviewMcpToolInvocationNames.includes(
-    toolInvocation.toolName as McpToolInvocationName
-  );
 
   const { gridRef, recordMap } = useGridSearchStore();
 
@@ -220,211 +205,109 @@ export const PureToolMessagePart = ({ id, part }: IToolMessagePart) => {
     }
   };
 
-  const isResult = toolInvocation.state === 'result';
-
   return (
-    <Accordion
-      type="single"
-      collapsible
-      value={isExpanded ? 'expanded' : 'collapsed'}
-      onValueChange={(value) => {
-        setIsExpanded(value === 'expanded');
-      }}
-      className="w-full"
-    >
-      <AccordionItem
-        value="expanded"
-        className="font-sm rounded-lg border px-2 dark:bg-neutral-900/80"
-      >
-        <AccordionTrigger
-          headerClassName="flex-1"
-          hiddenChevron
-          className="gap-1 py-2 text-xs font-normal text-muted-foreground hover:no-underline"
-        >
-          <div className="flex items-center gap-2">
-            {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-            <div>{toolName}</div>
-          </div>
-          <div className="flex items-center gap-2">
-            {rejectedTool ? (
-              <X className="size-4 text-red-500" />
-            ) : loading ? (
-              <Spin className="size-4" />
-            ) : (
-              <div className="flex items-center gap-2">
-                {needConfirm && shouldLocateDiffPosition && (
-                  <LocateFixed
-                    className="size-4 hover:opacity-80"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      locatePosition();
-                    }}
-                  />
-                )}
-                <Check
-                  className={cn('size-4 hover:opacity-80', {
-                    'text-green-500': !needConfirm,
-                  })}
-                  onClick={async (e) => {
+    <div className="flex flex-col">
+      <div className="flex justify-between gap-1 py-2 text-xs font-normal text-muted-foreground hover:no-underline">
+        <div className="flex items-center gap-2">
+          <div>{toolName}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          {rejectedTool ? (
+            <X className="size-4 text-red-500" />
+          ) : loading ? (
+            <Spin className="size-4" />
+          ) : (
+            <div className="flex items-center gap-2">
+              {needConfirm && shouldLocateDiffPosition && (
+                <LocateFixed
+                  className="size-4 hover:opacity-80"
+                  onClick={(e) => {
                     e.stopPropagation();
-                    if (!needConfirm) {
-                      return;
-                    }
-                    setLoading(true);
-                    try {
-                      const { execute, callBack } = toolExecutionMap[toolInvocation.toolName];
-                      if (!execute || !callBack) {
-                        return;
-                      }
-                      const result = await execute(toolInvocation.args);
-                      callBack(result, toolInvocation.args);
-                      addToolResult({
-                        toolCallId: toolInvocation.toolCallId,
-                        result: {
-                          content: [
-                            {
-                              text: JSON.stringify(result),
-                              type: 'text',
-                            },
-                          ],
-                          toolCallStatus: 'success',
-                        },
-                      });
-                      setToolCallInfo(
-                        toolInvocation?.args?.tableId || null,
-                        toolInvocation.toolName as McpToolInvocationName
-                      );
-                    } catch (error) {
-                      addToolResult({
-                        toolCallId: toolInvocation.toolCallId,
-                        result: {
-                          content: [
-                            {
-                              text: `execute tool failed reason: ${JSON.stringify(error)}`,
-                              type: 'text',
-                            },
-                          ],
-                          toolCallStatus: 'error',
-                        },
-                      });
-                    }
-                    setLoading(false);
+                    locatePosition();
                   }}
                 />
-                {needConfirm && (
-                  <X
-                    className="size-4 hover:opacity-80"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      addToolResult({
-                        toolCallId: toolInvocation.toolCallId,
-                        result: {
-                          content: [
-                            {
-                              text: `reject to execute this tool.`,
-                              type: 'text',
-                            },
-                          ],
-                          toolCallStatus: 'rejected',
-                        },
-                      });
-                    }}
-                  />
-                )}
-              </div>
-            )}
-          </div>
-        </AccordionTrigger>
-        <AccordionContent>
-          <div className="space-y-2 px-3 text-muted-foreground">
-            {previewVisible ? (
-              <AIChangePreview toolInvocation={toolInvocation} />
-            ) : (
-              <>
-                <div className="space-y-1">
-                  <div className="text-sm">{t('table:aiChat.tool.args')}: </div>
-                  <ContentRenderer id={id} content={JSON.stringify(toolInvocation.args, null, 2)} />
-                </div>
-                {isResult && (
-                  <div className="space-y-1">
-                    <div className="text-sm">{t('table:aiChat.tool.result')}: </div>
-                    <ToolsResultRenderer id={id} toolInvocation={toolInvocation} />
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </AccordionContent>
-      </AccordionItem>
-    </Accordion>
-  );
-};
-
-const PureToolsResultRenderer = ({
-  id,
-  toolInvocation,
-}: {
-  id: string;
-  toolInvocation: IToolMessagePart['part']['toolInvocation'] & { state: 'result' };
-}) => {
-  const result = toolInvocation.result?.['content']?.[0]?.text;
-
-  const content = useMemo(() => {
-    switch (toolInvocation.toolName) {
-      case McpToolInvocationName.CreateField:
-      case McpToolInvocationName.CreateRecords:
-      case McpToolInvocationName.CreateTable:
-      case McpToolInvocationName.RunScripts:
-      case McpToolInvocationName.UpdateField:
-      case McpToolInvocationName.SqlQuery: {
-        let res = result;
-        try {
-          res = JSON.stringify(JSON.parse(result), null, 2);
-        } catch (error) {
-          console.error(error);
-        }
-        return res;
-      }
-      case McpToolInvocationName.GetTableFields:
-      case McpToolInvocationName.GetTablesMeta:
-        return result;
-      default:
-        return JSON.stringify(toolInvocation.result, null, 2);
-    }
-  }, [result, toolInvocation.result, toolInvocation.toolName]);
-
-  return <ContentRenderer id={id} content={content} />;
-};
-
-const ToolsResultRenderer = memo(PureToolsResultRenderer, (prev, next) => {
-  if (prev.id !== next.id) return false;
-  if (isEqual(prev.toolInvocation, next.toolInvocation)) return true;
-  return false;
-});
-
-const ContentRenderer = ({ id, content }: { id: string; content: string }) => {
-  return (
-    <Markdown
-      id={id}
-      className="p-0"
-      components={{
-        pre(props) {
-          const { children, ...rest } = props;
-          return (
-            <pre
-              {...rest}
-              className="bg-card"
-              style={{
-                padding: 0,
-                backgroundColor: 'var(--card-background)',
-              }}
-            >
-              {children}
-            </pre>
-          );
-        },
-      }}
-    >{`\`\`\`json\n${content}`}</Markdown>
+              )}
+              <Check
+                className={cn('size-4 hover:opacity-80', {
+                  'text-green-500': !needConfirm,
+                  'cursor-pointer': needConfirm,
+                })}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (!needConfirm) {
+                    return;
+                  }
+                  setLoading(true);
+                  try {
+                    const { execute, callBack } = toolExecutionMap[toolInvocation.toolName];
+                    if (!execute || !callBack) {
+                      return;
+                    }
+                    const result = await execute(toolInvocation.args);
+                    callBack(result, toolInvocation.args);
+                    addToolResult({
+                      toolCallId: toolInvocation.toolCallId,
+                      result: {
+                        content: [
+                          {
+                            text: JSON.stringify(result),
+                            type: 'text',
+                          },
+                        ],
+                        toolCallStatus: 'success',
+                      },
+                    });
+                    setToolCallInfo(
+                      toolInvocation?.args?.tableId || null,
+                      toolInvocation.toolName as McpToolInvocationName
+                    );
+                  } catch (error) {
+                    addToolResult({
+                      toolCallId: toolInvocation.toolCallId,
+                      result: {
+                        content: [
+                          {
+                            text: `execute tool failed reason: ${JSON.stringify(error)}`,
+                            type: 'text',
+                          },
+                        ],
+                        toolCallStatus: 'error',
+                      },
+                    });
+                  }
+                  setLoading(false);
+                }}
+              />
+              {needConfirm && (
+                <X
+                  className={cn('size-4 hover:opacity-80', {
+                    'cursor-pointer': needConfirm,
+                  })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    addToolResult({
+                      toolCallId: toolInvocation.toolCallId,
+                      result: {
+                        content: [
+                          {
+                            text: `reject to execute this tool.`,
+                            type: 'text',
+                          },
+                        ],
+                        toolCallStatus: 'rejected',
+                      },
+                    });
+                  }}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="space-y-2 border-l pl-3 text-muted-foreground">
+        <PreviewRender toolInvocation={toolInvocation} id={id} />
+      </div>
+    </div>
   );
 };
 

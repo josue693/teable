@@ -234,7 +234,7 @@ export const ChatContainer = forwardRef<
   }));
 
   return (
-    <div className="flex w-full flex-1 flex-col overflow-hidden pb-3">
+    <div className="flex w-full flex-1 flex-col overflow-hidden pb-1">
       {(messages.length > 0 || !autoOpen) && (
         <ChatContext.Provider
           value={{
@@ -242,7 +242,7 @@ export const ChatContainer = forwardRef<
             addToolResult,
           }}
         >
-          <div className="flex flex-1 flex-col overflow-hidden pb-3">
+          <div className="flex flex-1 flex-col overflow-hidden pb-1">
             <Messages
               messages={messages}
               messageMetaMap={messageMetaMap}

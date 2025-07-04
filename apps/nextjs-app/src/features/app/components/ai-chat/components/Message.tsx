@@ -1,7 +1,4 @@
 import type { UseChatHelpers } from '@ai-sdk/react';
-import { TeableNew } from '@teable/icons';
-import { UserAvatar } from '@teable/sdk/components';
-import { useSession } from '@teable/sdk/hooks';
 import { cn } from '@teable/ui-lib/shadcn';
 import { TeableLogo } from '@/components/TeableLogo';
 import { useBrand } from '@/features/app/hooks/useBrand';
@@ -61,7 +58,6 @@ export const MessageWrapper = ({
   message,
   children,
 }: IMessage & { children: React.ReactNode | React.ReactNode[] }) => {
-  // const { user } = useSession();
   const { brandName } = useBrand();
 
   return (
@@ -80,11 +76,6 @@ export const MessageWrapper = ({
         >
           {children}
         </div>
-        {/* {message.role === 'user' && (
-          <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
-            <UserAvatar name={user?.name} avatar={user?.avatar} />
-          </div>
-        )} */}
       </div>
     </div>
   );
