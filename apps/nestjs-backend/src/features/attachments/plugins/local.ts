@@ -134,19 +134,22 @@ export class LocalStorage implements StorageAdapter {
 
         req.on('end', () => {
           fileStream.end();
+        });
+        req.on('error', (err) => {
+          fileStream.end();
+          reject(err.message);
+        });
+
+        fileStream.on('error', (err) => {
+          reject(err.message);
+        });
+
+        fileStream.on('finish', () => {
           resolve({
             size,
             mimetype: req.headers['content-type'] as string,
             path,
           });
-        });
-        req.on('error', (err) => {
-          this.deleteFile(path);
-          reject(err.message);
-        });
-        fileStream.on('error', (err) => {
-          this.deleteFile(path);
-          reject(err.message);
         });
       } catch (error) {
         this.logger.error('saveTemporaryFile error', error);
@@ -274,20 +277,15 @@ export class LocalStorage implements StorageAdapter {
     if (stream instanceof Buffer) {
       await fse.writeFile(temPath, stream);
     } else {
+      const writer = createWriteStream(temPath);
       await new Promise<void>((resolve, reject) => {
-        const writer = createWriteStream(temPath);
         stream.pipe(writer);
-        stream.on('end', function () {
-          writer.end();
-          writer.close();
-          resolve();
-        });
-        stream.on('error', (err) => {
-          writer.end();
-          writer.close();
-          this.deleteFile(path);
-          reject(err);
-        });
+        stream.on('error', reject);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      }).catch((err) => {
+        this.deleteFile(temPath);
+        throw err;
       });
     }
     const hash = await FileUtils.getHash(temPath);
