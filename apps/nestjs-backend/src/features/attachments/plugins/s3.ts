@@ -230,6 +230,8 @@ export class S3Storage implements StorageAdapter {
       },
     });
 
+    console.log('uploaduploaduploadupload: ', upload);
+
     return upload
       .done()
       .then((res) => ({
