@@ -226,6 +226,8 @@ export class S3Storage implements StorageAdapter {
       ContentMD5: metadata?.['Content-MD5'] as string,
     });
 
+    console.log('test for s3');
+
     return this.s3Client.send(command).then((res) => ({
       hash: res.ETag!,
       path,
