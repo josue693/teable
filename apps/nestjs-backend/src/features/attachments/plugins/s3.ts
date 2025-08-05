@@ -10,6 +10,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { getRandomString } from '@teable/core';
@@ -230,6 +231,48 @@ export class S3Storage implements StorageAdapter {
       hash: res.ETag!,
       path,
     }));
+  }
+
+  uploadFileStream(
+    bucket: string,
+    path: string,
+    stream: Buffer | Readable,
+    metadata?: Record<string, unknown>
+  ) {
+    const upload = new Upload({
+      client: this.s3Client,
+      params: {
+        Bucket: bucket,
+        Key: path,
+        Body: stream,
+        ContentType: metadata?.['Content-Type'] as string,
+        ContentLength: metadata?.['Content-Length'] as number,
+        ContentDisposition: metadata?.['Content-Disposition'] as string,
+        ContentEncoding: metadata?.['Content-Encoding'] as string,
+        ContentLanguage: metadata?.['Content-Language'] as string,
+        ContentMD5: metadata?.['Content-MD5'] as string,
+      },
+    });
+
+    return upload
+      .done()
+      .then((res) => ({
+        hash: res.ETag!,
+        path,
+      }))
+      .catch((error) => {
+        if (stream && typeof stream !== 'string' && 'destroy' in stream) {
+          (stream as Readable)?.removeAllListeners?.();
+          (stream as Readable)?.destroy?.();
+        }
+        throw new BadRequestException(`S3 upload failed: ${error?.message || 'Unknown error'}`);
+      })
+      .finally(() => {
+        if (stream && typeof stream !== 'string' && 'destroy' in stream) {
+          (stream as Readable)?.removeAllListeners?.();
+          (stream as Readable).destroy?.();
+        }
+      });
   }
 
   // s3 file exists
