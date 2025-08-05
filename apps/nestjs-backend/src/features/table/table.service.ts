@@ -311,6 +311,26 @@ export class TableService implements IReadonlyAdapterService {
     await this.createDBTable(baseId, snapshot);
   }
 
+  async getSnapshot(baseId: string, id: string): Promise<ISnapshotBase<ITableVo> | undefined> {
+    const table = await this.prismaService.txClient().tableMeta.findFirst({
+      where: { baseId, id: id, deletedTime: null },
+    });
+    if (!table) {
+      return;
+    }
+    return {
+      id: table.id,
+      v: table.version,
+      type: 'json0',
+      data: {
+        ...table,
+        description: table.description ?? undefined,
+        icon: table.icon ?? undefined,
+        lastModifiedTime: table.lastModifiedTime?.toISOString() || table.createdTime.toISOString(),
+      },
+    };
+  }
+
   async getSnapshotBulk(baseId: string, ids: string[]): Promise<ISnapshotBase<ITableVo>[]> {
     const tables = await this.prismaService.txClient().tableMeta.findMany({
       where: { baseId, id: { in: ids }, deletedTime: null },

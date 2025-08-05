@@ -249,7 +249,11 @@ export class ShareDbAdapter extends ShareDb.DB {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async getSnapshotData(docType: IdPrefix, collectionId: string, id: string, options: any) {
     if (docType === IdPrefix.Table) {
-      return await this.tableServiceInner.getSnapshotBulk(collectionId, [id]);
+      const tableSnapshot = await this.tableServiceInner.getSnapshot(collectionId, id);
+      if (tableSnapshot) {
+        return [tableSnapshot];
+      }
+      return [];
     }
     const { cookie, shareId } = this.getCookieAndShareId(options);
     return await this.cls.runWith(
@@ -284,11 +288,12 @@ export class ShareDbAdapter extends ShareDb.DB {
     options: any,
     callback: (error: unknown, data?: unknown) => void
   ) {
+    if (!from) from = 0;
     const time = Date.now();
     let callbackCalled = false;
     const safeCallback = (error: unknown, data?: unknown) => {
       if (callbackCalled) {
-        this.logger.warn(
+        this.logger.error(
           `Attempted to call callback multiple times for collection: ${collection}, id: ${id}`
         );
         return;
@@ -296,7 +301,6 @@ export class ShareDbAdapter extends ShareDb.DB {
       callbackCalled = true;
       callback(error, data);
     };
-
     try {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const [docType, collectionId] = collection.split('_');
@@ -359,7 +363,8 @@ export class ShareDbAdapter extends ShareDb.DB {
       }
 
       const editOp = this.getOpsFromSnapshot(docType as IdPrefix, data);
-      const editOps = new Array(Math.max((to || baseRaw.v + 1) - from, 0)).fill(0).map((_, i) => {
+      const gapVersion = Math.max((to || baseRaw.v + 1) - from, 0);
+      const editOps = new Array(gapVersion).fill(0).map((_, i) => {
         return {
           ...baseRaw,
           v: from + i,
