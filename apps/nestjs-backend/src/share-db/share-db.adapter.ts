@@ -284,7 +284,7 @@ export class ShareDbAdapter extends ShareDb.DB {
     options: any,
     callback: (error: unknown, data?: unknown) => void
   ) {
-    this.logger.log(`getOps: ${collection}, ${id}, ${from}, ${to}`);
+    const time = Date.now();
     let callbackCalled = false;
     const safeCallback = (error: unknown, data?: unknown) => {
       if (callbackCalled) {
@@ -343,6 +343,9 @@ export class ShareDbAdapter extends ShareDb.DB {
       const { data } = snapshotData[0];
 
       if (type === RawOpType.Create) {
+        this.logger.log(
+          `getOps create: ${collection}, ${id}, ${from}, ${to}, ${Date.now() - time}ms`
+        );
         safeCallback(null, [
           {
             ...baseRaw,
@@ -363,6 +366,7 @@ export class ShareDbAdapter extends ShareDb.DB {
           op: editOp,
         } as IEditOp;
       });
+      this.logger.log(`getOps edit: ${collection}, ${id}, ${from}, ${to}, ${Date.now() - time}ms`);
       safeCallback(null, editOps);
     } catch (err) {
       this.logger.error(err);
