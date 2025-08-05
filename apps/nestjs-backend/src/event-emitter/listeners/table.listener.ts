@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { IdPrefix, TableOpBuilder } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectModel } from 'nest-knexjs';
@@ -46,7 +45,6 @@ export class TableListener {
     }
 
     const tableId = await this.getTableId(event);
-    this.logger.log(`handleTableLastModifiedTimeEvent: ${tableId}`);
     if (!tableId) {
       return;
     }
@@ -55,45 +53,15 @@ export class TableListener {
       where: { id: tableId, deletedTime: null },
       data: {
         lastModifiedTime,
-        version: {
-          increment: 1,
-        },
       },
       select: {
         baseId: true,
         lastModifiedTime: true,
-        version: true,
       },
     });
     if (!updatedTable) {
       return;
     }
-    const collection = `${IdPrefix.Table}_${updatedTable.baseId}`;
-    const baseRaw = {
-      src: this.cls.getId() || 'unknown',
-      seq: 1,
-      m: {
-        ts: Date.now(),
-      },
-    };
-
-    await this.shareDbService.publishOpsMap([
-      {
-        [collection]: {
-          [tableId]: {
-            ...baseRaw,
-            op: [
-              TableOpBuilder.editor.setTableProperty.build({
-                key: 'lastModifiedTime',
-                newValue: lastModifiedTime,
-                oldValue: null,
-              }),
-            ],
-            v: updatedTable.version - 1,
-          },
-        },
-      },
-    ]);
   }
 
   private async getTableId(event: ITableLastModifiedTimeEvent) {
