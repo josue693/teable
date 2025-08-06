@@ -305,8 +305,8 @@ export class ShareDbAdapter extends ShareDb.DB {
         return;
       }
       callbackCalled = true;
-      this.logger.log(
-        `getOps callback: ${collection}, ${id}, ${from}, ${to}, ${data ? JSON.stringify(data[data.length - 1]) : ''}`
+      console.log(
+        `getOps callback: ${collection}, ${id}, ${from}, ${to}, ${data ? JSON.stringify(data[data.length - 1]) : ''}, ${data ? data.length : 0}`
       );
       callback(error, data);
     };
