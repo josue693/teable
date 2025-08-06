@@ -296,7 +296,6 @@ export class ShareDbAdapter extends ShareDb.DB {
   ) {
     if (!from) from = 0;
     let callbackCalled = false;
-    console.log('getOps', collection, id, from, to);
     const safeCallback = (error: unknown, data?: unknown[]) => {
       if (callbackCalled) {
         this.logger.error(
@@ -305,9 +304,6 @@ export class ShareDbAdapter extends ShareDb.DB {
         return;
       }
       callbackCalled = true;
-      console.log(
-        `getOps callback: ${collection}, ${id}, ${from}, ${to}, ${data ? JSON.stringify(data[data.length - 1]) : ''}, ${data ? data.length : 0}`
-      );
       callback(error, data);
     };
     try {

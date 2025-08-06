@@ -312,7 +312,7 @@ export class TableService implements IReadonlyAdapterService {
   }
 
   async getSnapshot(baseId: string, id: string): Promise<ISnapshotBase<ITableVo> | undefined> {
-    const table = await this.prismaService.txClient().tableMeta.findFirst({
+    const table = await this.prismaService.tableMeta.findFirst({
       where: { baseId, id: id, deletedTime: null },
     });
     if (!table) {
