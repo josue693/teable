@@ -32,6 +32,7 @@ export class ShareDbService extends ShareDBClass {
       presence: true,
       doNotForwardSendPresenceErrorsToClient: true,
       db: shareDbAdapter,
+      maxSubmitRetries: 1,
     });
 
     const { provider, redis } = this.cacheConfig;

@@ -24,7 +24,6 @@ import { exceptionParse } from '../utils/exception-parse';
 import {
   RawOpType,
   type ICreateOp,
-  type IDeleteOp,
   type IEditOp,
   type IShareDbReadonlyAdapterService,
 } from './interface';
@@ -127,14 +126,12 @@ export class ShareDbAdapter extends ShareDb.DB {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     callback: (error: any | null, ids: string[], extra?: any) => void
   ) {
-    const { cookie, shareId } = this.getCookieAndShareId(options);
     try {
       await this.cls.runWith(
         {
-          ...this.cls.get(),
-          cookie,
-          shareViewId: shareId,
-        },
+          cookie: options.cookie,
+          shareViewId: options.shareId,
+        } as IClsStore,
         async () => {
           const [docType, collectionId] = collection.split('_');
           const queryResult = await this.getReadonlyService(docType as IdPrefix).getDocIdsByQuery(
@@ -232,13 +229,11 @@ export class ShareDbAdapter extends ShareDb.DB {
     options: any,
     callback: (err: unknown, data?: Snapshot) => void
   ) {
-    const { cookie, shareId } = this.getCookieAndShareId(options);
     await this.cls.runWith(
       {
-        ...this.cls.get(),
-        cookie,
-        shareViewId: shareId,
-      },
+        cookie: options.agentCustom.cookie,
+        shareViewId: options.agentCustom.shareId,
+      } as IClsStore,
       async () => {
         return this.getSnapshotBulk(collection, [id], projection, options, (err, data) => {
           if (err) {
@@ -264,10 +259,9 @@ export class ShareDbAdapter extends ShareDb.DB {
     const { cookie, shareId } = this.getCookieAndShareId(options);
     return await this.cls.runWith(
       {
-        ...this.cls.get(),
         cookie,
         shareViewId: shareId,
-      },
+      } as IClsStore,
       async () => {
         return await this.getReadonlyService(docType as IdPrefix).getSnapshotBulk(collectionId, [
           id,
@@ -313,20 +307,8 @@ export class ShareDbAdapter extends ShareDb.DB {
         docType as IdPrefix
       ).getVersionAndType(collectionId, id);
 
-      const baseRaw = {
-        src: getRandomString(36).toLowerCase(),
-        seq: 1,
-        v: version,
-      };
-
       if (type === RawOpType.Del) {
-        safeCallback(null, [
-          {
-            ...baseRaw,
-            v: version < 0 ? from : version,
-            del: true,
-          } as IDeleteOp,
-        ]);
+        safeCallback(null, []);
         return;
       }
 
@@ -334,6 +316,12 @@ export class ShareDbAdapter extends ShareDb.DB {
         safeCallback(null, []);
         return;
       }
+
+      const baseRaw = {
+        src: getRandomString(36).toLowerCase(),
+        seq: 1,
+        v: version,
+      };
 
       const snapshotData = await this.getSnapshotData(
         docType as IdPrefix,

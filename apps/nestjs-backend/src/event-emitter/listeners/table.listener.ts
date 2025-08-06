@@ -3,9 +3,6 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectModel } from 'nest-knexjs';
-import { ClsService } from 'nestjs-cls';
-import { ShareDbService } from '../../share-db/share-db.service';
-import type { IClsStore } from '../../types/cls';
 import { isSQLite } from '../../utils/db-helpers';
 import type {
   FieldCreateEvent,
@@ -31,8 +28,6 @@ export class TableListener {
 
   constructor(
     private readonly prismaService: PrismaService,
-    private readonly shareDbService: ShareDbService,
-    private readonly cls: ClsService<IClsStore>,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex
   ) {}
 
@@ -45,6 +40,7 @@ export class TableListener {
     }
 
     const tableId = await this.getTableId(event);
+    this.logger.log(`handleTableLastModifiedTimeEvent: ${event.name}, ${tableId}`);
     if (!tableId) {
       return;
     }

@@ -82,7 +82,7 @@ export class RecordReadonlyServiceAdapter
     }
     return this.prismaService
       .$queryRawUnsafe<
-        { version: number; deletedTime: Date | null }[]
+        { version: number }[]
       >(this.knex(table.dbTableName).select('__version as version').where('__id', recordId).toQuery())
       .then((res) => {
         return this.formatVersionAndType(res[0]);

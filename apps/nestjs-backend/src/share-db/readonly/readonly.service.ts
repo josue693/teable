@@ -18,7 +18,7 @@ export class ReadonlyService {
     });
   }
 
-  formatVersionAndType(record?: { version: number; deletedTime: Date | null } | null): {
+  formatVersionAndType(record?: { version: number; deletedTime?: Date | null } | null): {
     version: number;
     type: RawOpType;
   } {
