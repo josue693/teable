@@ -6,7 +6,13 @@ import type {
   IRecord,
   ITablePropertyKey,
 } from '@teable/core';
-import { FieldOpBuilder, IdPrefix, RecordOpBuilder, TableOpBuilder } from '@teable/core';
+import {
+  FieldOpBuilder,
+  getRandomString,
+  IdPrefix,
+  RecordOpBuilder,
+  TableOpBuilder,
+} from '@teable/core';
 import type { ITableVo } from '@teable/openapi';
 import { ClsService } from 'nestjs-cls';
 import type { CreateOp, DeleteOp, EditOp } from 'sharedb';
@@ -289,9 +295,9 @@ export class ShareDbAdapter extends ShareDb.DB {
     callback: (error: unknown, data?: unknown) => void
   ) {
     if (!from) from = 0;
-    const time = Date.now();
     let callbackCalled = false;
-    const safeCallback = (error: unknown, data?: unknown) => {
+    console.log('getOps', collection, id, from, to);
+    const safeCallback = (error: unknown, data?: unknown[]) => {
       if (callbackCalled) {
         this.logger.error(
           `Attempted to call callback multiple times for collection: ${collection}, id: ${id}`
@@ -299,6 +305,9 @@ export class ShareDbAdapter extends ShareDb.DB {
         return;
       }
       callbackCalled = true;
+      this.logger.log(
+        `getOps callback: ${collection}, ${id}, ${from}, ${to}, ${data ? JSON.stringify(data[data.length - 1]) : ''}`
+      );
       callback(error, data);
     };
     try {
@@ -309,11 +318,8 @@ export class ShareDbAdapter extends ShareDb.DB {
       ).getVersionAndType(collectionId, id);
 
       const baseRaw = {
-        src: this.cls.getId() || 'unknown',
+        src: getRandomString(36).toLowerCase(),
         seq: 1,
-        m: {
-          ts: Date.now(),
-        },
         v: version,
       };
 
@@ -347,9 +353,6 @@ export class ShareDbAdapter extends ShareDb.DB {
       const { data } = snapshotData[0];
 
       if (type === RawOpType.Create) {
-        this.logger.log(
-          `getOps create: ${collection}, ${id}, ${from}, ${to}, version: ${version}, ${Date.now() - time}ms`
-        );
         safeCallback(null, [
           {
             ...baseRaw,
@@ -371,9 +374,6 @@ export class ShareDbAdapter extends ShareDb.DB {
           op: editOp,
         } as IEditOp;
       });
-      this.logger.log(
-        `getOps edit: ${collection}, ${id}, ${from}, ${to}, version: ${version}, ${Date.now() - time}ms ${editOps.length}`
-      );
       safeCallback(null, editOps);
     } catch (err) {
       this.logger.error(err);
