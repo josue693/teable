@@ -17,10 +17,10 @@ export interface IReadonlyAdapterService {
 
 export interface IShareDbReadonlyAdapterService extends IReadonlyAdapterService {
   // get current version and type of the document
-  getVersionAndType(
-    collectionId: string,
-    docId: string
-  ): Promise<{ version: number; type: RawOpType }>;
+  // getVersionAndType(
+  //   collectionId: string,
+  //   docId: string
+  // ): Promise<{ version: number; type: RawOpType }>;
 }
 
 export interface IAdapterService {

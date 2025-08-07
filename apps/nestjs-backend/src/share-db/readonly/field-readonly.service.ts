@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import type { IGetFieldsQuery } from '@teable/core';
-import { PrismaService } from '@teable/db-main-prisma';
 import { ClsService } from 'nestjs-cls';
 import type { IClsStore } from '../../types/cls';
 import { type IShareDbReadonlyAdapterService } from '../interface';
@@ -11,10 +10,7 @@ export class FieldReadonlyServiceAdapter
   extends ReadonlyService
   implements IShareDbReadonlyAdapterService
 {
-  constructor(
-    private readonly cls: ClsService<IClsStore>,
-    private readonly prismaService: PrismaService
-  ) {
+  constructor(private readonly cls: ClsService<IClsStore>) {
     super(cls);
   }
 
@@ -49,20 +45,20 @@ export class FieldReadonlyServiceAdapter
       .then((res) => res.data);
   }
 
-  getVersionAndType(tableId: string, fieldId: string) {
-    return this.prismaService.field
-      .findUnique({
-        where: {
-          id: fieldId,
-          tableId,
-        },
-        select: {
-          version: true,
-          deletedTime: true,
-        },
-      })
-      .then((res) => {
-        return this.formatVersionAndType(res);
-      });
-  }
+  // getVersionAndType(tableId: string, fieldId: string) {
+  //   return this.prismaService.field
+  //     .findUnique({
+  //       where: {
+  //         id: fieldId,
+  //         tableId,
+  //       },
+  //       select: {
+  //         version: true,
+  //         deletedTime: true,
+  //       },
+  //     })
+  //     .then((res) => {
+  //       return this.formatVersionAndType(res);
+  //     });
+  // }
 }
