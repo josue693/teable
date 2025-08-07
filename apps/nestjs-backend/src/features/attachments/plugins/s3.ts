@@ -3,6 +3,7 @@
 import { join, resolve } from 'path';
 import type { Readable } from 'stream';
 import {
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
