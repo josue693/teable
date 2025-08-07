@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/naming-convention */
-module '@teamwork/websocket-json-stream' {
+declare module '@teamwork/websocket-json-stream' {
   import { Duplex } from 'stream';
   import type WebSocket from 'ws';
 
