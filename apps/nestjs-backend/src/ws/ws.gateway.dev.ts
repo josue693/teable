@@ -70,7 +70,7 @@ export class DevWsGateway implements OnModuleInit, OnModuleDestroy {
         }),
 
         new Promise((resolve) => {
-          this.server?.close((err) => {
+          this.server.close((err) => {
             if (err) {
               this.logger.error('DevWsGateway close error', err?.stack);
             } else {

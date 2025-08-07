@@ -19,7 +19,7 @@ export const SpaceLayout: React.FC<{
 }> = ({ children, user, dehydratedState }) => {
   const sdkLocale = useSdkLocale();
   const { i18n } = useTranslation();
-
+  console.log('space layout');
   return (
     <AppLayout>
       <SpacePageTitle dehydratedState={dehydratedState} />
