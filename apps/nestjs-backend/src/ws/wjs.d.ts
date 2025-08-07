@@ -4,7 +4,7 @@ declare module '@teamwork/websocket-json-stream' {
   import { Duplex } from 'stream';
   import type WebSocket from 'ws';
 
-  class WebSocketJSONStream extends Duplex {
+  declare class WebSocketJSONStream extends Duplex {
     private _emittedClose;
     private ws;
     constructor(ws: WebSocket);

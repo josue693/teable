@@ -220,11 +220,7 @@ export class ImportTableCsvChunkQueueProcessor extends WorkerHost {
     const { path } = await this.storageAdapter.uploadFile(
       bucket,
       `${pathDir}/${jobId}/${tableId}_[${range[0]},${range[1]}].csv`,
-      csvStream,
-      {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        'Content-Type': 'text/csv',
-      }
+      csvStream
     );
 
     const chunkJobId = this.importTableCsvQueueProcessor.getChunkImportJobId(jobId, range);
