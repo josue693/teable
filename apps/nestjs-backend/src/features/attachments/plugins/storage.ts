@@ -28,5 +28,5 @@ export const storageAdapterProvider: Provider = {
         throw new Error('Invalid storage provider');
     }
   },
-  inject: [storageConfig.KEY, baseConfig.KEY, CacheService, ClsService],
+  inject: [storageConfig.KEY, baseConfig.KEY, CacheService],
 };
