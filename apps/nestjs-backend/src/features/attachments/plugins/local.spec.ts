@@ -9,8 +9,6 @@ import * as fse from 'fs-extra';
 import { vi } from 'vitest';
 import { CacheService } from '../../../cache/cache.service';
 import type { IAttachmentLocalTokenCache } from '../../../cache/types';
-import { baseConfig } from '../../../configs/base.config';
-import { storageConfig } from '../../../configs/storage';
 import { GlobalModule } from '../../../global/global.module';
 import { LocalStorage } from './local';
 import { StorageModule } from './storage.module';
@@ -65,11 +63,11 @@ describe('LocalStorage', () => {
           useValue: mockCacheService,
         },
         {
-          provide: storageConfig.KEY,
+          provide: 'STORAGE_CONFIG',
           useValue: mockConfig,
         },
         {
-          provide: baseConfig.KEY,
+          provide: 'BASE_CONFIG',
           useValue: mockBaseConfig,
         },
       ],
@@ -173,11 +171,7 @@ describe('LocalStorage', () => {
       vi.spyOn(fs, 'createWriteStream').mockReturnValue({
         write: vi.fn(),
         end: vi.fn(),
-        on: vi.fn().mockImplementation((event, callback) => {
-          if (event === 'finish') {
-            callback();
-          }
-        }),
+        on: vi.fn(),
       } as any);
       mockRequest.on.mockImplementation((event, callback) => {
         if (event === 'data') {
