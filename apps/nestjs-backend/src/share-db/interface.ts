@@ -15,7 +15,7 @@ export interface IReadonlyAdapterService {
   ): Promise<{ ids: string[]; extra?: unknown }>;
 }
 
-export interface IAdapterService {
+export interface IAdapterService extends IReadonlyAdapterService {
   create(collectionId: string, snapshot: unknown): Promise<void>;
 
   del(version: number, collectionId: string, docId: string): Promise<void>;
