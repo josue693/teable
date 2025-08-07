@@ -44,21 +44,4 @@ export class FieldReadonlyServiceAdapter
       })
       .then((res) => res.data);
   }
-
-  // getVersionAndType(tableId: string, fieldId: string) {
-  //   return this.prismaService.field
-  //     .findUnique({
-  //       where: {
-  //         id: fieldId,
-  //         tableId,
-  //       },
-  //       select: {
-  //         version: true,
-  //         deletedTime: true,
-  //       },
-  //     })
-  //     .then((res) => {
-  //       return this.formatVersionAndType(res);
-  //     });
-  // }
 }
