@@ -3,7 +3,6 @@ import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { ExpressInstrumentation, ExpressLayerType } from '@opentelemetry/instrumentation-express';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
-import { NestInstrumentation } from '@opentelemetry/instrumentation-nestjs-core';
 import { PinoInstrumentation } from '@opentelemetry/instrumentation-pino';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import * as opentelemetry from '@opentelemetry/sdk-node';
@@ -75,7 +74,6 @@ const otelSDK = new opentelemetry.NodeSDK({
     new ExpressInstrumentation({
       ignoreLayersType: [ExpressLayerType.MIDDLEWARE, ExpressLayerType.REQUEST_HANDLER],
     }),
-    new NestInstrumentation(),
     new PrismaInstrumentation(),
     new PinoInstrumentation(),
   ],

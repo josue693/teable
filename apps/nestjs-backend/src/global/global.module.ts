@@ -1,6 +1,6 @@
 import type { DynamicModule, MiddlewareConsumer, ModuleMetadata, NestModule } from '@nestjs/common';
 import { Global, Module } from '@nestjs/common';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD } from '@nestjs/core';
 import { context, trace } from '@opentelemetry/api';
 import { PrismaModule } from '@teable/db-main-prisma';
 import type { Request } from 'express';
@@ -15,7 +15,6 @@ import { AuthGuard } from '../features/auth/guard/auth.guard';
 import { PermissionGuard } from '../features/auth/guard/permission.guard';
 import { PermissionModule } from '../features/auth/permission.module';
 import { RequestInfoMiddleware } from '../middleware/request-info.middleware';
-import { RouteTracingInterceptor } from '../tracing/route-tracing.interceptor';
 import { KnexModule } from './knex';
 
 const globalModules = {
@@ -55,10 +54,6 @@ const globalModules = {
     {
       provide: APP_GUARD,
       useClass: PermissionGuard,
-    },
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: RouteTracingInterceptor,
     },
   ],
   exports: [DbProvider],
