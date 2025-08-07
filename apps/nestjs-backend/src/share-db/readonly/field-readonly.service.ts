@@ -2,13 +2,13 @@ import { Injectable } from '@nestjs/common';
 import type { IGetFieldsQuery } from '@teable/core';
 import { ClsService } from 'nestjs-cls';
 import type { IClsStore } from '../../types/cls';
-import { type IShareDbReadonlyAdapterService } from '../interface';
+import type { IReadonlyAdapterService } from '../interface';
 import { ReadonlyService } from './readonly.service';
 
 @Injectable()
 export class FieldReadonlyServiceAdapter
   extends ReadonlyService
-  implements IShareDbReadonlyAdapterService
+  implements IReadonlyAdapterService
 {
   constructor(private readonly cls: ClsService<IClsStore>) {
     super(cls);

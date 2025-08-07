@@ -1,14 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import type { IClsStore } from '../../types/cls';
-import type { IShareDbReadonlyAdapterService } from '../interface';
+import type { IReadonlyAdapterService } from '../interface';
 import { ReadonlyService } from './readonly.service';
 
 @Injectable()
-export class ViewReadonlyServiceAdapter
-  extends ReadonlyService
-  implements IShareDbReadonlyAdapterService
-{
+export class ViewReadonlyServiceAdapter extends ReadonlyService implements IReadonlyAdapterService {
   constructor(private readonly cls: ClsService<IClsStore>) {
     super(cls);
   }

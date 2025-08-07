@@ -15,8 +15,6 @@ export interface IReadonlyAdapterService {
   ): Promise<{ ids: string[]; extra?: unknown }>;
 }
 
-export type IShareDbReadonlyAdapterService = IReadonlyAdapterService;
-
 export interface IAdapterService {
   create(collectionId: string, snapshot: unknown): Promise<void>;
 
