@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 import type { Provider } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { ClsService } from 'nestjs-cls';
 import { CacheService } from '../../../cache/cache.service';
 import { baseConfig, type IBaseConfig } from '../../../configs/base.config';
 import type { IStorageConfig } from '../../../configs/storage';
