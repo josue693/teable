@@ -1,12 +1,10 @@
-import { BadRequestException, Logger } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { createAxios } from '@teable/openapi';
 import type { ClsService } from 'nestjs-cls';
 import type { IClsStore } from '../../types/cls';
 import { RawOpType } from '../interface';
 
 export class ReadonlyService {
-  private readonly logger = new Logger(ReadonlyService.name);
-
   protected axios;
   constructor(clsService: ClsService<IClsStore>) {
     this.axios = createAxios();
