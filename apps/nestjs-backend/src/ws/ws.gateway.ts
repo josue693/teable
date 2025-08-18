@@ -24,7 +24,10 @@ export class WsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayD
     this.logger.log('WsGateway afterInit');
     server.on('connection', async (webSocket, request: Request) => {
       try {
-        this.logger.log('ws:on:connection');
+        this.logger.log(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          `ws:on:connection, total agents: ${(this.shareDb as any)?.agentsCount}, remote agents: ${(this.shareDb as any)?.remoteAgentsCount}`
+        );
         const stream = new WebSocketJSONStream(webSocket);
         this.shareDb.listen(stream, request);
       } catch (error) {

@@ -20,8 +20,15 @@ export class DevWsGateway implements OnModuleInit, OnModuleDestroy {
 
   handleConnection = async (webSocket: WebSocket, request: Request) => {
     this.logger.log('ws:on:connection');
+    this.logger.log(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      `ws:on:connection, total agents: ${(this.shareDb as any)?.agentsCount}, remote agents: ${(this.shareDb as any)?.remoteAgentsCount}`
+    );
     try {
       const stream = new WebSocketJSONStream(webSocket);
+      stream.on('close', () => {
+        this.logger.log('ws:on:close');
+      });
       this.shareDb.listen(stream, request);
     } catch (error) {
       webSocket.send(JSON.stringify({ error }));
