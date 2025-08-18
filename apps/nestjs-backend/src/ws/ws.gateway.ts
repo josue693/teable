@@ -6,7 +6,7 @@ import type { Request } from 'express';
 import type { Server } from 'ws';
 import { ShareDbService } from '../share-db/share-db.service';
 
-@WebSocketGateway({ path: '/socket', perMessageDeflate: true })
+@WebSocketGateway({ path: '/socket' })
 export class WsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   private logger = new Logger(WsGateway.name);
 
