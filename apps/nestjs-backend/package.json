@@ -140,7 +140,7 @@
     "@nestjs/jwt": "10.2.0",
     "@nestjs/passport": "10.0.3",
     "@nestjs/platform-express": "10.3.5",
-    "@nestjs/platform-ws": "10.3.5",
+    "@nestjs/platform-ws": "10.4.10",
     "@nestjs/swagger": "7.3.0",
     "@nestjs/terminus": "10.2.3",
     "@nestjs/websockets": "10.3.5",
