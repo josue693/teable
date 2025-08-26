@@ -80,6 +80,7 @@ export class DateFieldCore extends FieldCore {
     }
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   convertStringToCellValue(value: string): string | null {
     if (this.isLookup) {
       return null;
@@ -103,6 +104,11 @@ export class DateFieldCore extends FieldCore {
       } catch {
         // ignore
       }
+    }
+
+    const dayjsObj = dayjs(value);
+    if (dayjsObj.isValid() && dayjsObj.toISOString() === value) {
+      return value;
     }
 
     const formatted = this.parseUsingFieldFormatting(value);
