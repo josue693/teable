@@ -44,8 +44,7 @@ export class AggregationFunctionPostgres extends AbstractAggregationFunction {
     return this.knex
       .raw(
         `SUM(COALESCE((SELECT SUM((e.value ->> 'size')::INTEGER)
-          FROM jsonb_array_elements((??)::jsonb) AS e), 0))`,
-        [this.tableColumnRef]
+          FROM jsonb_array_elements(COALESCE(${this.tableColumnRef}, '[]'::jsonb)) AS e), 0))`
       )
       .toQuery();
   }
