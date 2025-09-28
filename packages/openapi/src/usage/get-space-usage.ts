@@ -41,6 +41,7 @@ export enum UsageFeatureLimit {
   ChatAIEnable = 'chatAIEnable',
   AppEnable = 'appEnable',
   CustomDomainEnable = 'customDomainEnable',
+  SpaceAIConfigEnable = 'spaceAIConfigEnable',
 }
 
 export const usageFeatureLimitSchema = z.object({
@@ -66,6 +67,7 @@ export const usageFeatureLimitSchema = z.object({
   [UsageFeatureLimit.ChatAIEnable]: z.boolean(),
   [UsageFeatureLimit.AppEnable]: z.boolean(),
   [UsageFeatureLimit.CustomDomainEnable]: z.boolean(),
+  [UsageFeatureLimit.SpaceAIConfigEnable]: z.boolean(),
 });
 
 export const usageVoSchema = z.object({
