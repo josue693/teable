@@ -18,7 +18,7 @@ export abstract class IndexBuilderAbstract {
 
   abstract createSingleIndexSql(dbTableName: string, field: IFieldInstance): string | null;
 
-  abstract getIndexInfoSql(dbTableName: string): string;
+  abstract getIndexInfoSql(dbTableName: string, baseId: string): string;
 
   abstract getAbnormalIndex(
     dbTableName: string,

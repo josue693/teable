@@ -168,11 +168,11 @@ export class TableIndexService {
   async getIndexInfo(tableId: string) {
     const tableRaw = await this.prismaService.txClient().tableMeta.findFirstOrThrow({
       where: { id: tableId, deletedTime: null },
-      select: { dbTableName: true },
+      select: { dbTableName: true, baseId: true },
     });
-    const { dbTableName } = tableRaw;
+    const { dbTableName, baseId } = tableRaw;
 
-    const sql = this.dbProvider.searchIndex().getIndexInfoSql(dbTableName);
+    const sql = this.dbProvider.searchIndex().getIndexInfoSql(dbTableName, baseId);
     return this.prismaService.$queryRawUnsafe<unknown[]>(sql);
   }
 

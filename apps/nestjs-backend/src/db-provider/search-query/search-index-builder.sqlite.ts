@@ -105,7 +105,7 @@ export class IndexBuilderSqlite extends IndexBuilderAbstract {
     return NO_OPERATION_SQL;
   }
 
-  getIndexInfoSql(dbTableName: string): string {
+  getIndexInfoSql(dbTableName: string, baseId: string): string {
     return NO_OPERATION_SQL;
   }
 

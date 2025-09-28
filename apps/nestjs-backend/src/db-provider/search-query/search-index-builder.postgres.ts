@@ -179,13 +179,15 @@ export class IndexBuilderPostgres extends IndexBuilderAbstract {
     `;
   }
 
-  getIndexInfoSql(dbTableName: string): string {
+  getIndexInfoSql(dbTableName: string, baseId: string): string {
     const [, table] = dbTableName.split('.');
     const searchFactor = this.getSearchFactor();
     return `
-    SELECT * FROM pg_indexes 
-WHERE tablename = '${table}'
-AND indexname like '${searchFactor}%'`;
+      SELECT * FROM pg_indexes 
+      WHERE tablename = '${table}'
+      AND indexname like '${searchFactor}%'
+      AND schemaname = '${baseId}'
+    `;
   }
 
   getAbnormalIndex(dbTableName: string, fields: IFieldInstance[], existingIndex: IPgIndex[]) {

@@ -12,6 +12,7 @@ import {
   deleteField,
   updateField,
   convertField,
+  createBase,
 } from '@teable/openapi';
 import { differenceWith } from 'lodash';
 import type { IFieldInstance } from '../src/features/field/model/factory';
@@ -36,10 +37,18 @@ const getSearchIndexName = (tableDbName: string, dbFieldName: string, fieldId: s
 describe('OpenAPI Record-Search-Query (e2e)', async () => {
   let app: INestApplication;
   const baseId = globalThis.testConfig.baseId;
+  let baseId2: string;
 
   beforeAll(async () => {
     const appCtx = await initApp();
     app = appCtx.app;
+    const base2 = (
+      await createBase({
+        name: 'base2',
+        spaceId: globalThis.testConfig.spaceId,
+      })
+    ).data;
+    baseId2 = base2.id;
   });
 
   afterAll(async () => {
@@ -385,6 +394,30 @@ describe('OpenAPI Record-Search-Query (e2e)', async () => {
         );
         const result2 = await getTableAbnormalIndex(baseId, table.id, TableIndex.search);
         expect(result2.data.length).toBe(0);
+      });
+
+      it.only('should get according index info when system exist same dbTableName', async () => {
+        const table2 = await createTable(baseId2, {
+          name: 'record_query_x_20_2',
+          dbTableName: table.dbTableName?.split('.').pop() as string,
+        });
+        await toggleTableIndex(baseId, table.id, { type: TableIndex.search });
+        await toggleTableIndex(baseId2, table2.id, { type: TableIndex.search });
+        const indexLength = table.fields?.filter(
+          ({ cellValueType }) =>
+            ![CellValueType.Boolean, CellValueType.DateTime].includes(cellValueType)
+        ).length;
+        const tableIndexService = await getTableIndexService(app);
+        const index = (await tableIndexService.getIndexInfo(table.id)) as { indexname: string }[];
+        const index2 = (await tableIndexService.getIndexInfo(table2.id)) as { indexname: string }[];
+
+        expect(index.length).toBe(indexLength);
+        expect(index2.length).toBe(
+          table2.fields?.filter(
+            ({ cellValueType }) =>
+              ![CellValueType.Boolean, CellValueType.DateTime].includes(cellValueType)
+          ).length
+        );
       });
     }
   );
