@@ -259,14 +259,21 @@ export class LocalAuthService {
     return res;
   }
 
-  async sendSignupVerificationCode(email: string, turnstileToken?: string, remoteIp?: string) {
+  async sendSignupVerificationCodeWithTurnstile(
+    email: string,
+    turnstileToken?: string,
+    remoteIp?: string
+  ) {
     this.logger.log(
       `Send verification code attempt - email: ${email}, hasTurnstileToken: ${!!turnstileToken}, tokenLength: ${turnstileToken?.length}, remoteIp: ${remoteIp}`
     );
 
     // Validate Turnstile token if enabled
     await this.validateTurnstileIfEnabled(turnstileToken, remoteIp);
+    return this.sendSignupVerificationCode(email);
+  }
 
+  async sendSignupVerificationCode(email: string) {
     // Check rate limit: ensure interval between emails for the same address
     // Backend rate limit is configured limit - 2 seconds (to account for network latency)
     // If configured limit is 0, skip rate limiting entirely
@@ -278,9 +285,7 @@ export class LocalAuthService {
       const existingRateLimit = await this.cacheService.get(rateLimitKey);
 
       if (existingRateLimit) {
-        this.logger.warn(
-          `Signup verification rate limit exceeded - email: ${email}, remoteIp: ${remoteIp}, timestamp: ${new Date().toISOString()}`
-        );
+        this.logger.warn(`Signup verification rate limit exceeded - email: ${email}`);
         throw new BadRequestException(
           `Please wait ${configuredLimit} seconds before requesting a new code`
         );
@@ -299,7 +304,7 @@ export class LocalAuthService {
 
     // Log verification code sending
     this.logger.log(
-      `Sending signup verification code - email: ${email}, remoteIp: ${remoteIp}, timestamp: ${new Date().toISOString()}, turnstileVerified: ${!!turnstileToken}`
+      `Sending signup verification code - email: ${email}, timestamp: ${new Date().toISOString()}`
     );
 
     const emailOptions = await this.mailSenderService.sendEmailVerifyCodeEmailOptions({

@@ -123,7 +123,11 @@ export class LocalAuthController {
     const remoteIp =
       req.ip || req.connection.remoteAddress || (req.headers['x-forwarded-for'] as string);
 
-    return this.authService.sendSignupVerificationCode(body.email, body.turnstileToken, remoteIp);
+    return this.authService.sendSignupVerificationCodeWithTurnstile(
+      body.email,
+      body.turnstileToken,
+      remoteIp
+    );
   }
 
   @Patch('/change-password')
