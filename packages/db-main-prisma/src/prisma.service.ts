@@ -39,7 +39,7 @@ export class PrismaService
 {
   private readonly logger = new Logger(PrismaService.name);
 
-  private afterTxCb?: () => void;
+  private afterTxCb?: () => Promise<void>;
 
   constructor(private readonly cls: ClsService<{ tx: ITx }>) {
     const logConfig = {
@@ -67,7 +67,7 @@ export class PrismaService
     super(initialConfig);
   }
 
-  bindAfterTransaction(fn: () => void) {
+  bindAfterTransaction(fn: () => Promise<void>) {
     this.afterTxCb = fn;
   }
 
@@ -108,7 +108,7 @@ export class PrismaService
           this.cls.set('tx.timeStr', undefined);
         }
       }, options);
-      this.afterTxCb?.();
+      await this.afterTxCb?.();
     });
 
     return result;
