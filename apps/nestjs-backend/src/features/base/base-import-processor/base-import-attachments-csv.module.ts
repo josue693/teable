@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EventJobModule } from '../../../event-emitter/event-job/event-job.module';
-import { conditionalQueueProcessorProviders } from '../../../utils/queue';
+import { conditionalQueueProcessorProviders, QueueConsumerType } from '../../../utils/queue';
 import { StorageModule } from '../../attachments/plugins/storage.module';
 import {
   BASE_IMPORT_ATTACHMENTS_CSV_QUEUE,
@@ -9,7 +9,10 @@ import {
 import { BaseImportAttachmentsCsvQueueProcessor } from './base-import-attachments-csv.processor';
 @Module({
   providers: [
-    ...conditionalQueueProcessorProviders(BaseImportAttachmentsCsvQueueProcessor),
+    ...conditionalQueueProcessorProviders({
+      consumer: QueueConsumerType.ImportExport,
+      providers: [BaseImportAttachmentsCsvQueueProcessor],
+    }),
     BaseImportAttachmentsCsvJob,
   ],
   imports: [EventJobModule.registerQueue(BASE_IMPORT_ATTACHMENTS_CSV_QUEUE), StorageModule],

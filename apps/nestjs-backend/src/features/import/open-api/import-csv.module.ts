@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { EventJobModule } from '../../../event-emitter/event-job/event-job.module';
 import { ShareDbModule } from '../../../share-db/share-db.module';
-import { conditionalQueueProcessorProviders } from '../../../utils/queue';
+import { conditionalQueueProcessorProviders, QueueConsumerType } from '../../../utils/queue';
 import { StorageModule } from '../../attachments/plugins/storage.module';
 import { NotificationModule } from '../../notification/notification.module';
 import { RecordOpenApiModule } from '../../record/open-api/record-open-api.module';
@@ -11,7 +11,10 @@ import { ImportTableCsvQueueProcessor } from './import-csv.processor';
 
 @Module({
   providers: [
-    ...conditionalQueueProcessorProviders(ImportTableCsvQueueProcessor),
+    ...conditionalQueueProcessorProviders({
+      consumer: QueueConsumerType.ImportExport,
+      providers: [ImportTableCsvQueueProcessor],
+    }),
     ImportTableCsvJob,
   ],
   imports: [

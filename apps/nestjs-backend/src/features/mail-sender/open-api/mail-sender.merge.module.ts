@@ -12,7 +12,12 @@ import { MailSenderMergeProcessor } from './mail-sender.merge.processor';
     EventJobModule.registerQueue(MAIL_SENDER_QUEUE),
     SettingOpenApiModule,
   ],
-  providers: [...conditionalQueueProcessorProviders(MailSenderMergeProcessor), MailSenderMergeJob],
+  providers: [
+    ...conditionalQueueProcessorProviders({
+      providers: [MailSenderMergeProcessor],
+    }),
+    MailSenderMergeJob,
+  ],
   exports: [MailSenderMergeJob],
 })
 export class MailSenderMergeModule {}
