@@ -906,7 +906,15 @@
     "username": "Username",
     "password": "Password",
     "sender": "Sender",
-    "senderName": "Sender Name"
+    "senderName": "Sender Name",
+    "subscribe": "Subscribe",
+    "unsubscribe": "Unsubscribe",
+    "unsubscribeList": "Unsubscribe List",
+    "processing": "Processing...",
+    "unsubscribeH1": "Do you want to unsubscribe from our mailing list?",
+    "unsubscribeH2": "You will no longer receive any subscription messages from us.",
+    "subscribeH1": "Do you want to subscribe to our mailing list?",
+    "subscribeH2": "You will receive any subscription messages from us."
   },
   "waitlist": {
     "title": "Waitlist",

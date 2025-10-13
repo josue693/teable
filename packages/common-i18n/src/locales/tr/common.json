@@ -470,7 +470,15 @@
     "username": "Kullanıcı Adı",
     "password": "Şifre",
     "sender": "Gönderen Adresi",
-    "senderName": "Gönderen Adı"
+    "senderName": "Gönderen Adı",
+    "subscribe": "Abone ol",
+    "unsubscribe": "Abonelikten çık",
+    "unsubscribeList": "Abonelikten çıkma listesi",
+    "processing": "İşleniyor...",
+    "unsubscribeH1": "Posta listemizden aboneliğinizi iptal etmek istiyor musunuz?",
+    "unsubscribeH2": "Artık bizden abonelik mesajları almayacaksınız.",
+    "subscribeH1": "Posta listemize abone olmak istiyor musunuz?",
+    "subscribeH2": "Bizden abonelik mesajları alacaksınız."
   },
   "waitlist": {
     "title": "Bekleme Listesi",

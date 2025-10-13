@@ -497,7 +497,15 @@
     "username": "Nome Utente",
     "password": "Password",
     "sender": "Indirizzo del Mittente",
-    "senderName": "Nome del Mittente"
+    "senderName": "Nome del Mittente",
+    "subscribe": "Iscriviti",
+    "unsubscribe": "Annulla iscrizione",
+    "unsubscribeList": "Lista di annullamento iscrizione",
+    "processing": "Elaborazione in corso...",
+    "unsubscribeH1": "Vuoi annullare l'iscrizione alla nostra mailing list?",
+    "unsubscribeH2": "Non riceverai più alcun messaggio di iscrizione da noi.",
+    "subscribeH1": "Vuoi iscriverti alla nostra mailing list?",
+    "subscribeH2": "Riceverai messaggi di iscrizione da noi."
   },
   "waitlist": {
     "title": "Lista d'attesa",

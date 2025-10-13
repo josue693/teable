@@ -453,7 +453,15 @@
     "username": "ユーザー名",
     "password": "パスワード",
     "sender": "送信者アドレス",
-    "senderName": "送信者名"
+    "senderName": "送信者名",
+    "subscribe": "購読",
+    "unsubscribe": "購読解除",
+    "unsubscribeList": "購読解除リスト",
+    "processing": "処理中...",
+    "unsubscribeH1": "メーリングリストの購読を解除しますか？",
+    "unsubscribeH2": "当社からの購読メッセージを受信しなくなります。",
+    "subscribeH1": "メーリングリストを購読しますか？",
+    "subscribeH2": "当社からの購読メッセージを受信します。"
   },
   "waitlist": {
     "title": "待機リスト",

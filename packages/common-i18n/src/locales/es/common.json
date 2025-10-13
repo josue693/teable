@@ -480,7 +480,15 @@
     "username": "Nombre de Usuario",
     "password": "Contraseña",
     "sender": "Dirección del Remitente",
-    "senderName": "Nombre del Remitente"
+    "senderName": "Nombre del Remitente",
+    "subscribe": "Suscribirse",
+    "unsubscribe": "Cancelar suscripción",
+    "unsubscribeList": "Lista de cancelar suscripción",
+    "processing": "Procesando...",
+    "unsubscribeH1": "¿Deseas cancelar tu suscripción a nuestra lista de correo?",
+    "unsubscribeH2": "Ya no recibirás ningún mensaje de suscripción de nosotros.",
+    "subscribeH1": "¿Deseas suscribirte a nuestra lista de correo?",
+    "subscribeH2": "Recibirás mensajes de suscripción de nosotros."
   },
   "waitlist": {
     "title": "Lista de espera",

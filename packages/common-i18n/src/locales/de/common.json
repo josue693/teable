@@ -500,7 +500,15 @@
     "username": "Benutzername",
     "password": "Passwort",
     "sender": "Absender-Adresse",
-    "senderName": "Absender-Name"
+    "senderName": "Absender-Name",
+    "subscribe": "Abonnieren",
+    "unsubscribe": "Abbestellen",
+    "unsubscribeList": "Abbestellliste",
+    "processing": "Verarbeitung...",
+    "unsubscribeH1": "Möchten Sie sich von unserer Mailingliste abmelden?",
+    "unsubscribeH2": "Sie erhalten keine Abonnement-Nachrichten mehr von uns.",
+    "subscribeH1": "Möchten Sie unsere Mailingliste abonnieren?",
+    "subscribeH2": "Sie erhalten Abonnement-Nachrichten von uns."
   },
   "waitlist": {
     "title": "Warteliste",

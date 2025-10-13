@@ -903,7 +903,15 @@
     "username": "用户名",
     "password": "密码",
     "sender": "发件人地址",
-    "senderName": "发件人名称"
+    "senderName": "发件人名称",
+    "subscribe": "订阅",
+    "unsubscribe": "取消订阅",
+    "unsubscribeList": "取消订阅列表",
+    "processing": "处理中...",
+    "unsubscribeH1": "您是否要取消订阅？",
+    "unsubscribeH2": "您将不再收到任何订阅消息",
+    "subscribeH1": "您是否要订阅？",
+    "subscribeH2": "您将收到任何订阅消息"
   },
   "waitlist": {
     "title": "等待列表",

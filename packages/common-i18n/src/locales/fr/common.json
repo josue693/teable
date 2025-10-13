@@ -432,7 +432,15 @@
     "username": "Nom d'utilisateur",
     "password": "Mot de passe",
     "sender": "Adresse de l'Expéditeur",
-    "senderName": "Nom de l'Expéditeur"
+    "senderName": "Nom de l'Expéditeur",
+    "subscribe": "S'abonner",
+    "unsubscribe": "Se désabonner",
+    "unsubscribeList": "Liste de désabonnement",
+    "processing": "Traitement en cours...",
+    "unsubscribeH1": "Voulez-vous vous désabonner de notre liste de diffusion ?",
+    "unsubscribeH2": "Vous ne recevrez plus aucun message d'abonnement de notre part.",
+    "subscribeH1": "Voulez-vous vous abonner à notre liste de diffusion ?",
+    "subscribeH2": "Vous recevrez des messages d'abonnement de notre part."
   },
   "waitlist": {
     "title": "Liste d'attente",
