@@ -54,7 +54,8 @@
   "editor": {
     "attachment": {
       "uploadDragOver": "Отпустите, чтобы загрузить файл",
-      "uploadDragDefault": "Вставьте или перетащите файл для загрузки сюда"
+      "uploadDragDefault": "Вставьте или перетащите файл для загрузки сюда",
+      "upload": "загрузить"
     },
     "date": {
       "placeholder": "Выберите дату",
@@ -78,7 +79,8 @@
         "generating": "Сгенерирование...",
         "generate": "Сгенерировать",
         "apply": "Применить"
-      }
+      },
+      "expressionRequired": "Выражение обязательно"
     },
     "link": {
       "placeholder": "Выберите записи для ссылки",
@@ -88,7 +90,12 @@
       "unselected": "Не выбрано",
       "selected": "Выбрано",
       "expandRecordError": "Нет доступа для просмотра этой записи.",
-      "goToForeignTable": "Перейти к связанной таблице"
+      "alreadyOpen": "Эта запись уже открыта.",
+      "goToForeignTable": "Перейти к связанной таблице",
+      "foreignTableIdRequired": "Внешняя таблица обязательна",
+      "linkFieldIdRequired": "Поле связи обязательно",
+      "selectTooManyRecords": "Выбранные записи не должны превышать {{maxCount}}",
+      "relationshipRequired": "Отношение обязательно"
     },
     "user": {
       "searchPlaceholder": "Найдите пользователей по имени",
@@ -105,7 +112,8 @@
       "refineOptionsError": "Ошибка парсинга опций поиска {{message}}"
     },
     "rollup": {
-      "expressionRequired": "Выражение обязательно"
+      "expressionRequired": "Выражение обязательно",
+      "unsupportedTip": "Rollup поддерживает только поля связи и rollup"
     },
     "aiConfig": {
       "modelKeyRequired": "Модель обязательна",
@@ -115,7 +123,8 @@
       "promptRequired": "Запрос обязателен"
     },
     "error": {
-      "refineOptionsError": "Ошибка парсинга опций поля {{message}}"
+      "refineOptionsError": "Ошибка парсинга опций поля {{message}}",
+      "optionsRequired": "Опции поля обязательны"
     }
   },
   "filter": {
@@ -809,6 +818,57 @@
     },
     "automation": {
       "buttonClickTriggerDuplicated": "Это поле кнопки уже связано с {{name}}[{{id}}] этот процесс автоматизации, пожалуйста, выберите другое поле кнопки"
+    },
+    "permission": {
+      "createRecordWithDeniedFields": "У вас нет разрешения на создание записей с полями({{fields}})",
+      "deleteRecords": "У вас нет разрешения на удаление записей({{recordIds}})",
+      "readRecordWithDeniedFields": "У вас нет разрешения на чтение полей({{fields}}) в записи({{recordId}})",
+      "updateRecordWithDeniedFields": "У вас нет разрешения на обновление полей({{fields}}) в записи({{recordId}})"
+    },
+    "field": {
+      "unsupportedFieldType": "Неподдерживаемый тип поля {{type}}",
+      "unsupportedPrimaryFieldType": "Неподдерживаемый тип поля {{type}} в качестве первичного поля",
+      "calculateRecordNotFound": "Запись не найдена для: {{value}}, fieldId: {{fieldId}}, при вычислении {{recordId}}",
+      "toRecordIdsOrFromRecordIdsRequired": "toRecordIds или fromRecordIds требуется для обычного вычисляемого поля",
+      "recordFieldsRequired": "Поля записи не определены",
+      "uniqueUnsupportedType": "Поле {{name}}[{{fieldId}}] не поддерживает проверку уникальности значения поля",
+      "notNullValidationWhenCreateField": "Поле {{name}}[{{fieldId}}] не поддерживает проверку не null при создании нового поля",
+      "dbFieldNameAlreadyExists": "Имя поля базы данных {{dbFieldName}} уже существует",
+      "fieldValidationError": "Поле {{name}}[{{fieldId}}] ошибка проверки поля",
+      "fieldNameAlreadyExists": "Имя поля {{name}} уже существует",
+      "fieldNotFound": "Поле {{fieldId}} не найдено",
+      "fieldNotFoundInTable": "Поле {{fieldId}} не найдено в таблице {{tableId}}",
+      "deleteFieldsNotFound": "Поля для удаления {{fieldIds}} не найдены в таблице {{tableId}}",
+      "lookupValuesShouldBeArray": "lookupValues должен быть массивом, когда поле связи имеет несколько значений ячейки",
+      "linkCellValuesShouldBeArray": "linkCellValues должен быть массивом, когда поле связи имеет несколько значений ячейки",
+      "lookupAndLinkLengthMatch": "Длина lookupValues должна быть такой же, как длина linkCellValues",
+      "cycleDetected": "Обнаружен цикл",
+      "cycleDetectedCreateField": "Обнаружен цикл, невозможно создать поле {{name}}[{{id}}]",
+      "recordMapNotFound": "Запись не найдена в таблице {{tableName}} для поля {{fieldName}}",
+      "forbidDeletePrimaryField": "Запрещено удалять первичное поле",
+      "foreignTableIdInvalid": "Внешняя таблица {{foreignTableId}} недействительна",
+      "relationshipInvalid": "Отношение {{relationship}} недействительно",
+      "linkFieldIdInvalid": "Поле связи {{linkFieldId}} недействительно",
+      "lookupFieldIdInvalid": "Поле поиска {{lookupFieldId}} недействительно",
+      "formulaExpressionParseError": "Ошибка разбора выражения формулы",
+      "formulaReferenceNotFound": "Поле ссылки формулы {{fieldIds}} не найдено",
+      "rollupExpressionParseError": "Ошибка разбора выражения сводки",
+      "choiceNameAlreadyExists": "Имя выбора {{name}} уже существует",
+      "symmetricFieldIdRequired": "Требуется идентификатор симметричного поля",
+      "foreignKeyNameCannotUseId": "Имя внешнего ключа не может использовать __id",
+      "createForeignKeyError": "Ошибка создания внешнего ключа",
+      "lookupFieldTypeNotEqual": "Текущий тип поля {{fieldType}} не равен типу поля поиска {{lookupFieldType}}",
+      "recordNotFound": "Запись {{recordId}} не найдена в {{tableId}}",
+      "linkCellRecordIdAlreadyExists": "Невозможно установить дублирующий recordId: {{recordId}} в той же ячейке",
+      "linkConsistencyError": "Ошибка согласованности, recordId {{recordId}} не существует",
+      "oneOneLinkCellValueCannotBeArray": "Значения поля связи один-к-одному не могут быть массивом",
+      "manyOneLinkCellValueCannotBeArray": "Значения поля связи многие-к-одному не могут быть массивом",
+      "oneManyLinkCellValueShouldBeArray": "Значения поля связи один-ко-многим должны быть массивом",
+      "manyManyLinkCellValueShouldBeArray": "Значения поля связи многие-ко-многим должны быть массивом",
+      "foreignKeyDuplicate": "Дубликат внешнего ключа"
+    },
+    "view": {
+      "viewNotFound": "Представление {{viewId}} не найдено"
     }
   }
 }

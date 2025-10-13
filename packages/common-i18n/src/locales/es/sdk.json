@@ -66,6 +66,7 @@
       "guideSyntax": "Sintaxis",
       "guideExample": "Ejemplo",
       "helperExample": "Ejemplo:",
+      "fieldValue": "Devuelve el valor a las celdas del campo {{fieldName}}.",
       "placeholder": "Ingrese una expresión",
       "placeholderForAIPrompt": "Describe la fórmula que quieres generar",
       "editExpression": "Editar fórmula",
@@ -78,7 +79,8 @@
         "generating": "Generando...",
         "generate": "Generar",
         "apply": "Aplicar"
-      }
+      },
+      "expressionRequired": "La expresión es obligatoria"
     },
     "link": {
       "placeholder": "Seleccionar registros para vincular",
@@ -89,7 +91,11 @@
       "selected": "Seleccionado",
       "expandRecordError": "No hay permiso para ver este registro.",
       "alreadyOpen": "Este registro ya está abierto.",
-      "goToForeignTable": "Ir a la mesa extranjera"
+      "goToForeignTable": "Ir a la mesa extranjera",
+      "foreignTableIdRequired": "La tabla externa es obligatoria",
+      "linkFieldIdRequired": "El campo de enlace es obligatorio",
+      "selectTooManyRecords": "Los registros seleccionados no deben exceder {{maxCount}}",
+      "relationshipRequired": "La relación es obligatoria"
     },
     "user": {
       "searchPlaceholder": "Encuentra usuarios por nombre",
@@ -106,7 +112,8 @@
       "refineOptionsError": "Error al analizar las opciones de búsqueda {{message}}"
     },
     "rollup": {
-      "expressionRequired": "La expresión es obligatoria"
+      "expressionRequired": "La expresión es obligatoria",
+      "unsupportedTip": "El rollup solo admite campos de enlace y rollup"
     },
     "aiConfig": {
       "modelKeyRequired": "El modelo es obligatorio",
@@ -116,7 +123,8 @@
       "promptRequired": "El prompt es obligatorio"
     },
     "error": {
-      "refineOptionsError": "Error al analizar las opciones del campo {{message}}"
+      "refineOptionsError": "Error al analizar las opciones del campo {{message}}",
+      "optionsRequired": "Las opciones del campo son obligatorias"
     }
   },
   "filter": {
@@ -819,6 +827,57 @@
     },
     "automation": {
       "buttonClickTriggerDuplicated": "Este campo de botón ya está vinculado a {{name}}[{{id}}] este proceso de automatización, por favor seleccione otro campo de botón"
+    },
+    "permission": {
+      "createRecordWithDeniedFields": "No tienes permiso para crear registros con campos({{fields}})",
+      "deleteRecords": "No tienes permiso para eliminar registros({{recordIds}})",
+      "readRecordWithDeniedFields": "No tienes permiso para leer campos({{fields}}) en el registro({{recordId}})",
+      "updateRecordWithDeniedFields": "No tienes permiso para actualizar campos({{fields}}) en el registro({{recordId}})"
+    },
+    "field": {
+      "unsupportedFieldType": "Tipo de campo no compatible {{type}}",
+      "unsupportedPrimaryFieldType": "Tipo de campo no compatible {{type}} como campo primario",
+      "calculateRecordNotFound": "Registro no encontrado para: {{value}}, fieldId: {{fieldId}}, al calcular {{recordId}}",
+      "toRecordIdsOrFromRecordIdsRequired": "toRecordIds o fromRecordIds es requerido para campo computado normal",
+      "recordFieldsRequired": "Los campos de registro no están definidos",
+      "uniqueUnsupportedType": "Campo {{name}}[{{fieldId}}] no admite validación de valor de campo único",
+      "notNullValidationWhenCreateField": "Campo {{name}}[{{fieldId}}] no admite validación no nula al crear un nuevo campo",
+      "dbFieldNameAlreadyExists": "El nombre del campo de base de datos {{dbFieldName}} ya existe",
+      "fieldValidationError": "Campo {{name}}[{{fieldId}}] error de validación de campo",
+      "fieldNameAlreadyExists": "El nombre del campo {{name}} ya existe",
+      "fieldNotFound": "Campo {{fieldId}} no encontrado",
+      "fieldNotFoundInTable": "Campo {{fieldId}} no encontrado en la tabla {{tableId}}",
+      "deleteFieldsNotFound": "Campos a eliminar {{fieldIds}} no encontrados en la tabla {{tableId}}",
+      "lookupValuesShouldBeArray": "lookupValues debe ser un array cuando el campo de enlace tiene múltiples valores de celda",
+      "linkCellValuesShouldBeArray": "linkCellValues debe ser un array cuando el campo de enlace tiene múltiples valores de celda",
+      "lookupAndLinkLengthMatch": "La longitud de lookupValues debe ser igual a la longitud de linkCellValues",
+      "cycleDetected": "Ciclo detectado",
+      "cycleDetectedCreateField": "Ciclo detectado, no se puede crear el campo {{name}}[{{id}}]",
+      "recordMapNotFound": "Registro no encontrado en la tabla {{tableName}} para el campo {{fieldName}}",
+      "forbidDeletePrimaryField": "Prohibido eliminar campo primario",
+      "foreignTableIdInvalid": "Tabla externa {{foreignTableId}} inválida",
+      "relationshipInvalid": "Relación {{relationship}} inválida",
+      "linkFieldIdInvalid": "Campo de enlace {{linkFieldId}} inválido",
+      "lookupFieldIdInvalid": "Campo de búsqueda {{lookupFieldId}} inválido",
+      "formulaExpressionParseError": "Error al analizar la expresión de la fórmula",
+      "formulaReferenceNotFound": "Campo de referencia de fórmula {{fieldIds}} no encontrado",
+      "rollupExpressionParseError": "Error al analizar la expresión de resumen",
+      "choiceNameAlreadyExists": "El nombre de opción {{name}} ya existe",
+      "symmetricFieldIdRequired": "Se requiere ID de campo simétrico",
+      "foreignKeyNameCannotUseId": "El nombre de clave externa no puede usar __id",
+      "createForeignKeyError": "Error al crear clave externa",
+      "lookupFieldTypeNotEqual": "El tipo de campo actual {{fieldType}} no es igual al tipo de campo de búsqueda {{lookupFieldType}}",
+      "recordNotFound": "Registro {{recordId}} no encontrado en {{tableId}}",
+      "linkCellRecordIdAlreadyExists": "No se puede establecer recordId duplicado: {{recordId}} en la misma celda",
+      "linkConsistencyError": "Error de consistencia, recordId {{recordId}} no existe",
+      "oneOneLinkCellValueCannotBeArray": "Los valores de campo de enlace uno a uno no pueden ser un array",
+      "manyOneLinkCellValueCannotBeArray": "Los valores de campo de enlace muchos a uno no pueden ser un array",
+      "oneManyLinkCellValueShouldBeArray": "Los valores de campo de enlace uno a muchos deben ser un array",
+      "manyManyLinkCellValueShouldBeArray": "Los valores de campo de enlace muchos a muchos deben ser un array",
+      "foreignKeyDuplicate": "Clave externa duplicada"
+    },
+    "view": {
+      "viewNotFound": "Vista {{viewId}} no encontrada"
     }
   }
 }
