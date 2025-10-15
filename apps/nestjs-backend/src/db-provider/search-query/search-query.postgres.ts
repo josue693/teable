@@ -118,7 +118,7 @@ export class SearchQueryPostgres extends SearchQueryAbstract {
         [`%${escapedSearchValue}%`]
       );
     } else {
-      return knex.raw(`${this.fieldName} LIKE ?`, [`%${escapedSearchValue}%`]);
+      return knex.raw(`${this.fieldName} ILIKE ?`, [`%${escapedSearchValue}%`]);
     }
   }
 
