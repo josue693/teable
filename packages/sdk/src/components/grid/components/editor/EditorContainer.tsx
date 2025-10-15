@@ -62,6 +62,7 @@ export interface IEditorProps<T extends IInnerCell = IInnerCell> {
   theme: IGridTheme;
   style?: CSSProperties;
   isEditing?: boolean;
+  initialSearch?: string;
   setEditing?: React.Dispatch<React.SetStateAction<boolean>>;
   onChange?: (value: unknown) => void;
 }
@@ -119,6 +120,7 @@ export const EditorContainerBase: ForwardRefRenderFunction<
   const editorRef = useRef<IEditorRef | null>(null);
   const defaultFocusRef = useRef<HTMLInputElement | null>(null);
   const editorId = useMemo(() => `editor-container-${getRandomString(8)}`, []);
+  const initialSearchRef = useRef<string>('');
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus?.(),
@@ -135,13 +137,9 @@ export const EditorContainerBase: ForwardRefRenderFunction<
     if ((cellType as CellType) === CellType.Loading) return;
     if (!activeCell || selection.type === SelectionRegionType.None) return;
 
-    requestAnimationFrame(() => {
-      if (editorRef.current && editorRef.current.focus) {
-        editorRef.current.focus();
-      } else {
-        defaultFocusRef.current?.focus({ preventScroll: true });
-      }
-    });
+    initialSearchRef.current = '';
+
+    requestAnimationFrame(() => (editorRef.current || defaultFocusRef.current)?.focus?.());
   }, [cellType, activeCell, selection, isEditing]);
 
   useKeyboardSelection({
@@ -213,6 +211,7 @@ export const EditorContainerBase: ForwardRefRenderFunction<
           isEditing,
           setEditing,
           onChange: onChangeInner,
+          initialSearch: initialSearchRef.current,
         },
         editorRef
       );
@@ -263,6 +262,7 @@ export const EditorContainerBase: ForwardRefRenderFunction<
             cell={cellContent}
             style={editorStyle}
             isEditing={isEditing}
+            initialSearch={initialSearchRef.current}
             setEditing={setEditing}
             onChange={onChangeInner}
           />
@@ -288,6 +288,14 @@ export const EditorContainerBase: ForwardRefRenderFunction<
     if (!activeCell || isEditing) return;
     if (!isPrintableKey(event.nativeEvent)) return;
     if (NO_EDITING_CELL_TYPES.has(cellType)) return;
+
+    const key = event.key;
+    if (key && key.length === 1) {
+      initialSearchRef.current = key;
+    } else {
+      initialSearchRef.current = '';
+    }
+
     setEditing(true);
     editorRef.current?.setValue?.(null);
   };
@@ -320,7 +328,7 @@ export const EditorContainerBase: ForwardRefRenderFunction<
         onCopy={onCopyInner}
       >
         {EditorRenderer}
-        <input className="opacity-0" ref={defaultFocusRef} />
+        <input className="size-0 opacity-0" ref={defaultFocusRef} />
       </div>
     </div>
   );
