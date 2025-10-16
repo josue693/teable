@@ -1,5 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
-import type { IFieldRo, IGroup, IGroupItem, IViewGroupRo } from '@teable/core';
+import type { IFieldRo, IGroupItem, IViewGroupRo } from '@teable/core';
 import { CellValueType, FieldKeyType, FieldType, SortFunc } from '@teable/core';
 import type { ITableFullVo, IGetRecordsRo } from '@teable/openapi';
 import { updateViewGroup, updateViewSort } from '@teable/openapi';

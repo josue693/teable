@@ -1,8 +1,7 @@
-import type { INumberFieldOptions, IDateFieldOptions, DateFormattingPreset } from '@teable/core';
+import type { INumberFieldOptions, IDateFieldOptions } from '@teable/core';
 import type { Knex } from 'knex';
 import type { IFieldInstance } from '../../features/field/model/factory';
 import { isUserOrLink } from '../../utils/is-user-or-link';
-import { getPostgresDateTimeFormatString } from './format-string';
 import { AbstractGroupQuery } from './group-query.abstract';
 import type { IGroupQueryExtra } from './group-query.interface';
 
@@ -51,19 +50,24 @@ export class GroupQueryPostgres extends AbstractGroupQuery {
   date(field: IFieldInstance): Knex.QueryBuilder {
     const { dbFieldName, options } = field;
     const { date, time, timeZone } = (options as IDateFieldOptions).formatting;
-    const formatString = getPostgresDateTimeFormatString(date as DateFormattingPreset, time);
+    let unit: 'year' | 'month' | 'day' | 'minute';
+    if (date === 'YYYY') {
+      unit = 'year';
+    } else if (date === 'YYYY-MM' || date === 'MM') {
+      unit = 'month';
+    } else if (time === 'None' || time == null) {
+      unit = 'day';
+    } else {
+      unit = 'minute';
+    }
 
-    const column = this.knex.raw(`TO_CHAR(TIMEZONE(?, ??), ?) as ??`, [
-      timeZone,
-      dbFieldName,
-      formatString,
-      dbFieldName,
-    ]);
-    const groupByColumn = this.knex.raw(`TO_CHAR(TIMEZONE(?, ??), ?)`, [
-      timeZone,
-      dbFieldName,
-      formatString,
-    ]);
+    const isoBucketExpr = this.knex.raw(
+      `TO_CHAR(((date_trunc(?, (??::timestamptz AT TIME ZONE ?)) AT TIME ZONE ?) AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+      [unit, dbFieldName, timeZone, timeZone]
+    );
+
+    const column = this.knex.raw(`(${isoBucketExpr}) as ??`, [dbFieldName]);
+    const groupByColumn = this.knex.raw(`(${isoBucketExpr})`);
 
     if (this.isDistinct) {
       return this.originQueryBuilder.countDistinct(groupByColumn);
@@ -124,21 +128,30 @@ export class GroupQueryPostgres extends AbstractGroupQuery {
   multipleDate(field: IFieldInstance): Knex.QueryBuilder {
     const { dbFieldName, options } = field;
     const { date, time, timeZone } = (options as IDateFieldOptions).formatting;
-    const formatString = getPostgresDateTimeFormatString(date as DateFormattingPreset, time);
+    let unit: 'year' | 'month' | 'day' | 'minute';
+    if (date === 'YYYY') {
+      unit = 'year';
+    } else if (date === 'YYYY-MM' || date === 'MM') {
+      unit = 'month';
+    } else if (time === 'None' || time == null) {
+      unit = 'day';
+    } else {
+      unit = 'minute';
+    }
 
     const column = this.knex.raw(
       `
-      (SELECT to_jsonb(array_agg(TO_CHAR(TIMEZONE(?, CAST(elem AS timestamp with time zone)), ?)))
+      (SELECT to_jsonb(array_agg(TO_CHAR(((date_trunc(?, (CAST(elem AS timestamptz) AT TIME ZONE ?)) AT TIME ZONE ?) AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')))
       FROM jsonb_array_elements_text(??::jsonb) as elem) as ??
       `,
-      [timeZone, formatString, dbFieldName, dbFieldName]
+      [unit, timeZone, timeZone, dbFieldName, dbFieldName]
     );
     const groupByColumn = this.knex.raw(
       `
-      (SELECT to_jsonb(array_agg(TO_CHAR(TIMEZONE(?, CAST(elem AS timestamp with time zone)), ?)))
+      (SELECT to_jsonb(array_agg(TO_CHAR(((date_trunc(?, (CAST(elem AS timestamptz) AT TIME ZONE ?)) AT TIME ZONE ?) AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:MI:SS"Z"')))
       FROM jsonb_array_elements_text(??::jsonb) as elem)
       `,
-      [timeZone, formatString, dbFieldName]
+      [unit, timeZone, timeZone, dbFieldName]
     );
 
     if (this.isDistinct) {
