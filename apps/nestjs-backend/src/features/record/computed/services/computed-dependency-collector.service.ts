@@ -10,7 +10,7 @@ import type {
   IConditionalLookupOptions,
   FieldCore,
 } from '@teable/core';
-import { FieldType, isFieldReferenceValue } from '@teable/core';
+import { DbFieldType, FieldType, isFieldReferenceValue } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectModel } from 'nest-knexjs';
@@ -420,6 +420,27 @@ export class ComputedDependencyCollectorService {
 
     const foreignFieldMap = await this.loadFieldInstances(edge.foreignTableId, foreignFieldIds);
     if (foreignFieldMap.size !== foreignFieldIds.size) {
+      return ALL_RECORDS;
+    }
+
+    // Note: when any foreign-side filter column is JSON, we bail out to ALL_RECORDS.
+    // The values-based subquery we build below uses parameter binding which serialises JSON
+    // as plain text. Postgres then attempts to cast that "text" into json/jsonb when evaluating
+    // operators like `@>` or `?`. Without explicit casts (e.g. `::jsonb`) the parser errors out:
+    //   ERROR: invalid input syntax for type json DETAIL: Expected ":", but found "}".
+    // Rather than attempt to inline JSON literals with per-driver casting (and reimplement
+    // Prisma's quoting rules), we fall back to the conservative ALL_RECORDS path. For now this
+    // keeps correctness for complex filters (array_contains, field references, etc.) while
+    // avoiding subtle type issues. If/when we add a typed VALUES helper we can revisit this.
+    if (
+      Array.from(foreignFieldMap.values()).some((field) => field.dbFieldType === DbFieldType.Json)
+    ) {
+      return ALL_RECORDS;
+    }
+
+    if (
+      Array.from(foreignFieldMap.values()).some((field) => field.dbFieldType === DbFieldType.Json)
+    ) {
       return ALL_RECORDS;
     }
 
