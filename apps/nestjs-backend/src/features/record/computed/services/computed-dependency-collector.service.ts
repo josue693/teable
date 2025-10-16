@@ -4,17 +4,20 @@
 import { Injectable } from '@nestjs/common';
 import type {
   IFilter,
+  IFilterItem,
   ILinkFieldOptions,
   IConditionalRollupFieldOptions,
   IConditionalLookupOptions,
+  FieldCore,
 } from '@teable/core';
-import { FieldType } from '@teable/core';
+import { FieldType, isFieldReferenceValue } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectModel } from 'nest-knexjs';
 import { InjectDbProvider } from '../../../../db-provider/db.provider';
 import { IDbProvider } from '../../../../db-provider/db.provider.interface';
 import type { ICellContext } from '../../../calculation/utils/changes';
+import { createFieldInstanceByRaw } from '../../../field/model/factory';
 
 export interface ICellBasicContext {
   recordId: string;
@@ -120,6 +123,65 @@ export class ComputedDependencyCollectorService {
     }
     if (typeof raw === 'object') return raw as T;
     return null;
+  }
+
+  private collectFilterFieldReferences(filter?: IFilter | null): {
+    hostFieldRefs: Array<{ fieldId: string; tableId?: string }>;
+    foreignFieldIds: Set<string>;
+  } {
+    const hostFieldRefs: Array<{ fieldId: string; tableId?: string }> = [];
+    const foreignFieldIds = new Set<string>();
+    if (!filter?.filterSet?.length) {
+      return { hostFieldRefs, foreignFieldIds };
+    }
+
+    const visitValue = (value: unknown) => {
+      if (!value) return;
+      if (Array.isArray(value)) {
+        value.forEach(visitValue);
+        return;
+      }
+      if (isFieldReferenceValue(value)) {
+        hostFieldRefs.push({ fieldId: value.fieldId, tableId: value.tableId });
+      }
+    };
+
+    const traverse = (current: IFilter) => {
+      if (!current?.filterSet?.length) return;
+      for (const entry of current.filterSet as Array<IFilter | IFilterItem>) {
+        if (entry && 'fieldId' in entry) {
+          const item = entry as IFilterItem;
+          foreignFieldIds.add(item.fieldId);
+          visitValue(item.value);
+        } else if (entry && 'filterSet' in entry) {
+          traverse(entry as IFilter);
+        }
+      }
+    };
+
+    traverse(filter);
+    return { hostFieldRefs, foreignFieldIds };
+  }
+
+  private async loadFieldInstances(
+    tableId: string,
+    fieldIds: Iterable<string>
+  ): Promise<Map<string, FieldCore>> {
+    const ids = Array.from(new Set(Array.from(fieldIds).filter(Boolean)));
+    if (!ids.length) {
+      return new Map();
+    }
+
+    const rows = await this.prismaService.txClient().field.findMany({
+      where: { tableId, id: { in: ids }, deletedTime: null },
+    });
+
+    const map = new Map<string, FieldCore>();
+    for (const row of rows) {
+      const instance = createFieldInstanceByRaw(row) as unknown as FieldCore;
+      map.set(instance.id, instance);
+    }
+    return map;
   }
 
   private async resolveConditionalSortDependents(
@@ -326,10 +388,91 @@ export class ComputedDependencyCollectorService {
     if (!foreignRecordIds.length) {
       return [];
     }
-    // Without additional context (old/new values), any change to the foreign
-    // records may affect an arbitrary subset of host records. Mark the host
-    // table for a full recompute instead of eagerly selecting every __id.
-    return ALL_RECORDS;
+    const uniqueForeignIds = Array.from(new Set(foreignRecordIds.filter(Boolean)));
+    if (!uniqueForeignIds.length) {
+      return [];
+    }
+
+    const filter = edge.filter;
+    if (!filter) {
+      return ALL_RECORDS;
+    }
+
+    const { hostFieldRefs, foreignFieldIds } = this.collectFilterFieldReferences(filter);
+    if (!hostFieldRefs.length) {
+      return ALL_RECORDS;
+    }
+
+    if (foreignFieldIds.size === 0) {
+      return ALL_RECORDS;
+    }
+
+    if (hostFieldRefs.some((ref) => ref.tableId && ref.tableId !== edge.tableId)) {
+      return ALL_RECORDS;
+    }
+
+    const uniqueHostFieldIds = Array.from(new Set(hostFieldRefs.map((ref) => ref.fieldId)));
+    const hostFieldMap = await this.loadFieldInstances(edge.tableId, uniqueHostFieldIds);
+    if (hostFieldMap.size !== uniqueHostFieldIds.length) {
+      return ALL_RECORDS;
+    }
+
+    const foreignFieldMap = await this.loadFieldInstances(edge.foreignTableId, foreignFieldIds);
+    if (foreignFieldMap.size !== foreignFieldIds.size) {
+      return ALL_RECORDS;
+    }
+
+    const hostTableName = await this.getDbTableName(edge.tableId);
+    const foreignTableName = await this.getDbTableName(edge.foreignTableId);
+
+    const hostAlias = '__host';
+    const foreignAlias = '__foreign';
+
+    const selectionMap = new Map<string, string>();
+    const foreignFieldObj: Record<string, FieldCore> = {};
+    for (const [id, field] of foreignFieldMap) {
+      selectionMap.set(id, `"${foreignAlias}"."${field.dbFieldName}"`);
+      foreignFieldObj[id] = field;
+    }
+
+    const fieldReferenceSelectionMap = new Map<string, string>();
+    const fieldReferenceFieldMap = new Map<string, FieldCore>();
+    for (const [id, field] of hostFieldMap) {
+      fieldReferenceSelectionMap.set(id, `"${hostAlias}"."${field.dbFieldName}"`);
+      fieldReferenceFieldMap.set(id, field);
+    }
+
+    const existsSubquery = this.knex
+      .select(this.knex.raw('1'))
+      .from(`${foreignTableName} as ${foreignAlias}`)
+      .whereIn(`${foreignAlias}.__id`, uniqueForeignIds);
+
+    this.dbProvider
+      .filterQuery(existsSubquery, foreignFieldObj, filter, undefined, {
+        selectionMap,
+        fieldReferenceSelectionMap,
+        fieldReferenceFieldMap,
+      })
+      .appendQueryBuilder();
+
+    const queryBuilder = this.knex
+      .select(this.knex.raw(`"${hostAlias}"."__id" as id`))
+      .from(`${hostTableName} as ${hostAlias}`)
+      .whereExists(existsSubquery);
+
+    const rows = await this.prismaService
+      .txClient()
+      .$queryRawUnsafe<{ id?: string; __id?: string }[]>(queryBuilder.toQuery());
+
+    const ids = new Set<string>();
+    for (const row of rows) {
+      const id = row.id || row.__id;
+      if (id) {
+        ids.add(id);
+      }
+    }
+
+    return Array.from(ids);
   }
 
   /**
