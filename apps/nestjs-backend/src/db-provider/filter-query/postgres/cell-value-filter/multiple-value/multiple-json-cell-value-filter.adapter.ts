@@ -1,16 +1,33 @@
-import type { IFilterOperator, ILiteralValue, ILiteralValueList } from '@teable/core';
-import { FieldType } from '@teable/core';
+import type {
+  FieldCore,
+  IFieldReferenceValue,
+  IFilterOperator,
+  ILiteralValue,
+  ILiteralValueList,
+} from '@teable/core';
+import { FieldType, isFieldReferenceValue } from '@teable/core';
 import type { Knex } from 'knex';
 import { isUserOrLink } from '../../../../../utils/is-user-or-link';
 import { escapeJsonbRegex } from '../../../../../utils/postgres-regex-escape';
+import type { IDbProvider } from '../../../../db.provider.interface';
 import { CellValueFilterPostgres } from '../cell-value-filter.postgres';
 
 export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres {
   isOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      builderClient.whereRaw(
+        `${selfArray} @> ${referenceArray} AND ${referenceArray} @> ${selfArray}`
+      );
+      return builderClient;
+    }
+
     const { type } = this.field;
 
     if (type === FieldType.Link) {
@@ -32,8 +49,18 @@ export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres 
   isNotOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      builderClient.whereRaw(
+        `NOT (${selfArray} @> ${referenceArray} AND ${referenceArray} @> ${selfArray})`
+      );
+      return builderClient;
+    }
+
     const { type } = this.field;
 
     if (type === FieldType.Link) {
@@ -57,8 +84,18 @@ export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres 
   isExactlyOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      builderClient.whereRaw(
+        `${selfArray} @> ${referenceArray} AND ${referenceArray} @> ${selfArray}`
+      );
+      return builderClient;
+    }
+
     const { type } = this.field;
     const sqlPlaceholders = this.createSqlPlaceholders(value);
 
@@ -79,9 +116,18 @@ export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres 
   isAnyOfOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const { type } = this.field;
+
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      const referenceTextArray = this.buildTextArrayExpression(referenceArray);
+      builderClient.whereRaw(`jsonb_exists_any(${selfArray}, ${referenceTextArray})`);
+      return builderClient;
+    }
 
     if (isUserOrLink(type)) {
       builderClient.whereRaw(
@@ -97,9 +143,20 @@ export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres 
   isNoneOfOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const { type } = this.field;
+
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      const referenceTextArray = this.buildTextArrayExpression(referenceArray);
+      builderClient.whereRaw(
+        `NOT jsonb_exists_any(COALESCE(${selfArray}, '[]'::jsonb), ${referenceTextArray})`
+      );
+      return builderClient;
+    }
 
     if (isUserOrLink(type)) {
       builderClient.whereRaw(
@@ -118,9 +175,17 @@ export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres 
   hasAllOfOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const { type } = this.field;
+
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      builderClient.whereRaw(`${selfArray} @> ${referenceArray}`);
+      return builderClient;
+    }
 
     if (isUserOrLink(type)) {
       builderClient.whereRaw(
@@ -136,8 +201,18 @@ export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres 
   isNotExactlyOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      builderClient.whereRaw(
+        `NOT (${selfArray} @> ${referenceArray} AND ${referenceArray} @> ${selfArray})`
+      );
+      return builderClient;
+    }
+
     const { type } = this.field;
     const sqlPlaceholders = this.createSqlPlaceholders(value);
 
@@ -194,5 +269,30 @@ export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres 
       );
     }
     return builderClient;
+  }
+
+  private buildReferenceJsonArray(value: IFieldReferenceValue): string {
+    const referenceExpression = this.resolveFieldReference(value);
+    const referenceField = this.getFieldReferenceMetadata(value.fieldId);
+    return this.buildJsonArrayExpression(referenceExpression, referenceField);
+  }
+
+  private buildJsonArrayExpression(columnExpression: string, field?: FieldCore): string {
+    const targetField = field ?? this.field;
+    const fallback = targetField.isMultipleCellValue ? "'[]'::jsonb" : "'null'::jsonb'";
+    return `jsonb_path_query_array(COALESCE(${columnExpression}, ${fallback}), ${this.getJsonPath(
+      targetField
+    )})`;
+  }
+
+  private buildTextArrayExpression(jsonArrayExpression: string): string {
+    return `COALESCE((SELECT array_agg(value) FROM jsonb_array_elements_text(${jsonArrayExpression}) AS value), ARRAY[]::text[])`;
+  }
+
+  private getJsonPath(field: FieldCore): string {
+    if (isUserOrLink(field.type)) {
+      return field.isMultipleCellValue ? "'$[*].id'" : "'$.id'";
+    }
+    return field.isMultipleCellValue ? "'$[*]'" : "'$'";
   }
 }

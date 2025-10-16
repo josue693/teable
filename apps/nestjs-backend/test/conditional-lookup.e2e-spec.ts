@@ -2832,4 +2832,353 @@ describe('OpenAPI Conditional Lookup field (e2e)', () => {
       }
     });
   });
+
+  describe('user field filters', () => {
+    let foreign: ITableFullVo;
+    let host: ITableFullVo;
+    let lookupField: IFieldVo;
+    let titleId: string;
+    let foreignOwnerId: string;
+    let hostOwnerId: string;
+    let assignedRecordId: string;
+    let emptyRecordId: string;
+
+    beforeAll(async () => {
+      const { userId, userName, email } = globalThis.testConfig;
+      const userCell = { id: userId, title: userName, email };
+
+      foreign = await createTable(baseId, {
+        name: 'ConditionalLookup_User_Foreign',
+        fields: [
+          { name: 'Task', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Owner', type: FieldType.User } as IFieldRo,
+        ],
+        records: [
+          { fields: { Task: 'Task Alpha', Owner: userCell } },
+          { fields: { Task: 'Task Beta' } },
+          { fields: { Task: 'Task Gamma', Owner: userCell } },
+        ],
+      });
+
+      titleId = foreign.fields.find((field) => field.name === 'Task')!.id;
+      foreignOwnerId = foreign.fields.find((field) => field.name === 'Owner')!.id;
+
+      host = await createTable(baseId, {
+        name: 'ConditionalLookup_User_Host',
+        fields: [{ name: 'Assigned', type: FieldType.User } as IFieldRo],
+        records: [{ fields: { Assigned: userCell } }, { fields: {} }],
+      });
+
+      hostOwnerId = host.fields.find((field) => field.name === 'Assigned')!.id;
+      assignedRecordId = host.records[0].id;
+      emptyRecordId = host.records[1].id;
+
+      const ownerMatchFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: foreignOwnerId,
+            operator: 'is',
+            value: { type: 'field', fieldId: hostOwnerId },
+          },
+        ],
+      };
+
+      lookupField = await createField(host.id, {
+        name: 'Owned Tasks',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: foreign.id,
+          lookupFieldId: titleId,
+          filter: ownerMatchFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, host.id);
+      await permanentDeleteTable(baseId, foreign.id);
+    });
+
+    it('should create conditional lookup filtered by matching users', async () => {
+      expect(lookupField.id).toBeDefined();
+
+      const assignedRecord = await getRecord(host.id, assignedRecordId);
+      const ownedTasks = [...((assignedRecord.fields[lookupField.id] as string[]) ?? [])].sort();
+      expect(ownedTasks).toEqual(['Task Alpha', 'Task Gamma']);
+
+      const emptyRecord = await getRecord(host.id, emptyRecordId);
+      expect((emptyRecord.fields[lookupField.id] as string[] | undefined) ?? []).toEqual([]);
+    });
+  });
+
+  describe('numeric array field reference filters', () => {
+    let games: ITableFullVo;
+    let summary: ITableFullVo;
+    let roundScoresField: IFieldVo;
+    let gamesLinkFieldId: string;
+    let thresholdFieldId: string;
+    let ceilingFieldId: string;
+    let targetFieldId: string;
+    let exactFieldId: string;
+    let excludeFieldId: string;
+    let aliceSummaryId: string;
+    let bobSummaryId: string;
+    let scoresAboveThresholdField: IFieldVo;
+    let scoresWithinCeilingField: IFieldVo;
+    let scoresEqualTargetField: IFieldVo;
+    let scoresNotExactField: IFieldVo;
+    let scoresWithoutExcludedField: IFieldVo;
+
+    beforeAll(async () => {
+      games = await createTable(baseId, {
+        name: 'ConditionalLookup_NumberArray_Games',
+        fields: [
+          { name: 'Player', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Score', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          { fields: { Player: 'Alice', Score: 10 } },
+          { fields: { Player: 'Alice', Score: 12 } },
+          { fields: { Player: 'Bob', Score: 7 } },
+        ],
+      });
+      const scoreFieldId = games.fields.find((f) => f.name === 'Score')!.id;
+
+      const gamePlayerFieldId = games.fields.find((f) => f.name === 'Player')!.id;
+
+      summary = await createTable(baseId, {
+        name: 'ConditionalLookup_NumberArray_Summary',
+        fields: [
+          { name: 'Player', type: FieldType.SingleLineText } as IFieldRo,
+          {
+            name: 'Games',
+            type: FieldType.Link,
+            options: {
+              foreignTableId: games.id,
+              relationship: Relationship.ManyMany,
+            },
+          } as IFieldRo,
+          { name: 'Threshold', type: FieldType.Number } as IFieldRo,
+          { name: 'Ceiling', type: FieldType.Number } as IFieldRo,
+          { name: 'Target', type: FieldType.Number } as IFieldRo,
+          { name: 'Exact', type: FieldType.Number } as IFieldRo,
+          { name: 'Exclude', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          {
+            fields: {
+              Player: 'Alice',
+              Games: [{ id: games.records[0].id }, { id: games.records[1].id }],
+              Threshold: 11,
+              Ceiling: 12,
+              Target: 12,
+              Exact: 12,
+              Exclude: 10,
+            },
+          },
+          {
+            fields: {
+              Player: 'Bob',
+              Games: [{ id: games.records[2].id }],
+              Threshold: 8,
+              Ceiling: 8,
+              Target: 9,
+              Exact: 7,
+              Exclude: 5,
+            },
+          },
+        ],
+      });
+
+      gamesLinkFieldId = summary.fields.find((f) => f.name === 'Games')!.id;
+      const summaryPlayerFieldId = summary.fields.find((f) => f.name === 'Player')!.id;
+      roundScoresField = await createField(summary.id, {
+        name: 'Round Scores',
+        type: FieldType.Number,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          linkFieldId: gamesLinkFieldId,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+      thresholdFieldId = summary.fields.find((f) => f.name === 'Threshold')!.id;
+      ceilingFieldId = summary.fields.find((f) => f.name === 'Ceiling')!.id;
+      targetFieldId = summary.fields.find((f) => f.name === 'Target')!.id;
+      exactFieldId = summary.fields.find((f) => f.name === 'Exact')!.id;
+      excludeFieldId = summary.fields.find((f) => f.name === 'Exclude')!.id;
+      aliceSummaryId = summary.records[0].id;
+      bobSummaryId = summary.records[1].id;
+
+      const scoresAboveThresholdFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'isGreater',
+            value: { type: 'field', fieldId: thresholdFieldId },
+          },
+        ],
+      };
+      scoresAboveThresholdField = await createField(summary.id, {
+        name: 'Scores Above Threshold',
+        type: FieldType.Number,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          filter: scoresAboveThresholdFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      const scoresWithinCeilingFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'isLessEqual',
+            value: { type: 'field', fieldId: ceilingFieldId },
+          },
+        ],
+      };
+      scoresWithinCeilingField = await createField(summary.id, {
+        name: 'Scores Within Ceiling',
+        type: FieldType.Number,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          filter: scoresWithinCeilingFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      const equalTargetFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: targetFieldId },
+          },
+        ],
+      };
+      scoresEqualTargetField = await createField(summary.id, {
+        name: 'Scores Equal Target',
+        type: FieldType.Number,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          filter: equalTargetFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      const notExactFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'isNot',
+            value: { type: 'field', fieldId: exactFieldId },
+          },
+        ],
+      };
+      scoresNotExactField = await createField(summary.id, {
+        name: 'Scores Not Exact',
+        type: FieldType.Number,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          filter: notExactFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      const withoutExcludedFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'isNot',
+            value: { type: 'field', fieldId: excludeFieldId },
+          },
+        ],
+      };
+      scoresWithoutExcludedField = await createField(summary.id, {
+        name: 'Scores Without Excluded',
+        type: FieldType.Number,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          filter: withoutExcludedFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, summary.id);
+      await permanentDeleteTable(baseId, games.id);
+    });
+
+    it('filters numeric lookup arrays using field references', async () => {
+      const records = await getRecords(summary.id, { fieldKeyType: FieldKeyType.Id });
+      const aliceSummary = records.records.find((record) => record.id === aliceSummaryId)!;
+      const bobSummary = records.records.find((record) => record.id === bobSummaryId)!;
+
+      expect(aliceSummary.fields[scoresAboveThresholdField.id]).toEqual([12]);
+      expect(
+        (bobSummary.fields[scoresAboveThresholdField.id] as number[] | undefined) ?? []
+      ).toEqual([]);
+
+      expect(aliceSummary.fields[scoresWithinCeilingField.id]).toEqual([10, 12]);
+      expect(bobSummary.fields[scoresWithinCeilingField.id]).toEqual([7]);
+
+      expect(aliceSummary.fields[scoresEqualTargetField.id]).toEqual([12]);
+      expect((bobSummary.fields[scoresEqualTargetField.id] as number[] | undefined) ?? []).toEqual(
+        []
+      );
+
+      expect((aliceSummary.fields[scoresNotExactField.id] as number[] | undefined) ?? []).toEqual([
+        10,
+      ]);
+      expect((bobSummary.fields[scoresNotExactField.id] as number[] | undefined) ?? []).toEqual([]);
+
+      expect(aliceSummary.fields[scoresWithoutExcludedField.id]).toEqual([12]);
+      expect(bobSummary.fields[scoresWithoutExcludedField.id]).toEqual([7]);
+    });
+  });
 });

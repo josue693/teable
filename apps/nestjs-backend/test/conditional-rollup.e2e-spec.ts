@@ -2900,4 +2900,337 @@ describe('OpenAPI Conditional Rollup field (e2e)', () => {
       }
     });
   });
+
+  describe('user field filters', () => {
+    let foreign: ITableFullVo;
+    let host: ITableFullVo;
+    let rollupField: IFieldVo;
+    let hoursId: string;
+    let foreignOwnerId: string;
+    let hostOwnerId: string;
+    let assignedRecordId: string;
+    let emptyRecordId: string;
+
+    beforeAll(async () => {
+      const { userId, userName, email } = globalThis.testConfig;
+      const userCell = { id: userId, title: userName, email };
+
+      foreign = await createTable(baseId, {
+        name: 'ConditionalRollup_User_Foreign',
+        fields: [
+          { name: 'Task', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Owner', type: FieldType.User } as IFieldRo,
+          { name: 'Hours', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          { fields: { Task: 'Task Alpha', Owner: userCell, Hours: 3 } },
+          { fields: { Task: 'Task Beta', Owner: userCell, Hours: 2 } },
+          { fields: { Task: 'Task Gamma', Hours: 4 } },
+        ],
+      });
+
+      hoursId = foreign.fields.find((field) => field.name === 'Hours')!.id;
+      foreignOwnerId = foreign.fields.find((field) => field.name === 'Owner')!.id;
+
+      host = await createTable(baseId, {
+        name: 'ConditionalRollup_User_Host',
+        fields: [{ name: 'Assigned', type: FieldType.User } as IFieldRo],
+        records: [{ fields: { Assigned: userCell } }, { fields: {} }],
+      });
+
+      hostOwnerId = host.fields.find((field) => field.name === 'Assigned')!.id;
+      assignedRecordId = host.records[0].id;
+      emptyRecordId = host.records[1].id;
+
+      const ownerMatchFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: foreignOwnerId,
+            operator: 'is',
+            value: { type: 'field', fieldId: hostOwnerId },
+          },
+        ],
+      };
+
+      rollupField = await createField(host.id, {
+        name: 'Assigned Hours',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: foreign.id,
+          lookupFieldId: hoursId,
+          expression: 'sum({values})',
+          filter: ownerMatchFilter,
+        } as IConditionalRollupFieldOptions,
+      } as IFieldRo);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, host.id);
+      await permanentDeleteTable(baseId, foreign.id);
+    });
+
+    it('should create conditional rollup filtered by matching users', async () => {
+      expect(rollupField.id).toBeDefined();
+
+      const assignedRecord = await getRecord(host.id, assignedRecordId);
+      expect((assignedRecord.fields[rollupField.id] as number | null | undefined) ?? 0).toBe(5);
+
+      const emptyRecord = await getRecord(host.id, emptyRecordId);
+      expect((emptyRecord.fields[rollupField.id] as number | null | undefined) ?? 0).toBe(0);
+    });
+  });
+
+  describe.only('numeric array field reference rollups', () => {
+    let games: ITableFullVo;
+    let summary: ITableFullVo;
+    let gamesLinkFieldId: string;
+    let scoreFieldId: string;
+    let thresholdFieldId: string;
+    let ceilingFieldId: string;
+    let targetFieldId: string;
+    let exactFieldId: string;
+    let excludeFieldId: string;
+    let aliceSummaryId: string;
+    let bobSummaryId: string;
+    let sumAboveThresholdField: IFieldVo;
+    let sumWithinCeilingField: IFieldVo;
+    let sumEqualTargetField: IFieldVo;
+    let sumWithoutExactField: IFieldVo;
+    let sumWithoutExcludedField: IFieldVo;
+
+    beforeAll(async () => {
+      games = await createTable(baseId, {
+        name: 'ConditionalRollup_NumberArray_Games',
+        fields: [
+          { name: 'Player', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Score', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          { fields: { Player: 'Alice', Score: 10 } },
+          { fields: { Player: 'Alice', Score: 12 } },
+          { fields: { Player: 'Bob', Score: 7 } },
+        ],
+      });
+      scoreFieldId = games.fields.find((f) => f.name === 'Score')!.id;
+
+      const gamePlayerFieldId = games.fields.find((f) => f.name === 'Player')!.id;
+
+      summary = await createTable(baseId, {
+        name: 'ConditionalRollup_NumberArray_Summary',
+        fields: [
+          { name: 'Player', type: FieldType.SingleLineText } as IFieldRo,
+          {
+            name: 'Games',
+            type: FieldType.Link,
+            options: {
+              foreignTableId: games.id,
+              relationship: Relationship.ManyMany,
+            },
+          } as IFieldRo,
+          { name: 'Threshold', type: FieldType.Number } as IFieldRo,
+          { name: 'Ceiling', type: FieldType.Number } as IFieldRo,
+          { name: 'Target', type: FieldType.Number } as IFieldRo,
+          { name: 'Exact', type: FieldType.Number } as IFieldRo,
+          { name: 'Exclude', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          {
+            fields: {
+              Player: 'Alice',
+              Games: [{ id: games.records[0].id }, { id: games.records[1].id }],
+              Threshold: 11,
+              Ceiling: 12,
+              Target: 12,
+              Exact: 12,
+              Exclude: 10,
+            },
+          },
+          {
+            fields: {
+              Player: 'Bob',
+              Games: [{ id: games.records[2].id }],
+              Threshold: 8,
+              Ceiling: 8,
+              Target: 9,
+              Exact: 7,
+              Exclude: 5,
+            },
+          },
+        ],
+      });
+
+      gamesLinkFieldId = summary.fields.find((f) => f.name === 'Games')!.id;
+      const summaryPlayerFieldId = summary.fields.find((f) => f.name === 'Player')!.id;
+      thresholdFieldId = summary.fields.find((f) => f.name === 'Threshold')!.id;
+      ceilingFieldId = summary.fields.find((f) => f.name === 'Ceiling')!.id;
+      targetFieldId = summary.fields.find((f) => f.name === 'Target')!.id;
+      exactFieldId = summary.fields.find((f) => f.name === 'Exact')!.id;
+      excludeFieldId = summary.fields.find((f) => f.name === 'Exclude')!.id;
+      aliceSummaryId = summary.records[0].id;
+      bobSummaryId = summary.records[1].id;
+
+      const thresholdFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'isGreater',
+            value: { type: 'field', fieldId: thresholdFieldId },
+          },
+        ],
+      };
+      sumAboveThresholdField = await createField(summary.id, {
+        name: 'Sum Above Threshold',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          expression: 'sum({values})',
+          filter: thresholdFilter,
+        } as IConditionalRollupFieldOptions,
+      } as IFieldRo);
+
+      const ceilingFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'isLessEqual',
+            value: { type: 'field', fieldId: ceilingFieldId },
+          },
+        ],
+      };
+      sumWithinCeilingField = await createField(summary.id, {
+        name: 'Sum Within Ceiling',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          expression: 'sum({values})',
+          filter: ceilingFilter,
+        } as IConditionalRollupFieldOptions,
+      } as IFieldRo);
+
+      const equalTargetFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: targetFieldId },
+          },
+        ],
+      };
+      sumEqualTargetField = await createField(summary.id, {
+        name: 'Sum Equal Target',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          expression: 'sum({values})',
+          filter: equalTargetFilter,
+        } as IConditionalRollupFieldOptions,
+      } as IFieldRo);
+
+      const excludeExactFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'isNot',
+            value: { type: 'field', fieldId: exactFieldId },
+          },
+        ],
+      };
+      sumWithoutExactField = await createField(summary.id, {
+        name: 'Sum Without Exact',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          expression: 'sum({values})',
+          filter: excludeExactFilter,
+        } as IConditionalRollupFieldOptions,
+      } as IFieldRo);
+
+      const withoutExcludedFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: gamePlayerFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: summaryPlayerFieldId },
+          },
+          {
+            fieldId: scoreFieldId,
+            operator: 'isNot',
+            value: { type: 'field', fieldId: excludeFieldId },
+          },
+        ],
+      };
+      sumWithoutExcludedField = await createField(summary.id, {
+        name: 'Sum Without Excluded',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: games.id,
+          lookupFieldId: scoreFieldId,
+          expression: 'sum({values})',
+          filter: withoutExcludedFilter,
+        } as IConditionalRollupFieldOptions,
+      } as IFieldRo);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, summary.id);
+      await permanentDeleteTable(baseId, games.id);
+    });
+
+    it('aggregates numeric arrays with field references', async () => {
+      const records = await getRecords(summary.id, { fieldKeyType: FieldKeyType.Id });
+      const aliceSummary = records.records.find((record) => record.id === aliceSummaryId)!;
+      const bobSummary = records.records.find((record) => record.id === bobSummaryId)!;
+
+      expect(aliceSummary.fields[sumAboveThresholdField.id]).toEqual(12);
+      expect(
+        (bobSummary.fields[sumAboveThresholdField.id] as number | null | undefined) ?? 0
+      ).toEqual(0);
+
+      expect(aliceSummary.fields[sumWithinCeilingField.id]).toEqual(22);
+      expect(bobSummary.fields[sumWithinCeilingField.id]).toEqual(7);
+
+      expect(aliceSummary.fields[sumEqualTargetField.id]).toEqual(12);
+      expect((bobSummary.fields[sumEqualTargetField.id] as number | null | undefined) ?? 0).toEqual(
+        0
+      );
+
+      expect(aliceSummary.fields[sumWithoutExactField.id]).toEqual(10);
+      expect(
+        (bobSummary.fields[sumWithoutExactField.id] as number | null | undefined) ?? 0
+      ).toEqual(0);
+
+      expect(aliceSummary.fields[sumWithoutExcludedField.id]).toEqual(12);
+      expect(bobSummary.fields[sumWithoutExcludedField.id]).toEqual(7);
+    });
+  });
 });
