@@ -2604,4 +2604,116 @@ describe('OpenAPI Conditional Lookup field (e2e)', () => {
       }
     });
   });
+
+  describe('circular dependency detection', () => {
+    it('rejects converting a conditional lookup that would introduce a cycle', async () => {
+      let alpha: ITableFullVo | undefined;
+      let beta: ITableFullVo | undefined;
+      let betaLookup: IFieldVo | undefined;
+      let alphaRollup: IFieldVo | undefined;
+
+      try {
+        alpha = await createTable(baseId, {
+          name: 'ConditionalLookup_Cycle_Alpha',
+          fields: [
+            { name: 'Alpha Key', type: FieldType.SingleLineText } as IFieldRo,
+            { name: 'Alpha Value', type: FieldType.Number } as IFieldRo,
+          ],
+          records: [
+            { fields: { 'Alpha Key': 'A', 'Alpha Value': 10 } },
+            { fields: { 'Alpha Key': 'B', 'Alpha Value': 20 } },
+          ],
+        });
+        const alphaKeyId = alpha.fields.find((field) => field.name === 'Alpha Key')!.id;
+        const alphaValueId = alpha.fields.find((field) => field.name === 'Alpha Value')!.id;
+
+        beta = await createTable(baseId, {
+          name: 'ConditionalLookup_Cycle_Beta',
+          fields: [
+            { name: 'Beta Key', type: FieldType.SingleLineText } as IFieldRo,
+            { name: 'Beta Quantity', type: FieldType.Number } as IFieldRo,
+          ],
+          records: [
+            { fields: { 'Beta Key': 'A', 'Beta Quantity': 1 } },
+            { fields: { 'Beta Key': 'B', 'Beta Quantity': 2 } },
+          ],
+        });
+        const betaKeyId = beta.fields.find((field) => field.name === 'Beta Key')!.id;
+
+        const matchFilter: IFilter = {
+          conjunction: 'and',
+          filterSet: [
+            {
+              fieldId: alphaKeyId,
+              operator: 'is',
+              value: { type: 'field', fieldId: betaKeyId },
+            },
+          ],
+        };
+
+        betaLookup = await createField(beta.id, {
+          name: 'Alpha Values Lookup',
+          type: FieldType.Number,
+          isLookup: true,
+          isConditionalLookup: true,
+          lookupOptions: {
+            foreignTableId: alpha.id,
+            lookupFieldId: alphaValueId,
+            filter: matchFilter,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const rollupFilter: IFilter = {
+          conjunction: 'and',
+          filterSet: [
+            {
+              fieldId: betaKeyId,
+              operator: 'is',
+              value: { type: 'field', fieldId: alphaKeyId },
+            },
+          ],
+        };
+
+        alphaRollup = await createField(alpha.id, {
+          name: 'Beta Lookup Count',
+          type: FieldType.ConditionalRollup,
+          options: {
+            foreignTableId: beta.id,
+            lookupFieldId: betaLookup.id,
+            expression: 'count({values})',
+            filter: rollupFilter,
+          },
+        } as IFieldRo);
+
+        await convertField(
+          beta.id,
+          betaLookup.id,
+          {
+            name: 'Alpha Values Lookup',
+            type: FieldType.ConditionalRollup,
+            isLookup: true,
+            isConditionalLookup: true,
+            lookupOptions: {
+              foreignTableId: alpha.id,
+              lookupFieldId: alphaRollup.id,
+              filter: matchFilter,
+            } as ILookupOptionsRo,
+          } as IFieldRo,
+          400
+        );
+
+        const lookupAfterFailure = await getField(beta.id, betaLookup.id);
+        expect((lookupAfterFailure.lookupOptions as ILookupOptionsRo).lookupFieldId).toBe(
+          alphaValueId
+        );
+      } finally {
+        if (beta) {
+          await permanentDeleteTable(baseId, beta.id);
+        }
+        if (alpha) {
+          await permanentDeleteTable(baseId, alpha.id);
+        }
+      }
+    });
+  });
 });

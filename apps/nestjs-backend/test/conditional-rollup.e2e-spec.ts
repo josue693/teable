@@ -2791,4 +2791,113 @@ describe('OpenAPI Conditional Rollup field (e2e)', () => {
       }
     });
   });
+
+  describe('circular dependency detection', () => {
+    it('rejects converting conditional rollups into a cycle', async () => {
+      let alpha: ITableFullVo | undefined;
+      let beta: ITableFullVo | undefined;
+      let betaRollup: IFieldVo | undefined;
+      let alphaRollup: IFieldVo | undefined;
+
+      try {
+        alpha = await createTable(baseId, {
+          name: 'ConditionalRollup_Cycle_Alpha',
+          fields: [
+            { name: 'Alpha Key', type: FieldType.SingleLineText } as IFieldRo,
+            { name: 'Alpha Value', type: FieldType.Number } as IFieldRo,
+          ],
+          records: [
+            { fields: { 'Alpha Key': 'A', 'Alpha Value': 10 } },
+            { fields: { 'Alpha Key': 'B', 'Alpha Value': 20 } },
+          ],
+        });
+        const alphaKeyId = alpha.fields.find((field) => field.name === 'Alpha Key')!.id;
+        const alphaValueId = alpha.fields.find((field) => field.name === 'Alpha Value')!.id;
+
+        beta = await createTable(baseId, {
+          name: 'ConditionalRollup_Cycle_Beta',
+          fields: [
+            { name: 'Beta Key', type: FieldType.SingleLineText } as IFieldRo,
+            { name: 'Beta Quantity', type: FieldType.Number } as IFieldRo,
+          ],
+          records: [
+            { fields: { 'Beta Key': 'A', 'Beta Quantity': 1 } },
+            { fields: { 'Beta Key': 'B', 'Beta Quantity': 2 } },
+          ],
+        });
+        const betaKeyId = beta.fields.find((field) => field.name === 'Beta Key')!.id;
+
+        const matchAlphaToBeta: IFilter = {
+          conjunction: 'and',
+          filterSet: [
+            {
+              fieldId: alphaKeyId,
+              operator: 'is',
+              value: { type: 'field', fieldId: betaKeyId },
+            },
+          ],
+        };
+
+        const matchBetaToAlpha: IFilter = {
+          conjunction: 'and',
+          filterSet: [
+            {
+              fieldId: betaKeyId,
+              operator: 'is',
+              value: { type: 'field', fieldId: alphaKeyId },
+            },
+          ],
+        };
+
+        betaRollup = await createField(beta.id, {
+          name: 'Alpha Value Count',
+          type: FieldType.ConditionalRollup,
+          options: {
+            foreignTableId: alpha.id,
+            lookupFieldId: alphaValueId,
+            expression: 'count({values})',
+            filter: matchAlphaToBeta,
+          },
+        } as IFieldRo);
+
+        alphaRollup = await createField(alpha.id, {
+          name: 'Beta Rollup Count',
+          type: FieldType.ConditionalRollup,
+          options: {
+            foreignTableId: beta.id,
+            lookupFieldId: betaRollup.id,
+            expression: 'count({values})',
+            filter: matchBetaToAlpha,
+          },
+        } as IFieldRo);
+
+        await convertField(
+          beta.id,
+          betaRollup.id,
+          {
+            name: 'Alpha Value Count',
+            type: FieldType.ConditionalRollup,
+            options: {
+              foreignTableId: alpha.id,
+              lookupFieldId: alphaRollup.id,
+              expression: 'count({values})',
+              filter: matchAlphaToBeta,
+            },
+          } as IFieldRo,
+          400
+        );
+
+        const rollupAfterFailure = await getField(beta.id, betaRollup.id);
+        const rollupOptions = rollupAfterFailure.options as IConditionalRollupFieldOptions;
+        expect(rollupOptions.lookupFieldId).toBe(alphaValueId);
+      } finally {
+        if (beta) {
+          await permanentDeleteTable(baseId, beta.id);
+        }
+        if (alpha) {
+          await permanentDeleteTable(baseId, alpha.id);
+        }
+      }
+    });
+  });
 });
