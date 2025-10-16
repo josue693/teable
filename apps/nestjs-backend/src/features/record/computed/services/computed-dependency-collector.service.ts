@@ -383,7 +383,8 @@ export class ComputedDependencyCollectorService {
 
   private async getConditionalRollupImpactedRecordIds(
     edge: IConditionalRollupAdjacencyEdge,
-    foreignRecordIds: string[]
+    foreignRecordIds: string[],
+    changeContextMap?: Map<string, ICellContext[]>
   ): Promise<string[] | typeof ALL_RECORDS> {
     if (!foreignRecordIds.length) {
       return [];
@@ -428,17 +429,19 @@ export class ComputedDependencyCollectorService {
     const hostAlias = '__host';
     const foreignAlias = '__foreign';
 
+    const quoteIdentifier = (name: string) => name.replace(/"/g, '""');
+
     const selectionMap = new Map<string, string>();
     const foreignFieldObj: Record<string, FieldCore> = {};
     for (const [id, field] of foreignFieldMap) {
-      selectionMap.set(id, `"${foreignAlias}"."${field.dbFieldName}"`);
+      selectionMap.set(id, `"${foreignAlias}"."${quoteIdentifier(field.dbFieldName)}"`);
       foreignFieldObj[id] = field;
     }
 
     const fieldReferenceSelectionMap = new Map<string, string>();
     const fieldReferenceFieldMap = new Map<string, FieldCore>();
     for (const [id, field] of hostFieldMap) {
-      fieldReferenceSelectionMap.set(id, `"${hostAlias}"."${field.dbFieldName}"`);
+      fieldReferenceSelectionMap.set(id, `"${hostAlias}"."${quoteIdentifier(field.dbFieldName)}"`);
       fieldReferenceFieldMap.set(id, field);
     }
 
@@ -466,6 +469,129 @@ export class ComputedDependencyCollectorService {
 
     const ids = new Set<string>();
     for (const row of rows) {
+      const id = row.id || row.__id;
+      if (id) {
+        ids.add(id);
+      }
+    }
+
+    if (!changeContextMap || !changeContextMap.size) {
+      return Array.from(ids);
+    }
+
+    const foreignDbFieldNamesOrdered = Array.from(
+      new Set(
+        Array.from(foreignFieldIds)
+          .map((fid) => foreignFieldMap.get(fid)?.dbFieldName)
+          .filter((name): name is string => !!name)
+      )
+    );
+
+    if (foreignDbFieldNamesOrdered.length !== foreignFieldIds.size) {
+      return ALL_RECORDS;
+    }
+
+    const { schema, table } = this.splitDbTableName(foreignTableName);
+    const foreignQueryBuilder = schema ? this.knex.withSchema(schema) : this.knex;
+    const selectColumns = ['__id', ...foreignDbFieldNamesOrdered];
+
+    const baseRows = await this.prismaService
+      .txClient()
+      .$queryRawUnsafe<
+        Record<string, unknown>[]
+      >(foreignQueryBuilder.select(selectColumns).from(table).whereIn('__id', uniqueForeignIds).toQuery());
+    const baseRowById = new Map<string, Record<string, unknown>>();
+    for (const row of baseRows) {
+      const id = row['__id'];
+      if (typeof id === 'string') {
+        baseRowById.set(id, row);
+      }
+    }
+
+    const updatedRows: Record<string, unknown>[] = [];
+    for (const recordId of uniqueForeignIds) {
+      const base: Record<string, unknown> = {
+        ...(baseRowById.get(recordId) ?? {}),
+        __id: recordId,
+      };
+      const recordContexts = changeContextMap.get(recordId) ?? [];
+      for (const ctx of recordContexts) {
+        const field = foreignFieldMap.get(ctx.fieldId);
+        if (!field) continue;
+        const converter = (
+          field as unknown as {
+            convertCellValue2DBValue?: (value: unknown) => unknown;
+          }
+        ).convertCellValue2DBValue;
+        const dbValue =
+          typeof converter === 'function' ? converter.call(field, ctx.newValue) : ctx.newValue;
+        base[field.dbFieldName] = dbValue;
+      }
+
+      let missing = false;
+      for (const fieldId of foreignFieldIds) {
+        const field = foreignFieldMap.get(fieldId);
+        if (!field) {
+          missing = true;
+          break;
+        }
+        if (!(field.dbFieldName in base)) {
+          missing = true;
+          break;
+        }
+      }
+      if (missing) {
+        return ALL_RECORDS;
+      }
+      updatedRows.push(base);
+    }
+
+    if (!updatedRows.length) {
+      return Array.from(ids);
+    }
+
+    const valueColumns = ['__id', ...foreignDbFieldNamesOrdered];
+    const valuesMatrix = updatedRows.map((row) => {
+      return valueColumns.map((column) => {
+        if (!(column in row)) return undefined;
+        return row[column];
+      });
+    });
+
+    if (valuesMatrix.some((row) => row.some((value) => typeof value === 'undefined'))) {
+      return ALL_RECORDS;
+    }
+
+    const valuePlaceholders = valuesMatrix
+      .map((row) => `(${row.map(() => '?').join(', ')})`)
+      .join(', ');
+    const bindings = valuesMatrix.flat();
+    const columnsSql = valueColumns.map((col) => `"${quoteIdentifier(col)}"`).join(', ');
+
+    const derivedRaw = this.knex.raw(
+      `(values ${valuePlaceholders}) as ${foreignAlias} (${columnsSql})`,
+      bindings
+    );
+    const postExistsSubquery = this.knex.select(this.knex.raw('1')).from(derivedRaw);
+
+    this.dbProvider
+      .filterQuery(postExistsSubquery, foreignFieldObj, filter, undefined, {
+        selectionMap,
+        fieldReferenceSelectionMap,
+        fieldReferenceFieldMap,
+      })
+      .appendQueryBuilder();
+
+    const postQueryBuilder = this.knex
+      .select(this.knex.raw(`"${hostAlias}"."__id" as id`))
+      .from(`${hostTableName} as ${hostAlias}`)
+      .whereExists(postExistsSubquery);
+
+    const postRows = await this.prismaService
+      .txClient()
+      .$queryRawUnsafe<{ id?: string; __id?: string }[]>(postQueryBuilder.toQuery());
+
+    for (const row of postRows) {
       const id = row.id || row.__id;
       if (id) {
         ids.add(id);
@@ -731,6 +857,16 @@ export class ComputedDependencyCollectorService {
     const changedRecordIds = Array.from(new Set(ctxs.map((c) => c.recordId)));
 
     // 1) Transitive dependents grouped by table (SQL CTE + join field)
+    const contextByRecord = ctxs.reduce<Map<string, ICellContext[]>>((map, ctx) => {
+      const list = map.get(ctx.recordId);
+      if (list) {
+        list.push(ctx);
+      } else {
+        map.set(ctx.recordId, [ctx]);
+      }
+      return map;
+    }, new Map());
+
     const relatedLinkIds = await this.resolveRelatedLinkFieldIds(changedFieldIds);
     const traversalFieldIds = Array.from(new Set([...changedFieldIds, ...relatedLinkIds]));
 
@@ -877,7 +1013,11 @@ export class ComputedDependencyCollectorService {
       for (const edge of referenceEdges) {
         const targetGroup = impact[edge.tableId];
         if (!targetGroup || !targetGroup.fieldIds.has(edge.fieldId)) continue;
-        const matched = await this.getConditionalRollupImpactedRecordIds(edge, currentIds);
+        const matched = await this.getConditionalRollupImpactedRecordIds(
+          edge,
+          currentIds,
+          src === tableId ? contextByRecord : undefined
+        );
         if (matched === ALL_RECORDS) {
           targetGroup.preferAutoNumberPaging = true;
           recordSets[edge.tableId] = ALL_RECORDS;
