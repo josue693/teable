@@ -65,6 +65,7 @@ const ConditionalRollupValue = (props: IConditionalRollupValueProps) => {
   const { literalComponent, value, onSelect, operator, referenceSource, modal, field } = props;
   const { t } = useTranslation();
   const referenceFields = referenceSource?.fields ?? [];
+  const referenceTableId = referenceSource?.tableId ?? referenceFields[0]?.tableId;
   const isFieldMode = isFieldReferenceValue(value);
   const [lastLiteralValue, setLastLiteralValue] = useState<IFilterItem['value'] | null>(
     isFieldMode ? null : (value as IFilterItem['value'])
@@ -107,7 +108,7 @@ const ConditionalRollupValue = (props: IConditionalRollupValueProps) => {
     onSelect({
       type: 'field',
       fieldId: fallbackFieldId,
-      tableId: referenceSource?.tableId,
+      tableId: referenceTableId,
     } satisfies IFieldReferenceValue);
   };
 
@@ -116,7 +117,7 @@ const ConditionalRollupValue = (props: IConditionalRollupValueProps) => {
     onSelect({
       type: 'field',
       fieldId,
-      tableId: referenceSource?.tableId,
+      tableId: referenceTableId,
     } satisfies IFieldReferenceValue);
   };
 
@@ -140,6 +141,8 @@ const ConditionalRollupValue = (props: IConditionalRollupValueProps) => {
           onSelect={handleFieldSelect}
           modal={modal}
           className="!h-9 w-40 rounded-r-none border-r-0"
+          showTableName={Boolean(referenceTableId)}
+          tableId={referenceTableId}
         />
       ) : (
         mergedLiteralComponent

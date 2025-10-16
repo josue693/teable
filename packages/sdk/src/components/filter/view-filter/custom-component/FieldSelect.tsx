@@ -1,7 +1,7 @@
 import { getValidFilterOperators, isFieldReferenceValue } from '@teable/core';
 import { cn } from '@teable/ui-lib';
 import { useCallback, useMemo } from 'react';
-import { useFieldStaticGetter } from '../../../../hooks';
+import { useFieldStaticGetter, useTables } from '../../../../hooks';
 import { useCrud } from '../../hooks';
 import type { IBaseFilterCustomComponentProps, IConditionItemProperty } from '../../types';
 import { DefaultErrorLabel } from '../component';
@@ -26,6 +26,27 @@ export const FieldSelect = <T extends IConditionItemProperty = IViewFilterCondit
     }));
   }, [fields]);
   const fieldStaticGetter = useFieldStaticGetter();
+  const tables = useTables();
+
+  const fieldReferenceValue = useMemo(() => {
+    const candidate = item?.value;
+    return isFieldReferenceValue(candidate) ? candidate : undefined;
+  }, [item?.value]);
+
+  const headingTableId = fieldReferenceValue?.tableId ?? fields[0]?.tableId;
+
+  const groupHeading = useMemo(() => {
+    if (!fieldReferenceValue) {
+      return undefined;
+    }
+    if (headingTableId) {
+      const tableName = tables?.find((table) => table.id === headingTableId)?.name;
+      if (tableName) {
+        return tableName;
+      }
+    }
+    return undefined;
+  }, [fieldReferenceValue, headingTableId, tables]);
   const optionRender = useCallback(
     (option: (typeof options)[number]) => {
       const { Icon } = fieldStaticGetter(option.type, {
@@ -84,6 +105,7 @@ export const FieldSelect = <T extends IConditionItemProperty = IViewFilterCondit
           </div>
         );
       }}
+      groupHeading={groupHeading}
     />
   );
 };

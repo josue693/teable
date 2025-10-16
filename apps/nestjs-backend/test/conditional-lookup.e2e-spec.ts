@@ -2605,6 +2605,122 @@ describe('OpenAPI Conditional Lookup field (e2e)', () => {
     });
   });
 
+  describe('conditional rollup filters referencing host titles', () => {
+    let tableA: ITableFullVo;
+    let tableB: ITableFullVo;
+    let tableATitleFieldId: string;
+    let tableBTitleFieldId: string;
+    let tableAFirstAlphaRecordId: string;
+    let tableABetaRecordId: string;
+    let tableASecondAlphaRecordId: string;
+    let tableBAlphaRecordId: string;
+    let tableBGammaRecordId: string;
+    let tableBConditionalRollupField: IFieldVo;
+    let tableASelfConditionalRollupField: IFieldVo;
+
+    beforeAll(async () => {
+      tableA = await createTable(baseId, {
+        name: 'ConditionalLookup_TitleMatch_Primary',
+        fields: [{ name: 'Title', type: FieldType.SingleLineText } as IFieldRo],
+        records: [
+          { fields: { Title: 'Alpha' } },
+          { fields: { Title: 'Beta' } },
+          { fields: { Title: 'Alpha' } },
+        ],
+      });
+      tableATitleFieldId = tableA.fields.find((field) => field.name === 'Title')!.id;
+      tableAFirstAlphaRecordId = tableA.records[0].id;
+      tableABetaRecordId = tableA.records[1].id;
+      tableASecondAlphaRecordId = tableA.records[2].id;
+
+      tableB = await createTable(baseId, {
+        name: 'ConditionalLookup_TitleMatch_Secondary',
+        fields: [{ name: 'Title', type: FieldType.SingleLineText } as IFieldRo],
+        records: [{ fields: { Title: 'Alpha' } }, { fields: { Title: 'Gamma' } }],
+      });
+      tableBTitleFieldId = tableB.fields.find((field) => field.name === 'Title')!.id;
+      tableBAlphaRecordId = tableB.records[0].id;
+      tableBGammaRecordId = tableB.records[1].id;
+
+      const matchPrimaryTitleFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: tableATitleFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: tableBTitleFieldId },
+          },
+        ],
+      };
+
+      tableBConditionalRollupField = await createField(tableB.id, {
+        name: 'Matching Primary Titles',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: tableA.id,
+          lookupFieldId: tableATitleFieldId,
+          expression: 'count({values})',
+          filter: matchPrimaryTitleFilter,
+        },
+      } as IFieldRo);
+
+      const selfTitleFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: tableATitleFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: tableATitleFieldId },
+          },
+        ],
+      };
+
+      tableASelfConditionalRollupField = await createField(tableA.id, {
+        name: 'Self Title Count',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: tableA.id,
+          lookupFieldId: tableATitleFieldId,
+          expression: 'count({values})',
+          filter: selfTitleFilter,
+        },
+      } as IFieldRo);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, tableB.id);
+      await permanentDeleteTable(baseId, tableA.id);
+    });
+
+    it('aggregates foreign matches when filter ties titles to host fields', async () => {
+      const tableBRecords = await getRecords(tableB.id, { fieldKeyType: FieldKeyType.Id });
+      const alphaRecord = tableBRecords.records.find(
+        (record) => record.id === tableBAlphaRecordId
+      )!;
+      const gammaRecord = tableBRecords.records.find(
+        (record) => record.id === tableBGammaRecordId
+      )!;
+
+      expect(alphaRecord.fields[tableBConditionalRollupField.id]).toEqual(2);
+      expect(gammaRecord.fields[tableBConditionalRollupField.id]).toEqual(0);
+    });
+
+    it('aggregates self-table matches when foreign scope equals host table', async () => {
+      const tableARecords = await getRecords(tableA.id, { fieldKeyType: FieldKeyType.Id });
+      const firstAlpha = tableARecords.records.find(
+        (record) => record.id === tableAFirstAlphaRecordId
+      )!;
+      const betaRecord = tableARecords.records.find((record) => record.id === tableABetaRecordId)!;
+      const secondAlpha = tableARecords.records.find(
+        (record) => record.id === tableASecondAlphaRecordId
+      )!;
+
+      expect(firstAlpha.fields[tableASelfConditionalRollupField.id]).toEqual(2);
+      expect(secondAlpha.fields[tableASelfConditionalRollupField.id]).toEqual(2);
+      expect(betaRecord.fields[tableASelfConditionalRollupField.id]).toEqual(1);
+    });
+  });
+
   describe('circular dependency detection', () => {
     it('rejects converting a conditional lookup that would introduce a cycle', async () => {
       let alpha: ITableFullVo | undefined;

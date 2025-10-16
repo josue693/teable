@@ -18,10 +18,18 @@ interface IFieldCommand {
   selectedIds?: string[];
   placeholder?: string;
   emptyHolder?: React.ReactNode;
+  groupHeading?: string;
 }
 
 export function FieldCommand(props: IFieldCommand) {
-  const { placeholder, emptyHolder, onSelect, selectedIds, fields: propsFields } = props;
+  const {
+    placeholder,
+    emptyHolder,
+    onSelect,
+    selectedIds,
+    fields: propsFields,
+    groupHeading,
+  } = props;
   const { t } = useTranslation();
 
   const defaultFields = useFields({ withHidden: true, withDenied: true });
@@ -42,7 +50,7 @@ export function FieldCommand(props: IFieldCommand) {
       />
       <CommandList>
         <CommandEmpty>{emptyHolder || t('common.search.empty')}</CommandEmpty>
-        <CommandGroup>
+        <CommandGroup heading={groupHeading}>
           {mergeFields?.map((field) => {
             const { Icon } = fieldStaticGetter(field.type, {
               isLookup: field.isLookup,

@@ -2,7 +2,7 @@ import { FieldType } from '@teable/core';
 import { ChevronDown } from '@teable/icons';
 import { Button, Popover, PopoverTrigger, PopoverContent, cn } from '@teable/ui-lib';
 import { useState, useMemo } from 'react';
-import { useFields, useFieldStaticGetter } from '../../hooks';
+import { useFields, useFieldStaticGetter, useTables } from '../../hooks';
 import type { IFieldInstance } from '../../model';
 import { FieldCommand } from './FieldCommand';
 
@@ -18,6 +18,9 @@ interface IFieldSelector {
   emptyHolder?: React.ReactNode;
   children?: React.ReactNode;
   modal?: boolean;
+  showTableName?: boolean;
+  tableId?: string;
+  tableName?: string;
 }
 
 export function FieldSelector(props: IFieldSelector) {
@@ -31,6 +34,9 @@ export function FieldSelector(props: IFieldSelector) {
     children,
     modal = false,
     fields: propsFields,
+    showTableName = false,
+    tableId: tableIdProp,
+    tableName: tableNameProp,
   } = props;
 
   const [open, setOpen] = useState(false);
@@ -42,12 +48,40 @@ export function FieldSelector(props: IFieldSelector) {
 
   const fieldStaticGetter = useFieldStaticGetter();
 
+  const tables = useTables();
+
   const { Icon } = fieldStaticGetter(selectedField?.type || FieldType.SingleLineText, {
     isLookup: selectedField?.isLookup,
     isConditionalLookup: selectedField?.isConditionalLookup,
     hasAiConfig: Boolean(selectedField?.aiConfig),
     deniedReadRecord: !selectedField?.canReadFieldRecord,
   });
+
+  const tableId = useMemo(() => {
+    if (!showTableName) {
+      return undefined;
+    }
+    if (tableIdProp) {
+      return tableIdProp;
+    }
+    if (selectedField?.tableId) {
+      return selectedField.tableId;
+    }
+    return fields[0]?.tableId;
+  }, [fields, selectedField?.tableId, showTableName, tableIdProp]);
+
+  const tableHeading = useMemo(() => {
+    if (!showTableName) {
+      return undefined;
+    }
+    if (tableNameProp) {
+      return tableNameProp;
+    }
+    if (!tableId) {
+      return undefined;
+    }
+    return tables?.find((table) => table.id === tableId)?.name;
+  }, [showTableName, tableNameProp, tableId, tables]);
 
   const selectHandler = (value: string) => {
     setOpen(false);
@@ -85,6 +119,7 @@ export function FieldSelector(props: IFieldSelector) {
           placeholder={placeholder}
           emptyHolder={emptyHolder}
           onSelect={selectHandler}
+          groupHeading={tableHeading}
         />
       </PopoverContent>
     </Popover>
