@@ -4184,6 +4184,55 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
     });
   });
 
+  describe('rollup conversion regressions', () => {
+    bfAf();
+
+    it('should convert an errored rollup to text without type mismatch', async () => {
+      const linkField = await createField(table1.id, {
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: table2.id,
+        },
+      });
+
+      // Seed a linked record to exercise rollup evaluation
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[0].id, 'seed');
+      await updateRecordByApi(table1.id, table1.records[0].id, linkField.id, {
+        id: table2.records[0].id,
+      });
+
+      const rollupField = await createField(table1.id, {
+        name: 'Done Rate',
+        type: FieldType.Rollup,
+        options: {
+          expression: 'countall({values})',
+        },
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields[0].id,
+          linkFieldId: linkField.id,
+        },
+      });
+
+      // Break the link dependency via API so the rollup enters an errored state.
+      await convertField(table1.id, linkField.id, {
+        type: FieldType.SingleLineText,
+      });
+      const erroredRollup = await getField(table1.id, rollupField.id);
+      expect(erroredRollup.hasError).toBeTruthy();
+
+      const updatedField = await convertField(table1.id, rollupField.id, {
+        type: FieldType.SingleLineText,
+      });
+
+      expect(updatedField.type).toBe(FieldType.SingleLineText);
+      expect(updatedField.dbFieldType).toBe(DbFieldType.Text);
+      expect(updatedField.cellValueType).toBe(CellValueType.String);
+      expect(updatedField.hasError ?? null).toBeNull();
+    });
+  });
+
   describe('convert user field', () => {
     bfAf();
 
