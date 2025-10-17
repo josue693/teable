@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   CellValueType,
@@ -12,6 +13,7 @@ import {
   isLinkLookupOptions,
   isFieldReferenceValue,
   isFieldReferenceComparable,
+  extractFieldIdsFromFilter,
 } from '@teable/core';
 import type {
   IFieldVo,
@@ -21,6 +23,7 @@ import type {
   IColumnMeta,
   ILinkFieldOptions,
   IConditionalRollupFieldOptions,
+  IConditionalLookupOptions,
   IGetFieldsQuery,
   IFilter,
   IFilterItem,
@@ -30,7 +33,7 @@ import { PrismaService } from '@teable/db-main-prisma';
 import type { IDuplicateFieldRo } from '@teable/openapi';
 import { instanceToPlain } from 'class-transformer';
 import { Knex } from 'knex';
-import { groupBy, omit, pick } from 'lodash';
+import { groupBy, isEqual, omit, pick } from 'lodash';
 import { InjectModel } from 'nest-knexjs';
 import { ClsService } from 'nestjs-cls';
 import { ThresholdConfig, IThresholdConfig } from '../../../configs/threshold.config';
@@ -201,6 +204,173 @@ export class FieldOpenApiService {
     }
 
     return this.validateFilterFieldReferences(tableId, foreignTableId, meta?.filter);
+  }
+
+  private async findConditionalFilterDependentFields(startFieldIds: readonly string[]): Promise<
+    Array<{
+      id: string;
+      tableId: string;
+      type: string;
+      options: string | null;
+      lookupOptions: string | null;
+      isConditionalLookup: boolean;
+    }>
+  > {
+    if (!startFieldIds.length) {
+      return [];
+    }
+
+    const nonRecursive = this.knex
+      .select('from_field_id', 'to_field_id')
+      .from('reference')
+      .whereIn('from_field_id', startFieldIds);
+
+    const recursive = this.knex
+      .select({ from_field_id: 'r.from_field_id', to_field_id: 'r.to_field_id' })
+      .from({ r: 'reference' })
+      .join({ d: 'dep' }, 'r.from_field_id', 'd.to_field_id');
+
+    const query = this.knex
+      .withRecursive('dep', ['from_field_id', 'to_field_id'], nonRecursive.union(recursive))
+      .select({
+        id: 'f.id',
+        table_id: 'f.table_id',
+        type: 'f.type',
+        options: 'f.options',
+        lookup_options: 'f.lookup_options',
+        is_conditional_lookup: 'f.is_conditional_lookup',
+      })
+      .from({ dep: 'dep' })
+      .join({ f: 'field' }, 'dep.to_field_id', 'f.id')
+      .whereNull('f.deleted_time')
+      .andWhere((qb) =>
+        qb.where('f.type', FieldType.ConditionalRollup).orWhere('f.is_conditional_lookup', true)
+      )
+      .distinct();
+
+    const rows = await this.prismaService.txClient().$queryRawUnsafe<
+      Array<{
+        id: string;
+        table_id: string;
+        type: string;
+        options: string | null;
+        lookup_options: string | null;
+        is_conditional_lookup: number | boolean | null;
+      }>
+    >(query.toQuery());
+
+    return rows.map((row) => ({
+      id: row.id,
+      tableId: row.table_id,
+      type: row.type,
+      options: row.options,
+      lookupOptions: row.lookup_options,
+      isConditionalLookup: Boolean(row.is_conditional_lookup),
+    }));
+  }
+
+  // eslint-disable-next-line sonarjs/cognitive-complexity
+  private async syncConditionalFiltersByFieldChanges(
+    newField: IFieldInstance,
+    oldField: IFieldInstance
+  ) {
+    const fieldId = newField.id;
+    if (!fieldId) {
+      return;
+    }
+
+    const selectTypes = new Set([FieldType.SingleSelect, FieldType.MultipleSelect]);
+    if (newField.type !== oldField.type || !selectTypes.has(newField.type)) {
+      return;
+    }
+
+    const dependents = await this.findConditionalFilterDependentFields([fieldId]);
+    if (!dependents.length) {
+      return;
+    }
+
+    const pendingOps: Record<string, { fieldId: string; ops: IOtOperation[] }[]> = {};
+    const enqueueFieldOps = (tableId: string, fieldId: string, ops: IOtOperation[]) => {
+      if (!ops.length) return;
+      (pendingOps[tableId] ||= []).push({ fieldId, ops });
+    };
+    const normalizeFilter = (filter: IFilter | null | undefined) =>
+      filter && filter.filterSet?.length ? filter : null;
+
+    for (const field of dependents) {
+      if (field.type === FieldType.ConditionalRollup) {
+        if (!field.options) continue;
+        let options: IConditionalRollupFieldOptions;
+        try {
+          options = JSON.parse(field.options) as IConditionalRollupFieldOptions;
+        } catch {
+          continue;
+        }
+
+        const originalFilter = options.filter;
+        if (!originalFilter) continue;
+        const filterRefs = extractFieldIdsFromFilter(originalFilter, true);
+        if (!filterRefs.includes(fieldId)) continue;
+
+        const updatedFilter = this.fieldViewSyncService.getNewFilterByFieldChanges(
+          originalFilter,
+          newField,
+          oldField
+        );
+        const normalizedOriginal = normalizeFilter(originalFilter);
+        const normalizedUpdated = normalizeFilter(updatedFilter);
+
+        if (isEqual(normalizedOriginal, normalizedUpdated)) continue;
+
+        const ops = [
+          FieldOpBuilder.editor.setFieldProperty.build({
+            key: 'options',
+            oldValue: options,
+            newValue: { ...options, filter: normalizedUpdated },
+          }),
+        ];
+        enqueueFieldOps(field.tableId, field.id, ops);
+        continue;
+      }
+
+      if (!field.isConditionalLookup) continue;
+      if (!field.lookupOptions) continue;
+
+      let lookupOptions: IConditionalLookupOptions;
+      try {
+        lookupOptions = JSON.parse(field.lookupOptions) as IConditionalLookupOptions;
+      } catch {
+        continue;
+      }
+
+      const originalFilter = lookupOptions.filter;
+      if (!originalFilter) continue;
+      const filterRefs = extractFieldIdsFromFilter(originalFilter, true);
+      if (!filterRefs.includes(fieldId)) continue;
+
+      const updatedFilter = this.fieldViewSyncService.getNewFilterByFieldChanges(
+        originalFilter,
+        newField,
+        oldField
+      );
+      const normalizedOriginal = normalizeFilter(originalFilter);
+      const normalizedUpdated = normalizeFilter(updatedFilter);
+
+      if (isEqual(normalizedOriginal, normalizedUpdated)) continue;
+
+      const ops = [
+        FieldOpBuilder.editor.setFieldProperty.build({
+          key: 'lookupOptions',
+          oldValue: lookupOptions,
+          newValue: { ...lookupOptions, filter: normalizedUpdated },
+        }),
+      ];
+      enqueueFieldOps(field.tableId, field.id, ops);
+    }
+
+    for (const [targetTableId, ops] of Object.entries(pendingOps)) {
+      await this.fieldService.batchUpdateFields(targetTableId, ops);
+    }
   }
 
   private async validateFilterFieldReferences(
@@ -775,6 +945,11 @@ export class FieldOpenApiService {
             newField,
             oldField
           );
+          await this.syncConditionalFiltersByFieldChanges(newField, oldField);
+          if (supplementChange) {
+            const { newField: sNew, oldField: sOld } = supplementChange;
+            await this.syncConditionalFiltersByFieldChanges(sNew, sOld);
+          }
           await this.fieldConvertingService.deleteOrCreateSupplementLink(
             tableId,
             newField,

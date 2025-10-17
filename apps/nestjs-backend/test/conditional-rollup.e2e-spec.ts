@@ -9,6 +9,7 @@ import type {
   ILookupOptionsRo,
   IConditionalRollupFieldOptions,
   IFilter,
+  IFilterItem,
 } from '@teable/core';
 import {
   CellValueType,
@@ -137,6 +138,81 @@ describe('OpenAPI Conditional Rollup field (e2e)', () => {
 
       expect(first.fields[lookupField.id]).toEqual(2);
       expect(second.fields[lookupField.id]).toEqual(1);
+    });
+  });
+
+  describe('filter option synchronization', () => {
+    let foreign: ITableFullVo;
+    let host: ITableFullVo;
+    let rollupField: IFieldVo;
+    let statusId: string;
+    let amountId: string;
+    const statusChoices = [
+      { id: 'status-active', name: 'Active', color: Colors.Green },
+      { id: 'status-closed', name: 'Closed', color: Colors.Gray },
+    ];
+
+    beforeAll(async () => {
+      foreign = await createTable(baseId, {
+        name: 'ConditionalRollup_Filter_Foreign',
+        fields: [
+          {
+            name: 'Status',
+            type: FieldType.SingleSelect,
+            options: { choices: statusChoices },
+          } as IFieldRo,
+          { name: 'Amount', type: FieldType.Number } as IFieldRo,
+        ],
+      });
+      statusId = foreign.fields.find((field) => field.name === 'Status')!.id;
+      amountId = foreign.fields.find((field) => field.name === 'Amount')!.id;
+
+      host = await createTable(baseId, {
+        name: 'ConditionalRollup_Filter_Host',
+        fields: [{ name: 'Label', type: FieldType.SingleLineText } as IFieldRo],
+      });
+
+      const filter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: statusId,
+            operator: 'is',
+            value: 'Active',
+          },
+        ],
+      };
+
+      rollupField = await createField(host.id, {
+        name: 'Active Amount Sum',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: foreign.id,
+          lookupFieldId: amountId,
+          expression: 'sum({values})',
+          filter,
+        },
+      } as IFieldRo);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, host.id);
+      await permanentDeleteTable(baseId, foreign.id);
+    });
+
+    it('should update conditional rollup filters when select option names change', async () => {
+      await convertField(foreign.id, statusId, {
+        name: 'Status',
+        type: FieldType.SingleSelect,
+        options: {
+          choices: [{ ...statusChoices[0], name: 'Active Plus' }, statusChoices[1]],
+        },
+      } as IFieldRo);
+
+      const refreshed = await getField(host.id, rollupField.id);
+      const options = refreshed.options as IConditionalRollupFieldOptions;
+      const filterItem = options.filter?.filterSet?.[0] as IFilterItem | undefined;
+      expect(filterItem?.value).toBe('Active Plus');
     });
   });
 

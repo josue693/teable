@@ -9,6 +9,7 @@ import type {
   IFieldVo,
   IFilter,
   ILookupOptionsRo,
+  IConditionalLookupOptions,
 } from '@teable/core';
 import {
   isConditionalLookupOptions,
@@ -159,6 +160,83 @@ describe('OpenAPI Conditional Lookup field (e2e)', () => {
       await updateRecordByApi(foreign.id, gammaRecordId, statusId, 'Closed');
       const restored = await getRecord(host.id, activeHostRecordId);
       expect(restored.fields[lookupField.id]).toEqual(['Alpha', 'Beta']);
+    });
+  });
+
+  describe('filter option synchronization', () => {
+    let foreign: ITableFullVo;
+    let host: ITableFullVo;
+    let lookupField: IFieldVo;
+    let titleId: string;
+    let statusId: string;
+    const statusChoices = [
+      { id: 'status-active', name: 'Active', color: Colors.Green },
+      { id: 'status-closed', name: 'Closed', color: Colors.Gray },
+    ];
+
+    beforeAll(async () => {
+      foreign = await createTable(baseId, {
+        name: 'ConditionalLookup_Filter_Foreign',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          {
+            name: 'Status',
+            type: FieldType.SingleSelect,
+            options: { choices: statusChoices },
+          } as IFieldRo,
+        ],
+      });
+      titleId = foreign.fields.find((field) => field.name === 'Title')!.id;
+      statusId = foreign.fields.find((field) => field.name === 'Status')!.id;
+
+      host = await createTable(baseId, {
+        name: 'ConditionalLookup_Filter_Host',
+        fields: [{ name: 'Label', type: FieldType.SingleLineText } as IFieldRo],
+      });
+
+      const filter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: statusId,
+            operator: 'is',
+            value: 'Active',
+          },
+        ],
+      };
+
+      lookupField = await createField(host.id, {
+        name: 'Active Titles',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: foreign.id,
+          lookupFieldId: titleId,
+          filter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, host.id);
+      await permanentDeleteTable(baseId, foreign.id);
+    });
+
+    it('should update conditional lookup filters when select option names change', async () => {
+      await convertField(foreign.id, statusId, {
+        name: 'Status',
+        type: FieldType.SingleSelect,
+        options: {
+          choices: [{ ...statusChoices[0], name: 'Active Plus' }, statusChoices[1]],
+        },
+      } as IFieldRo);
+
+      const refreshed = await getField(host.id, lookupField.id);
+      const updatedLookup = refreshed.lookupOptions as IConditionalLookupOptions | undefined;
+      const filterItem = updatedLookup?.filter?.filterSet?.[0];
+      // @ts-expect-error handle value
+      expect(filterItem?.value).toBe('Active Plus');
     });
   });
 
