@@ -6,10 +6,12 @@ import type {
   ILookupOptionsRo,
   IConditionalRollupFieldOptions,
   IConditionalLookupOptions,
+  IFilter,
 } from '@teable/core';
 import {
   FieldType,
   HttpErrorCode,
+  extractFieldIdsFromFilter,
   isConditionalLookupOptions,
   isLinkLookupOptions,
 } from '@teable/core';
@@ -936,6 +938,13 @@ export class FieldDuplicateService {
       const mappedLookupFieldId = originalLookupFieldId
         ? sourceToTargetFieldMap[originalLookupFieldId] || originalLookupFieldId
         : undefined;
+      const remappedLookupOptions = conditionalOptions
+        ? (replaceStringByMap(
+            conditionalOptions,
+            { tableIdMap, fieldIdMap: sourceToTargetFieldMap },
+            false
+          ) as IConditionalLookupOptions)
+        : undefined;
 
       if (!mappedForeignTableId || !(hasError || mappedLookupFieldId)) {
         throw new BadGatewayException(
@@ -954,10 +963,12 @@ export class FieldDuplicateService {
         name,
         options,
         lookupOptions: {
-          baseId: conditionalOptions?.baseId,
-          foreignTableId: mappedForeignTableId,
+          baseId: remappedLookupOptions?.baseId ?? conditionalOptions?.baseId,
+          foreignTableId: remappedLookupOptions?.foreignTableId ?? mappedForeignTableId,
           lookupFieldId: effectiveLookupFieldId,
-          filter: conditionalOptions?.filter ?? null,
+          filter: remappedLookupOptions?.filter ?? conditionalOptions?.filter ?? null,
+          sort: remappedLookupOptions?.sort ?? conditionalOptions?.sort ?? undefined,
+          limit: remappedLookupOptions?.limit ?? conditionalOptions?.limit ?? undefined,
         },
       });
 
@@ -972,6 +983,9 @@ export class FieldDuplicateService {
             lookupOptions: JSON.stringify({
               ...newField.lookupOptions,
               lookupFieldId: conditionalOptions?.lookupFieldId,
+              filter: conditionalOptions?.filter ?? null,
+              sort: conditionalOptions?.sort ?? undefined,
+              limit: conditionalOptions?.limit ?? undefined,
             }),
             options: JSON.stringify(options),
           },
@@ -1400,7 +1414,7 @@ export class FieldDuplicateService {
     fieldMap: Record<string, string>,
     scope: 'base' | 'table' = 'base'
   ) {
-    const { isLookup, type } = field;
+    const { isLookup, type, isConditionalLookup } = field;
     if (field.aiConfig) {
       const { aiConfig } = field;
 
@@ -1421,6 +1435,42 @@ export class FieldDuplicateService {
       const referencedFields = this.extractFieldIds(formulaOptions.expression);
       const keys = Object.keys(fieldMap);
       return referencedFields.every((field) => keys.includes(field));
+    }
+
+    if (type === FieldType.ConditionalRollup) {
+      const options = field.options as IConditionalRollupFieldOptions | undefined;
+      if (!options) {
+        return false;
+      }
+
+      if (options.baseId) {
+        return true;
+      }
+
+      const dependencies = this.collectConditionalDependencies({
+        lookupFieldId: options.lookupFieldId,
+        filter: options.filter,
+        sortFieldId: options.sort?.fieldId,
+      });
+      return this.areDependenciesResolved(fieldMap, dependencies);
+    }
+
+    if (isLookup && isConditionalLookup) {
+      const lookupOptions = field.lookupOptions as IConditionalLookupOptions | undefined;
+      if (!lookupOptions) {
+        return false;
+      }
+
+      if (lookupOptions.baseId) {
+        return true;
+      }
+
+      const dependencies = this.collectConditionalDependencies({
+        lookupFieldId: lookupOptions.lookupFieldId,
+        filter: lookupOptions.filter,
+        sortFieldId: lookupOptions.sort?.fieldId,
+      });
+      return this.areDependenciesResolved(fieldMap, dependencies);
     }
 
     if (isLookup || type === FieldType.Rollup) {
@@ -1464,5 +1514,43 @@ export class FieldDuplicateService {
       return [];
     }
     return matches.map((match) => match.slice(1, -1));
+  }
+
+  private collectConditionalDependencies({
+    lookupFieldId,
+    filter,
+    sortFieldId,
+  }: {
+    lookupFieldId?: string | null;
+    filter?: IFilter | null;
+    sortFieldId?: string | null;
+  }): string[] {
+    const dependencies = new Set<string>();
+
+    if (lookupFieldId) {
+      dependencies.add(lookupFieldId);
+    }
+
+    extractFieldIdsFromFilter(filter || undefined, true).forEach((fieldId) => {
+      dependencies.add(fieldId);
+    });
+
+    if (sortFieldId) {
+      dependencies.add(sortFieldId);
+    }
+
+    return [...dependencies];
+  }
+
+  private areDependenciesResolved(
+    fieldMap: Record<string, string>,
+    dependencies: string[]
+  ): boolean {
+    if (!dependencies.length) {
+      return true;
+    }
+
+    const knownFieldIds = new Set(Object.keys(fieldMap));
+    return dependencies.every((fieldId) => knownFieldIds.has(fieldId));
   }
 }
