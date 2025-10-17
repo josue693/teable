@@ -222,15 +222,15 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     }
 
     // If this lookup field is marked as error, don't attempt to resolve.
-    // Use untyped NULL to safely fit any target column type.
+    // Emit a typed NULL so the expression matches the physical column.
     if (field.hasError) {
-      return 'NULL';
+      return this.dialect.typedNullFor(field.dbFieldType);
     }
 
     if (field.isConditionalLookup) {
       const cteName = this.fieldCteMap.get(field.id);
       if (!cteName) {
-        return 'NULL';
+        return this.dialect.typedNullFor(field.dbFieldType);
       }
       return `"${cteName}"."conditional_lookup_${field.id}"`;
     }
@@ -279,7 +279,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
         }
       }
       // If still not found or field has error, return NULL instead of throwing
-      return 'NULL';
+      return this.dialect.typedNullFor(field.dbFieldType);
     }
 
     // If the target is a Link field, read its link_value from the JOINed CTE or subquery
@@ -307,7 +307,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
         }
       }
       // If self-referencing or missing, return NULL
-      return 'NULL';
+      return this.dialect.typedNullFor(field.dbFieldType);
     }
 
     // If the target is a Rollup field, read its precomputed rollup value from the link CTE
@@ -826,7 +826,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
 
     // If rollup field is marked as error, don't attempt to resolve; just return NULL
     if (field.hasError) {
-      return 'NULL';
+      return this.dialect.typedNullFor(field.dbFieldType);
     }
 
     const qb = this.qb.client.queryBuilder();
@@ -844,7 +844,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     const foreignAlias = this.getForeignAlias();
     const targetLookupField = field.getForeignLookupField(this.foreignTable);
     if (!targetLookupField) {
-      return 'NULL';
+      return this.dialect.typedNullFor(field.dbFieldType);
     }
     // If the target of rollup depends on a foreign link CTE, reference the JOINed CTE columns or use subquery
     if (targetLookupField.type === FieldType.Formula) {
