@@ -4,12 +4,14 @@ import { FieldOpBuilder, FieldType, HttpErrorCode } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { difference, keyBy } from 'lodash';
 import { CustomHttpException } from '../../../custom.exception';
+import { DropColumnOperationType } from '../../../db-provider/drop-database-column-query/drop-database-column-field-visitor.interface';
 import { Timing } from '../../../utils/timing';
 import { FieldCalculationService } from '../../calculation/field-calculation.service';
 import { TableIndexService } from '../../table/table-index.service';
 import { FieldService } from '../field.service';
 import { IFieldInstance, createFieldInstanceByRaw } from '../model/factory';
 import { FieldSupplementService } from './field-supplement.service';
+import { FormulaFieldService } from './formula-field.service';
 
 @Injectable()
 export class FieldDeletingService {
@@ -20,7 +22,8 @@ export class FieldDeletingService {
     private readonly fieldService: FieldService,
     private readonly tableIndexService: TableIndexService,
     private readonly fieldSupplementService: FieldSupplementService,
-    private readonly fieldCalculationService: FieldCalculationService
+    private readonly fieldCalculationService: FieldCalculationService,
+    private readonly formulaFieldService: FormulaFieldService
   ) {}
 
   private async markFieldsAsError(tableId: string, fieldIds: string[]) {
@@ -116,18 +119,20 @@ export class FieldDeletingService {
           },
         });
       }
-
-      await this.fieldCalculationService.calculateFields(fieldRawMap[field.id].tableId, [field.id]);
     }
 
     return fieldInstances.map((field) => field.id);
   }
 
   async cleanRef(tableId: string, field: IFieldInstance) {
+    // 2. Delete reference relationships
     const errorRefFieldIds = await this.fieldSupplementService.deleteReference(field.id);
 
+    // 3. Filter out fields that have already been cascade deleted
+    const remainingErrorFieldIds = errorRefFieldIds;
+
     const resetLinkFieldIds = await this.resetLinkFieldLookupFieldId(
-      errorRefFieldIds,
+      remainingErrorFieldIds,
       tableId,
       field.id
     );
@@ -136,23 +141,46 @@ export class FieldDeletingService {
       !field.isLookup &&
       field.type === FieldType.Link &&
       (await this.fieldSupplementService.deleteLookupFieldReference(field.id));
-    const errorFieldIds = difference(errorRefFieldIds, resetLinkFieldIds).concat(
+    const errorFieldIds = difference(remainingErrorFieldIds, resetLinkFieldIds).concat(
       errorLookupFieldIds || []
     );
-    const fieldRaws = await this.prismaService.txClient().field.findMany({
-      where: { id: { in: errorFieldIds } },
-      select: { id: true, tableId: true },
-    });
 
-    for (const fieldRaw of fieldRaws) {
-      const { id, tableId } = fieldRaw;
-      await this.markFieldsAsError(tableId, [id]);
+    // 4. Mark remaining fields as error
+    if (errorFieldIds.length > 0) {
+      // Additionally, propagate error to downstream formula fields (same table) that depend
+      // on these errored fields (e.g., a -> b -> c; deleting a should set b and c hasError)
+      const transitiveFormulaIds = new Set<string>();
+      for (const fid of errorFieldIds) {
+        try {
+          const deps = await this.formulaFieldService.getDependentFormulaFieldsInOrder(fid);
+          deps.filter((d) => d.tableId === tableId).forEach((d) => transitiveFormulaIds.add(d.id));
+        } catch (e) {
+          this.logger.warn(`Failed to load dependent formulas for field ${fid}: ${e}`);
+        }
+      }
+
+      // Merge direct and transitive ids
+      const allErrorIds = Array.from(new Set<string>([...errorFieldIds, ...transitiveFormulaIds]));
+
+      const fieldRaws = await this.prismaService.txClient().field.findMany({
+        where: { id: { in: allErrorIds } },
+        select: { id: true, tableId: true },
+      });
+
+      for (const fieldRaw of fieldRaws) {
+        const { id, tableId } = fieldRaw;
+        await this.markFieldsAsError(tableId, [id]);
+      }
     }
   }
 
-  async deleteFieldItem(tableId: string, field: IFieldInstance) {
+  async deleteFieldItem(
+    tableId: string,
+    field: IFieldInstance,
+    operationType: DropColumnOperationType = DropColumnOperationType.DELETE_FIELD
+  ) {
     await this.cleanRef(tableId, field);
-    await this.fieldService.batchDeleteFields(tableId, [field.id]);
+    await this.fieldService.batchDeleteFields(tableId, [field.id], operationType);
   }
 
   async getField(tableId: string, fieldId: string): Promise<IFieldInstance | null> {
@@ -188,12 +216,21 @@ export class FieldDeletingService {
     if (type === FieldType.Link && !isLookup) {
       const linkFieldOptions = field.options;
       const { foreignTableId, symmetricFieldId } = linkFieldOptions;
-      await this.fieldSupplementService.cleanForeignKey(linkFieldOptions);
-      await this.deleteFieldItem(tableId, field);
+      // Foreign key cleanup is handled in the drop visitor during deleteFieldItem
+      // First delete the main field and its FK artifacts
+      await this.deleteFieldItem(tableId, field, DropColumnOperationType.DELETE_FIELD);
 
       if (symmetricFieldId) {
         const symmetricField = await this.getField(foreignTableId, symmetricFieldId);
-        symmetricField && (await this.deleteFieldItem(foreignTableId, symmetricField));
+        // When deleting the symmetric field as part of a bidirectional pair,
+        // preserve FK artifacts that were already dropped when deleting the main field
+        if (symmetricField) {
+          await this.deleteFieldItem(
+            foreignTableId,
+            symmetricField,
+            DropColumnOperationType.DELETE_SYMMETRIC_FIELD
+          );
+        }
         return [
           { tableId, fieldId },
           { tableId: foreignTableId, fieldId: symmetricFieldId },

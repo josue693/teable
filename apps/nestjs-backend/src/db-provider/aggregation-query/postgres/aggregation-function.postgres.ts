@@ -12,7 +12,7 @@ export class AggregationFunctionPostgres extends AbstractAggregationFunction {
       return super.unique();
     }
 
-    return this.knex.raw(`COUNT(DISTINCT ?? ->> 'id')`, [this.tableColumnRef]).toQuery();
+    return this.knex.raw(`COUNT(DISTINCT ${this.tableColumnRef} ->> 'id')`).toQuery();
   }
 
   percentUnique(): string {
@@ -22,14 +22,12 @@ export class AggregationFunctionPostgres extends AbstractAggregationFunction {
       isMultipleCellValue
     ) {
       return this.knex
-        .raw(`(COUNT(DISTINCT ??) * 1.0 / GREATEST(COUNT(*), 1)) * 100`, [this.tableColumnRef])
+        .raw(`(COUNT(DISTINCT ${this.tableColumnRef}) * 1.0 / GREATEST(COUNT(*), 1)) * 100`)
         .toQuery();
     }
 
     return this.knex
-      .raw(`(COUNT(DISTINCT ?? ->> 'id') * 1.0 / GREATEST(COUNT(*), 1)) * 100`, [
-        this.tableColumnRef,
-      ])
+      .raw(`(COUNT(DISTINCT ${this.tableColumnRef} ->> 'id') * 1.0 / GREATEST(COUNT(*), 1)) * 100`)
       .toQuery();
   }
 
@@ -46,21 +44,20 @@ export class AggregationFunctionPostgres extends AbstractAggregationFunction {
     return this.knex
       .raw(
         `SUM(COALESCE((SELECT SUM((e.value ->> 'size')::INTEGER)
-          FROM jsonb_array_elements((??)::jsonb) AS e), 0))`,
-        [this.tableColumnRef]
+          FROM jsonb_array_elements(COALESCE(${this.tableColumnRef}, '[]'::jsonb)) AS e), 0))`
       )
       .toQuery();
   }
 
   percentEmpty(): string {
     return this.knex
-      .raw(`((COUNT(*) - COUNT(??)) * 1.0 / GREATEST(COUNT(*), 1)) * 100`, [this.tableColumnRef])
+      .raw(`((COUNT(*) - COUNT(${this.tableColumnRef})) * 1.0 / GREATEST(COUNT(*), 1)) * 100`)
       .toQuery();
   }
 
   percentFilled(): string {
     return this.knex
-      .raw(`(COUNT(??) * 1.0 / GREATEST(COUNT(*), 1)) * 100`, [this.tableColumnRef])
+      .raw(`(COUNT(${this.tableColumnRef}) * 1.0 / GREATEST(COUNT(*), 1)) * 100`)
       .toQuery();
   }
 

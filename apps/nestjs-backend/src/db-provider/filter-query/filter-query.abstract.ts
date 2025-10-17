@@ -1,5 +1,6 @@
 import { BadRequestException, Logger } from '@nestjs/common';
 import type {
+  FieldCore,
   IConjunction,
   IDateTimeFieldOperator,
   IFilter,
@@ -7,6 +8,7 @@ import type {
   IFilterOperator,
   IFilterSet,
   ILiteralValueList,
+  IFieldReferenceValue,
 } from '@teable/core';
 import {
   CellValueType,
@@ -17,12 +19,14 @@ import {
   isEmpty,
   isMeTag,
   isNotEmpty,
+  isFieldReferenceValue,
 } from '@teable/core';
 import type { Knex } from 'knex';
 import { includes, invert, isObject } from 'lodash';
-import type { IFieldInstance } from '../../features/field/model/factory';
-import type { IFilterQueryExtra } from '../db.provider.interface';
+import type { IRecordQueryFilterContext } from '../../features/record/query-builder/record-query-builder.interface';
+import type { IDbProvider, IFilterQueryExtra } from '../db.provider.interface';
 import type { AbstractCellValueFilter } from './cell-value-filter.abstract';
+import { FieldReferenceCompatibilityException } from './cell-value-filter.abstract';
 import type { IFilterQueryInterface } from './filter-query.interface';
 
 export abstract class AbstractFilterQuery implements IFilterQueryInterface {
@@ -30,9 +34,11 @@ export abstract class AbstractFilterQuery implements IFilterQueryInterface {
 
   constructor(
     protected readonly originQueryBuilder: Knex.QueryBuilder,
-    protected readonly fields?: { [fieldId: string]: IFieldInstance },
+    protected readonly fields?: { [fieldId: string]: FieldCore },
     protected readonly filter?: IFilter,
-    protected readonly extra?: IFilterQueryExtra
+    protected readonly extra?: IFilterQueryExtra,
+    protected readonly dbProvider?: IDbProvider,
+    protected readonly context?: IRecordQueryFilterContext
   ) {}
 
   appendQueryBuilder(): Knex.QueryBuilder {
@@ -86,6 +92,21 @@ export abstract class AbstractFilterQuery implements IFilterQueryInterface {
     }
 
     if (!includes(validFilterOperators, convertOperator)) {
+      let referenceFieldId: string | undefined;
+      if (isFieldReferenceValue(value)) {
+        referenceFieldId = value.fieldId;
+      } else if (Array.isArray(value)) {
+        referenceFieldId = (
+          value.find((entry) => isFieldReferenceValue(entry)) as IFieldReferenceValue | undefined
+        )?.fieldId;
+      }
+
+      if (referenceFieldId) {
+        const referenceName = this.fields?.[referenceFieldId]?.name ?? referenceFieldId;
+        const sourceName = field.name ?? field.id;
+        throw new FieldReferenceCompatibilityException(sourceName, referenceName);
+      }
+
       throw new BadRequestException(
         `The '${convertOperator}' operation provided for the '${field.name}' filter is invalid. Only the following types are allowed: [${validFilterOperators}]`
       );
@@ -109,24 +130,29 @@ export abstract class AbstractFilterQuery implements IFilterQueryInterface {
 
     queryBuilder = queryBuilder[conjunction];
 
-    this.getFilterAdapter(field).compiler(queryBuilder, convertOperator as IFilterOperator, value);
+    this.getFilterAdapter(field).compiler(
+      queryBuilder,
+      convertOperator as IFilterOperator,
+      value,
+      this.dbProvider!
+    );
     return queryBuilder;
   }
 
-  private getFilterAdapter(field: IFieldInstance): AbstractCellValueFilter {
+  private getFilterAdapter(field: FieldCore): AbstractCellValueFilter {
     const { dbFieldType } = field;
     switch (field.cellValueType) {
       case CellValueType.Boolean:
-        return this.booleanFilter(field);
+        return this.booleanFilter(field, this.context);
       case CellValueType.Number:
-        return this.numberFilter(field);
+        return this.numberFilter(field, this.context);
       case CellValueType.DateTime:
-        return this.dateTimeFilter(field);
+        return this.dateTimeFilter(field, this.context);
       case CellValueType.String: {
         if (dbFieldType === DbFieldType.Json) {
-          return this.jsonFilter(field);
+          return this.jsonFilter(field, this.context);
         }
-        return this.stringFilter(field);
+        return this.stringFilter(field, this.context);
       }
     }
   }
@@ -160,7 +186,7 @@ export abstract class AbstractFilterQuery implements IFilterQueryInterface {
 
   private replaceMeTagInValue(
     filterItem: IFilterItem,
-    field: IFieldInstance,
+    field: FieldCore,
     replaceUserId?: string
   ): void {
     const { value } = filterItem;
@@ -177,7 +203,7 @@ export abstract class AbstractFilterQuery implements IFilterQueryInterface {
     }
   }
 
-  private shouldKeepFilterItem(value: unknown, field: IFieldInstance, operator: string): boolean {
+  private shouldKeepFilterItem(value: unknown, field: FieldCore, operator: string): boolean {
     return (
       value !== null ||
       field.cellValueType === CellValueType.Boolean ||
@@ -185,13 +211,28 @@ export abstract class AbstractFilterQuery implements IFilterQueryInterface {
     );
   }
 
-  abstract booleanFilter(field: IFieldInstance): AbstractCellValueFilter;
+  abstract booleanFilter(
+    field: FieldCore,
+    context?: IRecordQueryFilterContext
+  ): AbstractCellValueFilter;
 
-  abstract numberFilter(field: IFieldInstance): AbstractCellValueFilter;
+  abstract numberFilter(
+    field: FieldCore,
+    context?: IRecordQueryFilterContext
+  ): AbstractCellValueFilter;
 
-  abstract dateTimeFilter(field: IFieldInstance): AbstractCellValueFilter;
+  abstract dateTimeFilter(
+    field: FieldCore,
+    context?: IRecordQueryFilterContext
+  ): AbstractCellValueFilter;
 
-  abstract stringFilter(field: IFieldInstance): AbstractCellValueFilter;
+  abstract stringFilter(
+    field: FieldCore,
+    context?: IRecordQueryFilterContext
+  ): AbstractCellValueFilter;
 
-  abstract jsonFilter(field: IFieldInstance): AbstractCellValueFilter;
+  abstract jsonFilter(
+    field: FieldCore,
+    context?: IRecordQueryFilterContext
+  ): AbstractCellValueFilter;
 }

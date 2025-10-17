@@ -1,18 +1,12 @@
 import { z } from 'zod';
 import type { FieldType, CellValueType } from '../constant';
+import type { IFieldVisitor } from '../field-visitor.interface';
 import { FormulaAbstractCore } from './abstract/formula.field.abstract';
-
-export const autoNumberFieldOptionsSchema = z.object({
-  expression: z.literal('AUTO_NUMBER()'),
-});
-
-export type IAutoNumberFieldOptions = z.infer<typeof autoNumberFieldOptionsSchema>;
-
-export const autoNumberFieldOptionsRoSchema = autoNumberFieldOptionsSchema.omit({
-  expression: true,
-});
-
-export type IAutoNumberFieldOptionsRo = z.infer<typeof autoNumberFieldOptionsRoSchema>;
+import {
+  autoNumberFieldOptionsRoSchema,
+  type IAutoNumberFieldOptions,
+  type IAutoNumberFieldOptionsRo,
+} from './auto-number-option.schema';
 
 export const autoNumberCellValueSchema = z.number().int();
 
@@ -20,6 +14,8 @@ export class AutoNumberFieldCore extends FormulaAbstractCore {
   type!: FieldType.AutoNumber;
 
   declare options: IAutoNumberFieldOptions;
+
+  meta?: undefined;
 
   declare cellValueType: CellValueType.Number;
 
@@ -56,5 +52,13 @@ export class AutoNumberFieldCore extends FormulaAbstractCore {
       return z.array(autoNumberCellValueSchema).nonempty().nullable().safeParse(value);
     }
     return autoNumberCellValueSchema.nullable().safeParse(value);
+  }
+
+  getExpression() {
+    return this.options.expression;
+  }
+
+  accept<T>(visitor: IFieldVisitor<T>): T {
+    return visitor.visitAutoNumberField(this);
   }
 }

@@ -2,7 +2,14 @@
 /* eslint-disable sonarjs/cognitive-complexity */
 import type { INestApplication } from '@nestjs/common';
 import type { IButtonFieldCellValue, IFieldRo, ILinkFieldOptions } from '@teable/core';
-import { Colors, FieldType, generateWorkflowId, Relationship, ViewType } from '@teable/core';
+import {
+  Colors,
+  FieldKeyType,
+  FieldType,
+  generateWorkflowId,
+  Relationship,
+  ViewType,
+} from '@teable/core';
 import type { ICreateBaseVo, ITableFullVo } from '@teable/openapi';
 import {
   createField,
@@ -17,7 +24,13 @@ import { omit, pick } from 'lodash';
 import { x_20 } from './data-helpers/20x';
 import { x_20_link, x_20_link_from_lookups } from './data-helpers/20x-link';
 
-import { createTable, permanentDeleteTable, initApp } from './utils/init-app';
+import {
+  createTable,
+  permanentDeleteTable,
+  initApp,
+  createRecords,
+  getRecords,
+} from './utils/init-app';
 
 describe('OpenAPI FieldOpenApiController for duplicate field (e2e)', () => {
   let app: INestApplication;
@@ -216,6 +229,172 @@ describe('OpenAPI FieldOpenApiController for duplicate field (e2e)', () => {
     afterAll(async () => {
       await permanentDeleteTable(baseId, table.id);
       await permanentDeleteTable(baseId, subTable.id);
+    });
+  });
+
+  describe('duplicate link field should copy cell data', () => {
+    let foreignTable: ITableFullVo;
+    let mainTable: ITableFullVo;
+    let linkFieldId: string;
+
+    beforeAll(async () => {
+      // create foreign table with some records
+      foreignTable = await createTable(baseId, { name: 'dup_link_foreign' });
+      const primaryFieldId = foreignTable.fields.find((f) => f.isPrimary)!.id;
+      const created = await createRecords(foreignTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+        records: [
+          { fields: { [primaryFieldId]: 'A1' } },
+          { fields: { [primaryFieldId]: 'A2' } },
+          { fields: { [primaryFieldId]: 'A3' } },
+        ],
+      });
+
+      // create main table and a link field to foreignTable
+      mainTable = await createTable(baseId, { name: 'dup_link_main' });
+      const linkField = (
+        await createField(mainTable.id, {
+          type: FieldType.Link,
+          name: 'link_to_foreign',
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: foreignTable.id,
+          },
+        })
+      ).data;
+      linkFieldId = linkField.id;
+
+      // create records in main table with link values
+      await createRecords(mainTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+        records: [
+          {
+            fields: {
+              [linkFieldId]: [{ id: created.records[0].id }, { id: created.records[1].id }],
+            },
+          },
+          {
+            fields: {
+              [linkFieldId]: [{ id: created.records[2].id }],
+            },
+          },
+        ],
+      });
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, mainTable.id);
+      await permanentDeleteTable(baseId, foreignTable.id);
+    });
+
+    it('should duplicate link field and preserve all cell values', async () => {
+      const copied = (
+        await duplicateField(mainTable.id, linkFieldId, {
+          name: 'link_to_foreign_copy',
+        })
+      ).data;
+
+      const { records } = await getRecords(mainTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+      });
+
+      for (const r of records) {
+        expect(r.fields[copied.id]).toEqual(r.fields[linkFieldId]);
+      }
+    });
+  });
+
+  describe('duplicate common fields should copy cell data', () => {
+    let table: ITableFullVo;
+    let textFieldId: string;
+    let numberFieldId: string;
+    let checkboxFieldId: string;
+
+    beforeAll(async () => {
+      // create base table
+      table = await createTable(baseId, { name: 'dup_common_main' });
+
+      // add three common fields
+      textFieldId = (
+        await createField(table.id, {
+          type: FieldType.SingleLineText,
+          name: 'text_col',
+        })
+      ).data.id;
+
+      numberFieldId = (
+        await createField(table.id, {
+          type: FieldType.Number,
+          name: 'num_col',
+        })
+      ).data.id;
+
+      checkboxFieldId = (
+        await createField(table.id, {
+          type: FieldType.Checkbox,
+          name: 'bool_col',
+        })
+      ).data.id;
+
+      // seed a few records with mixed values (including nulls/false)
+      await createRecords(table.id, {
+        fieldKeyType: FieldKeyType.Id,
+        records: [
+          {
+            fields: {
+              [textFieldId]: 'hello',
+              [numberFieldId]: 42,
+              [checkboxFieldId]: true,
+            },
+          },
+          {
+            fields: {
+              [textFieldId]: 'world',
+              [numberFieldId]: null,
+              [checkboxFieldId]: false,
+            },
+          },
+          {
+            fields: {
+              [textFieldId]: null,
+              [numberFieldId]: 0,
+              [checkboxFieldId]: true,
+            },
+          },
+        ],
+      });
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, table.id);
+    });
+
+    it('should duplicate text/number/checkbox fields and preserve all cell values', async () => {
+      const copiedText = (
+        await duplicateField(table.id, textFieldId, {
+          name: 'text_col_copy',
+        })
+      ).data;
+
+      const copiedNumber = (
+        await duplicateField(table.id, numberFieldId, {
+          name: 'num_col_copy',
+        })
+      ).data;
+
+      const copiedCheckbox = (
+        await duplicateField(table.id, checkboxFieldId, {
+          name: 'bool_col_copy',
+        })
+      ).data;
+
+      const { records } = await getRecords(table.id, { fieldKeyType: FieldKeyType.Id });
+
+      for (const r of records) {
+        expect(r.fields[copiedText.id]).toEqual(r.fields[textFieldId]);
+        expect(r.fields[copiedNumber.id]).toEqual(r.fields[numberFieldId]);
+        expect(r.fields[copiedCheckbox.id]).toEqual(r.fields[checkboxFieldId]);
+      }
     });
   });
 

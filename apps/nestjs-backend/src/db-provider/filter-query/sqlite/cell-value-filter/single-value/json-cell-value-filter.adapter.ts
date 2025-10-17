@@ -1,14 +1,40 @@
-import type { IFilterOperator, IFilterValue, ILiteralValue, ILiteralValueList } from '@teable/core';
+import type {
+  IFieldReferenceValue,
+  IFilterOperator,
+  IFilterValue,
+  ILiteralValue,
+  ILiteralValueList,
+} from '@teable/core';
+import { FieldType, isFieldReferenceValue } from '@teable/core';
 import type { Knex } from 'knex';
+import type { IDbProvider } from '../../../../db.provider.interface';
 import { CellValueFilterSqlite } from '../cell-value-filter.sqlite';
 
 export class JsonCellValueFilterAdapter extends CellValueFilterSqlite {
   isOperatorHandler(
     builderClient: Knex.QueryBuilder,
     operator: IFilterOperator,
-    value: ILiteralValue
+    value: ILiteralValue | IFieldReferenceValue,
+    dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const jsonColumn = this.getJsonQueryColumn(this.field, operator);
+
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+
+      if (
+        [FieldType.User, FieldType.CreatedBy, FieldType.LastModifiedBy, FieldType.Link].includes(
+          this.field.type
+        )
+      ) {
+        const refColumn = `json_extract(${ref}, '$.id')`;
+        builderClient.whereRaw(`lower(${jsonColumn}) = lower(${refColumn})`);
+        return builderClient;
+      }
+
+      return super.isOperatorHandler(builderClient, operator, value, dbProvider);
+    }
+
     const sql = `lower(${jsonColumn}) = lower(?)`;
     builderClient.whereRaw(sql, [value]);
     return builderClient;
@@ -17,9 +43,27 @@ export class JsonCellValueFilterAdapter extends CellValueFilterSqlite {
   isNotOperatorHandler(
     builderClient: Knex.QueryBuilder,
     operator: IFilterOperator,
-    value: ILiteralValue
+    value: ILiteralValue | IFieldReferenceValue,
+    dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const jsonColumn = this.getJsonQueryColumn(this.field, operator);
+
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+
+      if (
+        [FieldType.User, FieldType.CreatedBy, FieldType.LastModifiedBy, FieldType.Link].includes(
+          this.field.type
+        )
+      ) {
+        const refColumn = `json_extract(${ref}, '$.id')`;
+        builderClient.whereRaw(`lower(ifnull(${jsonColumn}, '')) != lower(${refColumn})`);
+        return builderClient;
+      }
+
+      return super.isNotOperatorHandler(builderClient, operator, value, dbProvider);
+    }
+
     const sql = `lower(ifnull(${jsonColumn}, '')) != lower(?)`;
     builderClient.whereRaw(sql, [value]);
     return builderClient;

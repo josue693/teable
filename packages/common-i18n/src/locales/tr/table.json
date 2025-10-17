@@ -140,6 +140,9 @@
       "lookup": {
         "title": "{{lookupFieldName}} ({{linkFieldName}} üzerinden)"
       },
+      "conditionalLookup": {
+        "title": "{{lookupFieldName}} ({{tableName}} üzerinden filtrelenmiş)"
+      },
       "rollup": {
         "title": "{{lookupFieldName}} Toplama ({{linkFieldName}} üzerinden)",
         "rollup": "Toplama",
@@ -218,7 +221,7 @@
       "self": "Kendisi",
       "selectTable": "Tablo seç...",
       "selectBase": "Veritabanı seç...",
-      "linkFromExternalBase": "Harici veritabanından bağlantı",
+      "linkFromAnotherBase": "Harici veritabanından bağlantı",
       "inSelfLink": "kendi içinde bağlantı",
       "betweenTwoTables": "iki tablo arasında",
       "linkTipMessage": "İpucu: bu yapılandırma<br></br> <b>{{relationship}}</b> ilişkisini temsil eder <span>{{linkType}}</span>",
@@ -231,7 +234,8 @@
       "calculating": "Hesaplanıyor...",
       "doSaveChanges": "Yaptığınız değişiklikleri kaydetmek istiyor musunuz?",
       "linkFieldToLookup": "Arama için kullanılacak bağlantılı kayıt alanı",
-      "lookupToTable": "Bağlantı veritabanındaki {{tableName}} alanı",
+      "lookupToTable": "Bağlantı veritabanındaki <bold>{{tableName}}</bold> alanı",
+      "rollupToTable": "Bağlantı veritabanındaki <bold>{{tableName}}</bold> alanı",
       "selectField": "Bir alan seç...",
       "linkTable": "Bağlantı tablosu",
       "linkBase": "Bağlantı veritabanı",
@@ -248,7 +252,17 @@
       "filter": "Kayıtları filtrele",
       "hideFields": "Alanları gizle",
       "moreOptions": "Daha fazla seçenek",
-      "allowNewOptionsWhenEditing": "Düzenlerken yeni seçeneklere izin ver"
+      "allowNewOptionsWhenEditing": "Düzenlerken yeni seçeneklere izin ver",
+      "conditionalLookup": {
+        "sortLimitToggleLabel": "Sort linked records and limit the number of matches",
+        "sortLabel": "Sort results",
+        "orderPlaceholder": "Select an order",
+        "clearSort": "Clear sort",
+        "limitLabel": "Maximum records to include",
+        "limitPlaceholder": "Leave blank to include all matches",
+        "sortMissingWarningTitle": "Sorting field unavailable",
+        "sortMissingWarningDescription": "The field that powered this sort was deleted. Results ignore the sort and only enforce the limit."
+      }
     },
     "subTitle": {
       "link": "Seçtiğiniz tablodaki kayıtlara bağlantı oluşturun",
@@ -265,6 +279,7 @@
       "rating": "Önceden tanımlanmış bir ölçekte değerlendirme ekleyin.",
       "formula": "Alanlara dayalı değerler hesaplayın.",
       "rollup": "Bağlantılı kayıtlardan veri özetleyin.",
+      "conditionalLookup": "Tanımladığınız filtreleri karşılayan bağlı değerleri gösterir.",
       "count": "Bağlantılı kayıtların sayısını sayın.",
       "createdTime": "Her kaydın oluşturulduğu tarih ve saati görün.",
       "lastModifiedTime": "Bir kayıttaki bazı veya tüm alanlarda yapılan en son düzenlemenin tarih ve saatini görün.",

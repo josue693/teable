@@ -48,8 +48,15 @@ import { useBuildBaseAgentStore } from '../store/useBuildBaseAgentStore';
 
 const cellValueStringCache: LRUCache<string, string> = new LRUCache({ max: 1000 });
 
-const iconString = (type: FieldType, isLookup: boolean | undefined) => {
-  return isLookup ? `${type}_lookup` : type;
+const iconString = (
+  type: FieldType,
+  isLookup: boolean | undefined,
+  isConditionalLookup: boolean | undefined
+) => {
+  if (isLookup) {
+    return isConditionalLookup ? `${type}_conditional_lookup` : `${type}_lookup`;
+  }
+  return type;
 };
 
 interface IGenerateColumnsProps {
@@ -162,7 +169,8 @@ const useGenerateColumns = () => {
               showAlways: i === 0,
               label: i === 0 ? t('common.summaryTip') : t('common.summary'),
             },
-            icon: field.aiConfig != null ? 'ai' : iconString(type, isLookup),
+            icon:
+              field.aiConfig != null ? 'ai' : iconString(type, isLookup, field.isConditionalLookup),
           };
         })
         .filter(Boolean)
@@ -299,7 +307,8 @@ export const useCreateCellValue2GridDisplay = (
           }
           case FieldType.Number:
           case FieldType.Rollup:
-          case FieldType.Formula: {
+          case FieldType.Formula:
+          case FieldType.ConditionalRollup: {
             if (cellValueType === CellValueType.Boolean) {
               return {
                 ...baseCellProps,

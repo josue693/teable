@@ -151,6 +151,9 @@
       "lookup": {
         "title": "从{{linkFieldName}}查找{{lookupFieldName}}"
       },
+      "conditionalLookup": {
+        "title": "从{{tableName}}筛选{{lookupFieldName}}"
+      },
       "rollup": {
         "title": "{{linkFieldName}}的{{lookupFieldName}}汇总",
         "rollup": "汇总",
@@ -162,6 +165,7 @@
           "max": "最大值",
           "min": "最小值",
           "sum": "求和",
+          "average": "平均值",
           "concatenate": "连接",
           "arrayJoin": "数组连接",
           "arrayUnique": "数组去重",
@@ -177,6 +181,7 @@
           "max": "计算所有值的最大值",
           "min": "计算所有值的最小值",
           "sum": "计算所有值的和",
+          "average": "计算所有值的平均值",
           "concatenate": "将所有值连接为一个字符串",
           "arrayJoin": "将所有值连接为一个逗号分隔的字符串",
           "arrayUnique": "去除数组中的重复值",
@@ -185,6 +190,10 @@
           "or": "如果有一个值为真，则返回真",
           "xor": "如果奇数个值为真，则返回真"
         }
+      },
+      "conditionalRollup": {
+        "title": "{{lookupFieldName}} 条件汇总",
+        "description": "通过筛选条件聚合其他表的数据。"
       }
     },
     "editor": {
@@ -228,7 +237,7 @@
       "self": "本表",
       "selectTable": "选择一张表...",
       "selectBase": "选择一个数据库...",
-      "linkFromExternalBase": "从其他数据库关联",
+      "linkFromAnotherBase": "从其他数据库关联",
       "inSelfLink": "自关联",
       "betweenTwoTables": "关联",
       "tips": "提示",
@@ -242,8 +251,24 @@
       "calculating": "计算中...",
       "doSaveChanges": "您要保存所做的更改吗？",
       "linkFieldToLookup": "用于查找的已链接记录字段",
-      "lookupToTable": "从{{tableName}}表中选择要进行查找的字段",
+      "lookupToTable": "从<bold>{{tableName}}</bold>表中选择要进行查找的字段",
+      "rollupToTable": "从<bold>{{tableName}}</bold>表中选择要进行汇总的字段",
       "selectField": "选择一个字段...",
+      "conditionalRollup": {
+        "fieldMapping": "字段映射",
+        "selectBaseField": "选择当前表字段",
+        "noMappings": "尚未配置字段映射"
+      },
+      "conditionalLookup": {
+        "sortLimitToggleLabel": "对引用字段进行排序和限制引用数量",
+        "sortLabel": "排序结果",
+        "orderPlaceholder": "选择排序方式",
+        "clearSort": "清除排序",
+        "limitLabel": "显示的最大记录数",
+        "limitPlaceholder": "留空表示显示全部匹配项",
+        "sortMissingWarningTitle": "排序字段已被删除",
+        "sortMissingWarningDescription": "用于排序的字段已删除，结果会忽略排序，仅保留数量限制。"
+      },
       "linkTable": "进行关联的表",
       "linkBase": "进行关联的数据库",
       "tableNoPermission": "无权限表格",
@@ -276,6 +301,8 @@
       "rating": "在预定分值上添加评分。",
       "formula": "基于字段进行动态公式计算。",
       "rollup": "汇总来自关联记录的数据。",
+      "conditionalRollup": "通过条件筛选汇总来自其他表的数据。",
+      "conditionalLookup": "通过筛选条件显示关联记录中的字段值。",
       "count": "计算关联记录的数量。",
       "createdTime": "查看每条记录创建的日期和时间。",
       "lastModifiedTime": "查看每条记录的最近编辑日期和时间。",

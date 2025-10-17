@@ -1,11 +1,17 @@
-import type { IFieldVo, DbFieldType, CellValueType } from '@teable/core';
-import { assertNever, FieldType } from '@teable/core';
+import type {
+  IFieldVo,
+  DbFieldType,
+  CellValueType,
+  ISetFieldPropertyOpContext,
+} from '@teable/core';
+import { assertNever, FieldType, applyFieldPropertyOps } from '@teable/core';
 import type { Field } from '@teable/db-main-prisma';
 import { instanceToPlain, plainToInstance } from 'class-transformer';
 import { AttachmentFieldDto } from './field-dto/attachment-field.dto';
 import { AutoNumberFieldDto } from './field-dto/auto-number-field.dto';
 import { ButtonFieldDto } from './field-dto/button-field.dto';
 import { CheckboxFieldDto } from './field-dto/checkbox-field.dto';
+import { ConditionalRollupFieldDto } from './field-dto/conditional-rollup-field.dto';
 import { CreatedByFieldDto } from './field-dto/created-by-field.dto';
 import { CreatedTimeFieldDto } from './field-dto/created-time-field.dto';
 import { DateFieldDto } from './field-dto/date-field.dto';
@@ -22,6 +28,7 @@ import { SingleLineTextFieldDto } from './field-dto/single-line-text-field.dto';
 import { SingleSelectFieldDto } from './field-dto/single-select-field.dto';
 import { UserFieldDto } from './field-dto/user-field.dto';
 
+// eslint-disable-next-line sonarjs/cognitive-complexity
 export function rawField2FieldObj(fieldRaw: Field): IFieldVo {
   return {
     id: fieldRaw.id,
@@ -30,6 +37,7 @@ export function rawField2FieldObj(fieldRaw: Field): IFieldVo {
     type: fieldRaw.type as FieldType,
     description: fieldRaw.description || undefined,
     options: fieldRaw.options && JSON.parse(fieldRaw.options as string),
+    meta: (fieldRaw.meta && JSON.parse(fieldRaw.meta as string)) || undefined,
     aiConfig: (fieldRaw.aiConfig && JSON.parse(fieldRaw.aiConfig as string)) || undefined,
     notNull: fieldRaw.notNull || undefined,
     unique: fieldRaw.unique || undefined,
@@ -37,6 +45,7 @@ export function rawField2FieldObj(fieldRaw: Field): IFieldVo {
     isPrimary: fieldRaw.isPrimary || undefined,
     isPending: fieldRaw.isPending || undefined,
     isLookup: fieldRaw.isLookup || undefined,
+    isConditionalLookup: fieldRaw.isConditionalLookup || undefined,
     hasError: fieldRaw.hasError || undefined,
     lookupOptions:
       (fieldRaw.lookupOptions && JSON.parse(fieldRaw.lookupOptions as string)) || undefined,
@@ -74,6 +83,8 @@ export function createFieldInstanceByVo(field: IFieldVo) {
       return plainToInstance(CheckboxFieldDto, field);
     case FieldType.Rollup:
       return plainToInstance(RollupFieldDto, field);
+    case FieldType.ConditionalRollup:
+      return plainToInstance(ConditionalRollupFieldDto, field);
     case FieldType.Rating:
       return plainToInstance(RatingFieldDto, field);
     case FieldType.AutoNumber:
@@ -103,4 +114,23 @@ export interface IFieldMap {
 
 export function convertFieldInstanceToFieldVo(fieldInstance: IFieldInstance): IFieldVo {
   return instanceToPlain(fieldInstance, { excludePrefixes: ['_'] }) as IFieldVo;
+}
+
+/**
+ * Apply field property operations to a field VO and return a field instance.
+ * This function combines the pure applyFieldPropertyOps function with createFieldInstanceByVo.
+ *
+ * @param fieldVo - The existing field VO to base the new field on
+ * @param ops - Array of field property operations to apply
+ * @returns A new field instance with the operations applied
+ */
+export function applyFieldPropertyOpsAndCreateInstance(
+  fieldVo: IFieldVo,
+  ops: ISetFieldPropertyOpContext[]
+): IFieldInstance {
+  // Apply operations to get a new field VO
+  const newFieldVo = applyFieldPropertyOps(fieldVo, ops);
+
+  // Create and return a field instance from the modified VO
+  return createFieldInstanceByVo(newFieldVo);
 }

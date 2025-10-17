@@ -1,7 +1,8 @@
-import { z } from 'zod';
 import type { FieldType } from '../constant';
+import type { IFieldVisitor } from '../field-visitor.interface';
 import type { IUserCellValue } from './abstract/user.field.abstract';
 import { UserAbstractCore } from './abstract/user.field.abstract';
+import { userFieldOptionsSchema, type IUserFieldOptions } from './user-option.schema';
 
 interface IUser {
   id: string;
@@ -12,23 +13,6 @@ interface IUser {
 interface IContext {
   userSets?: IUser[];
 }
-
-const userIdSchema = z
-  .string()
-  .startsWith('usr')
-  .or(z.enum(['me']));
-
-export const userFieldOptionsSchema = z.object({
-  isMultiple: z.boolean().optional().openapi({
-    description: 'Allow adding multiple users',
-  }),
-  shouldNotify: z.boolean().optional().openapi({
-    description: 'Notify users when their name is added to a cell',
-  }),
-  defaultValue: z.union([userIdSchema, z.array(userIdSchema)]).optional(),
-});
-
-export type IUserFieldOptions = z.infer<typeof userFieldOptionsSchema>;
 
 export const defaultUserFieldOptions: IUserFieldOptions = {
   isMultiple: false,
@@ -41,6 +25,10 @@ export class UserFieldCore extends UserAbstractCore {
 
   static defaultOptions() {
     return defaultUserFieldOptions;
+  }
+
+  override get isStructuredCellValue() {
+    return true;
   }
 
   /*
@@ -87,5 +75,9 @@ export class UserFieldCore extends UserAbstractCore {
 
   validateOptions() {
     return userFieldOptionsSchema.safeParse(this.options);
+  }
+
+  accept<T>(visitor: IFieldVisitor<T>): T {
+    return visitor.visitUserField(this);
   }
 }

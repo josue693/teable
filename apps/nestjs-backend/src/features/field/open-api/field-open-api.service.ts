@@ -1,11 +1,19 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  CellValueType,
   FieldKeyType,
   FieldOpBuilder,
   FieldType,
   generateFieldId,
   generateOperationId,
   IFieldRo,
+  StatisticsFunc,
+  isRollupFunctionSupportedForCellValueType,
+  isLinkLookupOptions,
+  isFieldReferenceValue,
+  isFieldReferenceComparable,
+  extractFieldIdsFromFilter,
 } from '@teable/core';
 import type {
   IFieldVo,
@@ -14,16 +22,22 @@ import type {
   IOtOperation,
   IColumnMeta,
   ILinkFieldOptions,
+  IConditionalRollupFieldOptions,
+  IConditionalLookupOptions,
   IGetFieldsQuery,
+  IFilter,
+  IFilterItem,
+  IFieldReferenceValue,
 } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { IDuplicateFieldRo } from '@teable/openapi';
 import { instanceToPlain } from 'class-transformer';
 import { Knex } from 'knex';
-import { groupBy, omit, pick } from 'lodash';
+import { groupBy, isEqual, omit, pick } from 'lodash';
 import { InjectModel } from 'nest-knexjs';
 import { ClsService } from 'nestjs-cls';
 import { ThresholdConfig, IThresholdConfig } from '../../../configs/threshold.config';
+import { FieldReferenceCompatibilityException } from '../../../db-provider/filter-query/cell-value-filter.abstract';
 import { EventEmitterService } from '../../../event-emitter/event-emitter.service';
 import { Events } from '../../../event-emitter/events';
 import type { IClsStore } from '../../../types/cls';
@@ -31,7 +45,9 @@ import { Timing } from '../../../utils/timing';
 import { FieldCalculationService } from '../../calculation/field-calculation.service';
 import type { IOpsMap } from '../../calculation/utils/compose-maps';
 import { GraphService } from '../../graph/graph.service';
+import { ComputedOrchestratorService } from '../../record/computed/services/computed-orchestrator.service';
 import { RecordOpenApiService } from '../../record/open-api/record-open-api.service';
+import { InjectRecordQueryBuilder, IRecordQueryBuilder } from '../../record/query-builder';
 import { RecordService } from '../../record/record.service';
 import { TableIndexService } from '../../table/table-index.service';
 import { ViewOpenApiService } from '../../view/open-api/view-open-api.service';
@@ -44,6 +60,7 @@ import { FieldViewSyncService } from '../field-calculate/field-view-sync.service
 import { FieldService } from '../field.service';
 import type { IFieldInstance } from '../model/factory';
 import {
+  convertFieldInstanceToFieldVo,
   createFieldInstanceByRaw,
   createFieldInstanceByVo,
   rawField2FieldObj,
@@ -69,11 +86,19 @@ export class FieldOpenApiService {
     private readonly tableIndexService: TableIndexService,
     private readonly recordOpenApiService: RecordOpenApiService,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
-    @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig
+    @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig,
+    @InjectRecordQueryBuilder() private readonly recordQueryBuilder: IRecordQueryBuilder,
+    private readonly computedOrchestrator: ComputedOrchestratorService
   ) {}
 
   async planField(tableId: string, fieldId: string) {
     return await this.graphService.planField(tableId, fieldId);
+  }
+
+  private isFieldReferenceCompatibilityError(
+    error: unknown
+  ): error is FieldReferenceCompatibilityException {
+    return error instanceof FieldReferenceCompatibilityException;
   }
 
   async planFieldCreate(tableId: string, fieldRo: IFieldRo) {
@@ -97,7 +122,7 @@ export class FieldOpenApiService {
   }
 
   private async validateLookupField(field: IFieldInstance) {
-    if (field.lookupOptions) {
+    if (field.lookupOptions && isLinkLookupOptions(field.lookupOptions)) {
       const { foreignTableId, lookupFieldId, linkFieldId } = field.lookupOptions;
       const foreignField = await this.prismaService.txClient().field.findFirst({
         where: { tableId: foreignTableId, id: lookupFieldId, deletedTime: null },
@@ -109,15 +134,368 @@ export class FieldOpenApiService {
       }
       const linkField = await this.prismaService.txClient().field.findFirst({
         where: { id: linkFieldId, deletedTime: null },
-        select: { id: true, options: true },
+        select: { id: true, options: true, type: true, isLookup: true },
       });
-      if (!linkField) {
+      if (!linkField || linkField.type !== FieldType.Link || linkField.isLookup) {
         return false;
       }
       const linkOptions = JSON.parse(linkField?.options as string) as ILinkFieldOptions;
       return linkOptions.foreignTableId === foreignTableId;
     }
     return true;
+  }
+
+  private async validateConditionalRollupAggregation(hostTableId: string, field: IFieldInstance) {
+    const options = field.options as IConditionalRollupFieldOptions | undefined;
+    const expression = options?.expression;
+    const lookupFieldId = options?.lookupFieldId;
+    const foreignTableId = options?.foreignTableId;
+
+    if (!expression || !lookupFieldId || !foreignTableId) {
+      return false;
+    }
+
+    const foreignField = await this.prismaService.txClient().field.findFirst({
+      where: { id: lookupFieldId, tableId: foreignTableId, deletedTime: null },
+      select: { cellValueType: true },
+    });
+
+    if (!foreignField?.cellValueType) {
+      return false;
+    }
+
+    const rawCellType = foreignField.cellValueType as string;
+    const availableTypes = new Set<string>(Object.values(CellValueType));
+    const cellValueType = availableTypes.has(rawCellType)
+      ? (rawCellType as CellValueType)
+      : CellValueType.String;
+
+    const aggregationSupported = isRollupFunctionSupportedForCellValueType(
+      expression,
+      cellValueType
+    );
+    if (!aggregationSupported) {
+      return false;
+    }
+
+    return await this.validateFilterFieldReferences(hostTableId, foreignTableId, options?.filter);
+  }
+
+  private async validateConditionalLookup(tableId: string, field: IFieldInstance) {
+    const meta = field.getConditionalLookupOptions?.();
+    const lookupFieldId = meta?.lookupFieldId;
+    const foreignTableId = meta?.foreignTableId;
+
+    if (!lookupFieldId || !foreignTableId) {
+      return false;
+    }
+
+    const foreignField = await this.prismaService.txClient().field.findFirst({
+      where: { id: lookupFieldId, tableId: foreignTableId, deletedTime: null },
+      select: { id: true, type: true },
+    });
+
+    if (!foreignField) {
+      return false;
+    }
+
+    if (foreignField.type !== field.type) {
+      return false;
+    }
+
+    return this.validateFilterFieldReferences(tableId, foreignTableId, meta?.filter);
+  }
+
+  private async findConditionalFilterDependentFields(startFieldIds: readonly string[]): Promise<
+    Array<{
+      id: string;
+      tableId: string;
+      type: string;
+      options: string | null;
+      lookupOptions: string | null;
+      isConditionalLookup: boolean;
+    }>
+  > {
+    if (!startFieldIds.length) {
+      return [];
+    }
+
+    const nonRecursive = this.knex
+      .select('from_field_id', 'to_field_id')
+      .from('reference')
+      .whereIn('from_field_id', startFieldIds);
+
+    const recursive = this.knex
+      .select({ from_field_id: 'r.from_field_id', to_field_id: 'r.to_field_id' })
+      .from({ r: 'reference' })
+      .join({ d: 'dep' }, 'r.from_field_id', 'd.to_field_id');
+
+    const query = this.knex
+      .withRecursive('dep', ['from_field_id', 'to_field_id'], nonRecursive.union(recursive))
+      .select({
+        id: 'f.id',
+        table_id: 'f.table_id',
+        type: 'f.type',
+        options: 'f.options',
+        lookup_options: 'f.lookup_options',
+        is_conditional_lookup: 'f.is_conditional_lookup',
+      })
+      .from({ dep: 'dep' })
+      .join({ f: 'field' }, 'dep.to_field_id', 'f.id')
+      .whereNull('f.deleted_time')
+      .andWhere((qb) =>
+        qb.where('f.type', FieldType.ConditionalRollup).orWhere('f.is_conditional_lookup', true)
+      )
+      .distinct();
+
+    const rows = await this.prismaService.txClient().$queryRawUnsafe<
+      Array<{
+        id: string;
+        table_id: string;
+        type: string;
+        options: string | null;
+        lookup_options: string | null;
+        is_conditional_lookup: number | boolean | null;
+      }>
+    >(query.toQuery());
+
+    return rows.map((row) => ({
+      id: row.id,
+      tableId: row.table_id,
+      type: row.type,
+      options: row.options,
+      lookupOptions: row.lookup_options,
+      isConditionalLookup: Boolean(row.is_conditional_lookup),
+    }));
+  }
+
+  // eslint-disable-next-line sonarjs/cognitive-complexity
+  private async syncConditionalFiltersByFieldChanges(
+    newField: IFieldInstance,
+    oldField: IFieldInstance
+  ) {
+    const fieldId = newField.id;
+    if (!fieldId) {
+      return;
+    }
+
+    const selectTypes = new Set([FieldType.SingleSelect, FieldType.MultipleSelect]);
+    if (newField.type !== oldField.type || !selectTypes.has(newField.type)) {
+      return;
+    }
+
+    const dependents = await this.findConditionalFilterDependentFields([fieldId]);
+    if (!dependents.length) {
+      return;
+    }
+
+    const pendingOps: Record<string, { fieldId: string; ops: IOtOperation[] }[]> = {};
+    const enqueueFieldOps = (tableId: string, fieldId: string, ops: IOtOperation[]) => {
+      if (!ops.length) return;
+      (pendingOps[tableId] ||= []).push({ fieldId, ops });
+    };
+    const normalizeFilter = (filter: IFilter | null | undefined) =>
+      filter && filter.filterSet?.length ? filter : null;
+
+    for (const field of dependents) {
+      if (field.type === FieldType.ConditionalRollup) {
+        if (!field.options) continue;
+        let options: IConditionalRollupFieldOptions;
+        try {
+          options = JSON.parse(field.options) as IConditionalRollupFieldOptions;
+        } catch {
+          continue;
+        }
+
+        const originalFilter = options.filter;
+        if (!originalFilter) continue;
+        const filterRefs = extractFieldIdsFromFilter(originalFilter, true);
+        if (!filterRefs.includes(fieldId)) continue;
+
+        const updatedFilter = this.fieldViewSyncService.getNewFilterByFieldChanges(
+          originalFilter,
+          newField,
+          oldField
+        );
+        const normalizedOriginal = normalizeFilter(originalFilter);
+        const normalizedUpdated = normalizeFilter(updatedFilter);
+
+        if (isEqual(normalizedOriginal, normalizedUpdated)) continue;
+
+        const ops = [
+          FieldOpBuilder.editor.setFieldProperty.build({
+            key: 'options',
+            oldValue: options,
+            newValue: { ...options, filter: normalizedUpdated },
+          }),
+        ];
+        enqueueFieldOps(field.tableId, field.id, ops);
+        continue;
+      }
+
+      if (!field.isConditionalLookup) continue;
+      if (!field.lookupOptions) continue;
+
+      let lookupOptions: IConditionalLookupOptions;
+      try {
+        lookupOptions = JSON.parse(field.lookupOptions) as IConditionalLookupOptions;
+      } catch {
+        continue;
+      }
+
+      const originalFilter = lookupOptions.filter;
+      if (!originalFilter) continue;
+      const filterRefs = extractFieldIdsFromFilter(originalFilter, true);
+      if (!filterRefs.includes(fieldId)) continue;
+
+      const updatedFilter = this.fieldViewSyncService.getNewFilterByFieldChanges(
+        originalFilter,
+        newField,
+        oldField
+      );
+      const normalizedOriginal = normalizeFilter(originalFilter);
+      const normalizedUpdated = normalizeFilter(updatedFilter);
+
+      if (isEqual(normalizedOriginal, normalizedUpdated)) continue;
+
+      const ops = [
+        FieldOpBuilder.editor.setFieldProperty.build({
+          key: 'lookupOptions',
+          oldValue: lookupOptions,
+          newValue: { ...lookupOptions, filter: normalizedUpdated },
+        }),
+      ];
+      enqueueFieldOps(field.tableId, field.id, ops);
+    }
+
+    for (const [targetTableId, ops] of Object.entries(pendingOps)) {
+      await this.fieldService.batchUpdateFields(targetTableId, ops);
+    }
+  }
+
+  private async validateFilterFieldReferences(
+    hostTableId: string,
+    foreignTableId: string,
+    filter?: IFilter | null
+  ): Promise<boolean> {
+    if (!filter) {
+      return true;
+    }
+
+    const foreignFieldIds = new Set<string>();
+    const referenceFieldIds = new Set<string>();
+
+    const collectFieldIds = (node: IFilter | IFilterItem) => {
+      if (!node) {
+        return;
+      }
+
+      if ('fieldId' in node) {
+        foreignFieldIds.add(node.fieldId);
+
+        const { value } = node;
+        if (isFieldReferenceValue(value)) {
+          referenceFieldIds.add(value.fieldId);
+        } else if (Array.isArray(value)) {
+          for (const entry of value) {
+            if (isFieldReferenceValue(entry)) {
+              referenceFieldIds.add(entry.fieldId);
+            }
+          }
+        }
+      } else if ('filterSet' in node) {
+        node.filterSet.forEach((child) => collectFieldIds(child));
+      }
+    };
+
+    collectFieldIds(filter);
+
+    if (!referenceFieldIds.size) {
+      return true;
+    }
+
+    const fieldIdsToFetch = Array.from(new Set([...foreignFieldIds, ...referenceFieldIds]));
+    if (!fieldIdsToFetch.length) {
+      return true;
+    }
+
+    const rawFields = await this.prismaService.txClient().field.findMany({
+      where: { id: { in: fieldIdsToFetch }, deletedTime: null },
+    });
+
+    const instanceMap = new Map<string, IFieldInstance>();
+    const hostFields = new Map<string, IFieldInstance>();
+    const foreignFields = new Map<string, IFieldInstance>();
+
+    for (const raw of rawFields) {
+      const instance = createFieldInstanceByRaw(raw);
+      instanceMap.set(raw.id, instance);
+
+      if (raw.tableId === hostTableId) {
+        hostFields.set(raw.id, instance);
+      }
+
+      if (raw.tableId === foreignTableId) {
+        foreignFields.set(raw.id, instance);
+      }
+    }
+
+    const resolveReferenceField = (reference: IFieldReferenceValue): IFieldInstance | undefined => {
+      if (reference.tableId) {
+        if (reference.tableId === hostTableId) {
+          return hostFields.get(reference.fieldId);
+        }
+        if (reference.tableId === foreignTableId) {
+          return foreignFields.get(reference.fieldId);
+        }
+      }
+
+      return (
+        hostFields.get(reference.fieldId) ??
+        foreignFields.get(reference.fieldId) ??
+        instanceMap.get(reference.fieldId)
+      );
+    };
+
+    // eslint-disable-next-line sonarjs/cognitive-complexity
+    const validateNode = (node: IFilter | IFilterItem): boolean => {
+      if (!node) {
+        return true;
+      }
+
+      if ('fieldId' in node) {
+        const baseField = foreignFields.get(node.fieldId) ?? instanceMap.get(node.fieldId);
+        if (!baseField) {
+          return false;
+        }
+
+        const references: IFieldReferenceValue[] = [];
+        const { value } = node;
+
+        if (isFieldReferenceValue(value)) {
+          references.push(value);
+        } else if (Array.isArray(value)) {
+          for (const entry of value) {
+            if (isFieldReferenceValue(entry)) {
+              references.push(entry);
+            }
+          }
+        }
+
+        return references.every((reference) => {
+          const referenceField = resolveReferenceField(reference);
+          return referenceField ? isFieldReferenceComparable(baseField, referenceField) : false;
+        });
+      }
+
+      if ('filterSet' in node) {
+        return node.filterSet.every((child) => validateNode(child));
+      }
+
+      return true;
+    };
+
+    return validateNode(filter);
   }
 
   private async markError(tableId: string, field: IFieldInstance, hasError: boolean) {
@@ -158,12 +536,24 @@ export class FieldOpenApiService {
       });
     }
 
-    if (field.lookupOptions) {
+    let hasError = false;
+
+    if (
+      field.lookupOptions &&
+      field.type !== FieldType.ConditionalRollup &&
+      !field.isConditionalLookup
+    ) {
       const isValid = await this.validateLookupField(field);
-      await this.markError(tableId, field, !isValid);
-    } else {
-      await this.markError(tableId, field, false);
+      hasError = !isValid;
+    } else if (field.type === FieldType.ConditionalRollup) {
+      const isValid = await this.validateConditionalRollupAggregation(tableId, field);
+      hasError = !isValid;
+    } else if (field.isConditionalLookup) {
+      const isValid = await this.validateConditionalLookup(tableId, field);
+      hasError = !isValid;
     }
+
+    await this.markError(tableId, field, hasError);
   }
 
   async restoreReference(references: string[]) {
@@ -182,38 +572,69 @@ export class FieldOpenApiService {
     tableId: string,
     fields: (IFieldVo & { columnMeta?: IColumnMeta; references?: string[] })[]
   ) {
-    const newFields = await this.prismaService.$tx(async () => {
-      const newFields: { tableId: string; field: IFieldInstance }[] = [];
-      for (let i = 0; i < fields.length; i++) {
-        const field = fields[i];
-        const { columnMeta, references, ...fieldVo } = field;
-
-        const fieldInstance = createFieldInstanceByVo(fieldVo);
-
-        const createResult = await this.fieldCreatingService.alterCreateField(
-          tableId,
-          fieldInstance,
-          columnMeta
-        );
-
-        if (references) {
-          await this.restoreReference(references);
-        }
-
-        newFields.push(...createResult);
-      }
-
-      return newFields;
-    });
-
-    await this.prismaService.$tx(
+    // Create fields and compute/publish record changes within the same transaction
+    const newFields = await this.prismaService.$tx(
       async () => {
-        for (const { tableId, field } of newFields) {
-          if (field.isComputed) {
-            await this.fieldCalculationService.calculateFields(tableId, [field.id]);
-            await this.fieldService.resolvePending(tableId, [field.id]);
-          }
+        const created: { tableId: string; field: IFieldInstance }[] = [];
+        for (let i = 0; i < fields.length; i++) {
+          const field = fields[i];
+          const { columnMeta, references, ...fieldVo } = field;
+          const fieldInstance = createFieldInstanceByVo(fieldVo);
+          const sourceEntries = [{ tableId, fieldIds: [fieldInstance.id] }];
+
+          await this.computedOrchestrator.computeCellChangesForFieldsAfterCreate(
+            sourceEntries,
+            async () => {
+              const createResult = await this.fieldCreatingService.alterCreateField(
+                tableId,
+                fieldInstance,
+                columnMeta
+              );
+              if (references) {
+                await this.restoreReference(references);
+              }
+              // Ensure dependent formula generated columns are recreated BEFORE
+              // evaluating and returning values in the computed pipeline.
+              // This avoids UPDATE ... RETURNING selecting non-existent generated columns
+              // right after restoring a base field.
+              try {
+                await this.fieldService.recreateDependentFormulaColumns(tableId, [
+                  fieldInstance.id,
+                ]);
+              } catch (e) {
+                this.logger.warn(
+                  `createFields: failed to recreate dependent formulas for ${fieldInstance.id}: ${String(
+                    e
+                  )}`
+                );
+              }
+              created.push(...createResult);
+              for (const { tableId: tid, field } of createResult) {
+                let entry = sourceEntries.find((s) => s.tableId === tid);
+                if (!entry) {
+                  entry = { tableId: tid, fieldIds: [] };
+                  sourceEntries.push(entry);
+                }
+                if (!entry.fieldIds.includes(field.id)) {
+                  entry.fieldIds.push(field.id);
+                }
+                if (field.isComputed) {
+                  await this.fieldService.resolvePending(tid, [field.id]);
+                }
+              }
+            }
+          );
         }
+
+        // Repair dependent formula generated columns for fields restored in this table
+        const createdFieldIds = created
+          .filter((nf) => nf.tableId === tableId)
+          .map((nf) => nf.field.id);
+        if (createdFieldIds.length) {
+          await this.fieldService.recreateDependentFormulaColumns(tableId, createdFieldIds);
+        }
+
+        return created;
       },
       { timeout: this.thresholdConfig.bigTransactionTimeout }
     );
@@ -239,27 +660,51 @@ export class FieldOpenApiService {
     const columnMeta = fieldRo.order && {
       [fieldRo.order.viewId]: { order: fieldRo.order.orderIndex },
     };
-    const newFields = await this.prismaService.$tx(async () => {
-      return await this.fieldCreatingService.alterCreateField(tableId, fieldInstance, columnMeta);
-    });
-
-    await this.prismaService.$tx(
+    // Create field and compute/publish record changes within the same transaction
+    const newFields = await this.prismaService.$tx(
       async () => {
-        for (const { tableId, field } of newFields) {
-          if (field.isComputed) {
-            await this.fieldCalculationService.calculateFields(tableId, [field.id]);
-            await this.fieldService.resolvePending(tableId, [field.id]);
+        let created: { tableId: string; field: IFieldInstance }[] = [];
+        const sourceEntries = [{ tableId, fieldIds: [fieldInstance.id] }];
+        await this.computedOrchestrator.computeCellChangesForFieldsAfterCreate(
+          sourceEntries,
+          async () => {
+            created = await this.fieldCreatingService.alterCreateField(
+              tableId,
+              fieldInstance,
+              columnMeta
+            );
+            for (const { tableId: tid, field } of created) {
+              let entry = sourceEntries.find((s) => s.tableId === tid);
+              if (!entry) {
+                entry = { tableId: tid, fieldIds: [] };
+                sourceEntries.push(entry);
+              }
+              if (!entry.fieldIds.includes(field.id)) {
+                entry.fieldIds.push(field.id);
+              }
+              if (field.isComputed) {
+                await this.fieldService.resolvePending(tid, [field.id]);
+              }
+            }
           }
-        }
+        );
+        return created;
       },
       { timeout: this.thresholdConfig.bigTransactionTimeout }
     );
 
-    for (const { tableId, field } of newFields) {
-      await this.tableIndexService.createSearchFieldSingleIndex(tableId, field);
+    for (const { tableId: tid, field } of newFields) {
+      await this.tableIndexService.createSearchFieldSingleIndex(tid, field);
     }
 
     const referenceMap = await this.getFieldReferenceMap([fieldVo.id]);
+
+    // Prefer emitting a VO converted from the created instance so computed props (e.g. recordRead)
+    // are included consistently with snapshots.
+    const createdMain = newFields.find(
+      (nf) => nf.tableId === tableId && nf.field.id === fieldVo.id
+    );
+    const emitFieldVo = createdMain ? convertFieldInstanceToFieldVo(createdMain.field) : fieldVo;
 
     this.eventEmitterService.emitAsync(Events.OPERATION_FIELDS_CREATE, {
       windowId,
@@ -267,7 +712,7 @@ export class FieldOpenApiService {
       userId: this.cls.get('user.id'),
       fields: [
         {
-          ...fieldVo,
+          ...emitFieldVo,
           columnMeta,
           references: referenceMap[fieldVo.id]?.map((ref) => ref.toFieldId),
         },
@@ -302,15 +747,34 @@ export class FieldOpenApiService {
     const columnsMeta = await this.viewService.getColumnsMetaMap(tableId, fieldIds);
     const referenceMap = await this.getFieldReferenceMap(fieldIds);
 
-    await this.prismaService.$tx(async () => {
-      await this.fieldViewSyncService.deleteDependenciesByFieldIds(
-        tableId,
-        fields.map((f) => f.id)
-      );
-      for (const field of fields) {
-        await this.fieldDeletingService.alterDeleteField(tableId, field);
+    // Drop per-field search indexes before entering long-running transaction
+    // to avoid prolonging the interactive transaction and hitting its timeout.
+    for (const field of fields) {
+      try {
+        await this.tableIndexService.deleteSearchFieldIndex(tableId, field);
+      } catch (e) {
+        this.logger.warn(`deleteFields: pre-drop search index failed for ${field.id}: ${e}`);
       }
-    });
+    }
+
+    await this.prismaService.$tx(
+      async () => {
+        const sources = [{ tableId, fieldIds: fields.map((f) => f.id) }];
+        await this.computedOrchestrator.computeCellChangesForFieldsBeforeDelete(
+          sources,
+          async () => {
+            await this.fieldViewSyncService.deleteDependenciesByFieldIds(
+              tableId,
+              fields.map((f) => f.id)
+            );
+            for (const field of fields) {
+              await this.fieldDeletingService.alterDeleteField(tableId, field);
+            }
+          }
+        );
+      },
+      { timeout: this.thresholdConfig.bigTransactionTimeout }
+    );
 
     this.eventEmitterService.emitAsync(Events.OPERATION_FIELDS_DELETE, {
       operationId: generateOperationId(),
@@ -435,30 +899,84 @@ export class FieldOpenApiService {
       newField: IFieldInstance;
       oldField: IFieldInstance;
     };
-  }) {
+  }): Promise<{ compatibilityIssue: boolean }> {
+    let encounteredCompatibilityIssue = false;
+
+    const runStageCalculate = async (
+      targetTableId: string,
+      targetNewField: IFieldInstance,
+      targetOldField: IFieldInstance,
+      ops?: IOpsMap
+    ) => {
+      try {
+        await this.fieldConvertingService.stageCalculate(
+          targetTableId,
+          targetNewField,
+          targetOldField,
+          ops
+        );
+      } catch (error) {
+        if (this.isFieldReferenceCompatibilityError(error)) {
+          encounteredCompatibilityIssue = true;
+          return;
+        }
+
+        throw error;
+      }
+    };
+
     // 1. stage close constraint
     await this.fieldConvertingService.closeConstraint(tableId, newField, oldField);
 
-    // 2. stage alter field
-    await this.prismaService.$tx(async () => {
-      await this.fieldViewSyncService.convertDependenciesByFieldIds(tableId, newField, oldField);
-      await this.fieldConvertingService.stageAlter(tableId, newField, oldField);
-      await this.fieldConvertingService.deleteOrCreateSupplementLink(tableId, newField, oldField);
-      // for modify supplement link
-      if (supplementChange) {
-        const { tableId, newField, oldField } = supplementChange;
-        await this.fieldConvertingService.stageAlter(tableId, newField, oldField);
-      }
-    });
-
-    // 3. stage apply record changes and calculate field
+    // 2. stage alter + apply record changes and calculate field with computed publishing (atomic)
     await this.prismaService.$tx(
       async () => {
-        await this.fieldConvertingService.stageCalculate(tableId, newField, oldField, modifiedOps);
+        const sources = [{ tableId, fieldIds: [newField.id] }];
+        if (supplementChange)
+          sources.push({
+            tableId: supplementChange.tableId,
+            fieldIds: [supplementChange.newField.id],
+          });
 
-        if (supplementChange) {
-          const { tableId, newField, oldField } = supplementChange;
-          await this.fieldConvertingService.stageCalculate(tableId, newField, oldField);
+        const runCompute = async () => {
+          // Update dependencies and schema first so evaluate() sees new schema
+          await this.fieldViewSyncService.convertDependenciesByFieldIds(
+            tableId,
+            newField,
+            oldField
+          );
+          await this.syncConditionalFiltersByFieldChanges(newField, oldField);
+          if (supplementChange) {
+            const { newField: sNew, oldField: sOld } = supplementChange;
+            await this.syncConditionalFiltersByFieldChanges(sNew, sOld);
+          }
+          await this.fieldConvertingService.deleteOrCreateSupplementLink(
+            tableId,
+            newField,
+            oldField
+          );
+          await this.fieldConvertingService.stageAlter(tableId, newField, oldField);
+          if (supplementChange) {
+            const { tableId: sTid, newField: sNew, oldField: sOld } = supplementChange;
+            await this.fieldConvertingService.stageAlter(sTid, sNew, sOld);
+          }
+
+          // Then apply record changes (base ops) prior to computed publishing
+          await runStageCalculate(tableId, newField, oldField, modifiedOps);
+          if (supplementChange) {
+            const { tableId: sTid, newField: sNew, oldField: sOld } = supplementChange;
+            await runStageCalculate(sTid, sNew, sOld);
+          }
+        };
+
+        try {
+          await this.computedOrchestrator.computeCellChangesForFields(sources, runCompute);
+        } catch (error) {
+          if (this.isFieldReferenceCompatibilityError(error)) {
+            encounteredCompatibilityIssue = true;
+            return;
+          }
+          throw error;
         }
       },
       { timeout: this.thresholdConfig.bigTransactionTimeout }
@@ -468,8 +986,38 @@ export class FieldOpenApiService {
     await this.prismaService.$tx(async () => {
       await this.fieldConvertingService.alterFieldConstraint(tableId, newField, oldField);
     });
+
+    // Persist values for a newly created symmetric link field (if any).
+    // When using tableCache for reads, link values must be materialized in the physical column.
+    try {
+      const newOpts = (newField.options || {}) as {
+        symmetricFieldId?: string;
+        foreignTableId?: string;
+      };
+      const oldOpts = (oldField.options || {}) as { symmetricFieldId?: string };
+      const createdSymmetricId =
+        newOpts.symmetricFieldId && newOpts.symmetricFieldId !== oldOpts.symmetricFieldId;
+      if (newField.type === FieldType.Link && createdSymmetricId && newOpts.foreignTableId) {
+        await this.computedOrchestrator.computeCellChangesForFieldsAfterCreate(
+          [
+            {
+              tableId: newOpts.foreignTableId,
+              fieldIds: [newOpts.symmetricFieldId!],
+            },
+          ],
+          async () => {
+            // no-op; field already created
+          }
+        );
+      }
+    } catch (e) {
+      this.logger.warn(`post-convert symmetric persist failed: ${String(e)}`);
+    }
+
+    return { compatibilityIssue: encounteredCompatibilityIssue };
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   async convertField(
     tableId: string,
     fieldId: string,
@@ -480,13 +1028,83 @@ export class FieldOpenApiService {
     const { newField, oldField, modifiedOps, supplementChange, references } =
       await this.fieldConvertingService.stageAnalysis(tableId, fieldId, updateFieldRo);
 
-    await this.performConvertField({
+    const { compatibilityIssue } = await this.performConvertField({
       tableId,
       newField,
       oldField,
       modifiedOps,
       supplementChange,
     });
+
+    const shouldForceLookupError =
+      oldField.type === FieldType.Link &&
+      !oldField.isLookup &&
+      !newField.isLookup &&
+      (newField.type !== FieldType.Link ||
+        ((newField.options as ILinkFieldOptions | undefined)?.foreignTableId ?? null) !==
+          ((oldField.options as ILinkFieldOptions | undefined)?.foreignTableId ?? null));
+
+    const dependentRefs = await this.prismaService.reference.findMany({
+      where: { fromFieldId: fieldId },
+      select: { toFieldId: true },
+    });
+    const dependentFieldIds = Array.from(
+      new Set([...(references ?? []), ...dependentRefs.map((ref) => ref.toFieldId)])
+    );
+
+    if (dependentFieldIds.length) {
+      try {
+        await this.restoreReference(dependentFieldIds);
+        const dependentFieldRaws = await this.prismaService.field.findMany({
+          where: { id: { in: dependentFieldIds }, deletedTime: null },
+        });
+        for (const raw of dependentFieldRaws) {
+          const instance = createFieldInstanceByRaw(raw);
+          let isValid = true;
+
+          if (instance.type === FieldType.ConditionalRollup) {
+            isValid = await this.validateConditionalRollupAggregation(raw.tableId, instance);
+          } else if (instance.isConditionalLookup) {
+            isValid = await this.validateConditionalLookup(raw.tableId, instance);
+          }
+
+          await this.markError(raw.tableId, instance, !isValid);
+        }
+
+        if (shouldForceLookupError) {
+          const lookupFieldsToMark = dependentFieldRaws.filter(
+            (raw) =>
+              raw.id !== fieldId &&
+              (raw.isLookup ||
+                raw.type === FieldType.Rollup ||
+                raw.type === FieldType.ConditionalRollup)
+          );
+          if (lookupFieldsToMark.length) {
+            const grouped = groupBy(lookupFieldsToMark, 'tableId');
+            for (const [lookupTableId, fields] of Object.entries(grouped)) {
+              await this.fieldService.markError(
+                lookupTableId,
+                fields.map((f) => f.id),
+                true
+              );
+            }
+          }
+        }
+      } catch (e) {
+        this.logger.warn(
+          `convertField: restoreReference/checkError failed for ${fieldId}: ${String(e)}`
+        );
+      }
+    }
+
+    if (
+      compatibilityIssue &&
+      (newField.isConditionalLookup ||
+        newField.isLookup ||
+        newField.type === FieldType.ConditionalRollup)
+    ) {
+      await this.markError(tableId, newField, true);
+    }
 
     const oldFieldVo = instanceToPlain(oldField, { excludePrefixes: ['_'] }) as IFieldVo;
     const newFieldVo = instanceToPlain(newField, { excludePrefixes: ['_'] }) as IFieldVo;
@@ -506,19 +1124,34 @@ export class FieldOpenApiService {
       });
     }
 
-    return newFieldVo;
+    // Keep API response consistent with getField/getFields by filtering out meta
+    return omit(newFieldVo, ['meta']) as IFieldVo;
   }
 
   async getFilterLinkRecords(tableId: string, fieldId: string) {
     const field = await this.fieldService.getField(tableId, fieldId);
 
-    if (field.type !== FieldType.Link) return [];
+    if (field.type === FieldType.Link) {
+      const { filter, foreignTableId } = field.options as ILinkFieldOptions;
 
-    const { filter, foreignTableId } = field.options as ILinkFieldOptions;
+      if (!foreignTableId || !filter) {
+        return [];
+      }
 
-    if (!foreignTableId || !filter) return [];
+      return this.viewOpenApiService.getFilterLinkRecordsByTable(foreignTableId, filter);
+    }
 
-    return this.viewOpenApiService.getFilterLinkRecordsByTable(foreignTableId, filter);
+    if (field.type === FieldType.ConditionalRollup) {
+      const { filter, foreignTableId } = field.options as IConditionalRollupFieldOptions;
+
+      if (!foreignTableId || !filter) {
+        return [];
+      }
+
+      return this.viewOpenApiService.getFilterLinkRecordsByTable(foreignTableId, filter);
+    }
+
+    return [];
   }
 
   async duplicateField(
@@ -602,13 +1235,19 @@ export class FieldOpenApiService {
       };
     }
 
-    if (fieldInstance.isLookup || fieldInstance.type === FieldType.Rollup) {
+    if (
+      fieldInstance.isLookup ||
+      fieldInstance.type === FieldType.Rollup ||
+      fieldInstance.type === FieldType.ConditionalRollup
+    ) {
       newFieldInstance.lookupOptions = {
         ...pick(fieldInstance.lookupOptions, [
           'foreignTableId',
           'lookupFieldId',
           'linkFieldId',
           'filter',
+          'sort',
+          'limit',
         ]),
       } as IFieldInstance['lookupOptions'];
     }
@@ -619,12 +1258,13 @@ export class FieldOpenApiService {
     });
 
     if (!fieldInstance.isComputed && fieldInstance.type !== FieldType.Button) {
-      // do not async duplicate records
-      this.duplicateFieldData(
+      // Duplicate records synchronously to avoid cross-transaction CLS leaks
+      await this.duplicateFieldData(
         sourceTableId,
         newField.id,
         fieldRaw.dbFieldName,
-        omit(newFieldInstance, 'order') as IFieldInstance
+        omit(newFieldInstance, 'order') as IFieldInstance,
+        { sourceFieldId: fieldRaw.id }
       );
     }
 
@@ -643,13 +1283,19 @@ export class FieldOpenApiService {
     sourceTableId: string,
     targetFieldId: string,
     sourceDbFieldName: string,
-    fieldInstance: IFieldInstance
+    fieldInstance: IFieldInstance,
+    opts: { sourceFieldId: string }
   ) {
     const chunkSize = 1000;
 
     const dbTableName = await this.fieldService.getDbTableName(sourceTableId);
 
-    const count = await this.getFieldRecordsCount(dbTableName, sourceDbFieldName);
+    // Use the SOURCE field for filtering/counting so we only fetch rows where
+    // the original field has a value. The new field is empty at this point.
+    const sourceFieldId = opts.sourceFieldId;
+    const sourceFieldForFilter = { ...fieldInstance, id: sourceFieldId } as IFieldInstance;
+
+    const count = await this.getFieldRecordsCount(dbTableName, sourceFieldForFilter);
 
     if (!count) {
       if (fieldInstance.notNull || fieldInstance.unique) {
@@ -667,23 +1313,26 @@ export class FieldOpenApiService {
     for (let i = 0; i < page; i++) {
       const sourceRecords = await this.getFieldRecords(
         dbTableName,
+        sourceFieldForFilter,
         sourceDbFieldName,
         i,
         chunkSize
       );
 
-      await this.prismaService.$tx(async () => {
-        await this.recordOpenApiService.simpleUpdateRecords(sourceTableId, {
-          fieldKeyType: FieldKeyType.Id,
-          typecast: true,
-          records: sourceRecords.map((record) => ({
-            id: record.id,
-            fields: {
-              [targetFieldId]: record.value,
-            },
-          })),
+      if (!fieldInstance.isComputed && fieldInstance.type !== FieldType.Button) {
+        await this.prismaService.$tx(async () => {
+          await this.recordOpenApiService.simpleUpdateRecords(sourceTableId, {
+            fieldKeyType: FieldKeyType.Id,
+            typecast: true,
+            records: sourceRecords.map((record) => ({
+              id: record.id,
+              fields: {
+                [targetFieldId]: record.value,
+              },
+            })),
+          });
         });
-      });
+      }
     }
 
     if (fieldInstance.notNull || fieldInstance.unique) {
@@ -695,27 +1344,84 @@ export class FieldOpenApiService {
     }
   }
 
-  private async getFieldRecordsCount(dbTableName: string, dbFieldName: string) {
-    const query = this.knex(dbTableName).count('*').whereNotNull(dbFieldName).toQuery();
+  private async getFieldRecordsCount(dbTableName: string, field: IFieldInstance) {
+    // Build a filter that counts only non-empty values for the field
+    // - For boolean (checkbox) fields: use OR(is true, is false)
+    // - For other fields: use isNotEmpty
+    const filter: IFilter =
+      field.cellValueType === CellValueType.Boolean
+        ? {
+            conjunction: 'or',
+            filterSet: [
+              { fieldId: field.id, operator: 'is', value: true },
+              { fieldId: field.id, operator: 'is', value: false },
+            ],
+          }
+        : {
+            conjunction: 'and',
+            filterSet: [{ fieldId: field.id, operator: 'isNotEmpty', value: null }],
+          };
+
+    const { qb } = await this.recordQueryBuilder.createRecordAggregateBuilder(dbTableName, {
+      tableIdOrDbTableName: dbTableName,
+      viewId: undefined,
+      filter,
+      aggregationFields: [
+        {
+          // Use Count with '*' so it just counts filtered rows
+          fieldId: '*',
+          statisticFunc: StatisticsFunc.Count,
+          alias: 'count',
+        },
+      ],
+    });
+
+    const query = qb.toQuery();
     const result = await this.prismaService.$queryRawUnsafe<{ count: number }[]>(query);
     return Number(result[0].count);
   }
 
   private async getFieldRecords(
     dbTableName: string,
+    field: IFieldInstance,
     dbFieldName: string,
     page: number,
     chunkSize: number
   ) {
-    const query = this.knex(dbTableName)
-      .select({ id: '__id', value: dbFieldName })
-      .whereNotNull(dbFieldName)
+    // Align fetching with counting logic: only fetch non-empty values for the field
+    const filter: IFilter =
+      field.cellValueType === CellValueType.Boolean
+        ? {
+            conjunction: 'or',
+            filterSet: [
+              { fieldId: field.id, operator: 'is', value: true },
+              { fieldId: field.id, operator: 'is', value: false },
+            ],
+          }
+        : {
+            conjunction: 'and',
+            filterSet: [{ fieldId: field.id, operator: 'isNotEmpty', value: null }],
+          };
+
+    const { qb } = await this.recordQueryBuilder.createRecordQueryBuilder(dbTableName, {
+      tableIdOrDbTableName: dbTableName,
+      viewId: undefined,
+      filter,
+    });
+    const query = qb
+      // TODO: handle where now link or lookup cannot use alias
+      // .whereNotNull(dbFieldName)
       .orderBy('__auto_number')
       .limit(chunkSize)
       .offset(page * chunkSize)
       .toQuery();
-    const result = await this.prismaService.$queryRawUnsafe<{ id: string; value: string }[]>(query);
-    return result.map((item) => item);
+    const result =
+      await this.prismaService.$queryRawUnsafe<{ __id: string; [key: string]: string }[]>(query);
+    this.logger.debug('getFieldRecords: ', result);
+    return result.map((item) => ({
+      id: item.__id,
+      value: item[dbFieldName] as string,
+    }));
   }
 
   getFieldUniqueKeyName(dbTableName: string, dbFieldName: string, fieldId: string) {

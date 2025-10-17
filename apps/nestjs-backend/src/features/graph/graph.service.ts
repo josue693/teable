@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { IFieldRo, ILinkFieldOptions, IConvertFieldRo } from '@teable/core';
-import { FieldType, Relationship } from '@teable/core';
+import { FieldType, Relationship, isLinkLookupOptions } from '@teable/core';
 import type { Field, TableMeta } from '@teable/db-main-prisma';
 import { PrismaService } from '@teable/db-main-prisma';
 import type {
@@ -20,11 +20,10 @@ import { IThresholdConfig, ThresholdConfig } from '../../configs/threshold.confi
 import { majorFieldKeysChanged } from '../../utils/major-field-keys-changed';
 import { Timing } from '../../utils/timing';
 import { FieldCalculationService } from '../calculation/field-calculation.service';
-import type { IGraphItem } from '../calculation/reference.service';
 import { ReferenceService } from '../calculation/reference.service';
+import type { IGraphItem } from '../calculation/utils/dfs';
 import { pruneGraph, topoOrderWithStart } from '../calculation/utils/dfs';
 import { FieldConvertingLinkService } from '../field/field-calculate/field-converting-link.service';
-import { FieldConvertingService } from '../field/field-calculate/field-converting.service';
 import { FieldSupplementService } from '../field/field-calculate/field-supplement.service';
 import { FieldService } from '../field/field.service';
 import {
@@ -39,6 +38,7 @@ interface ITinyField {
   type: string;
   tableId: string;
   isLookup?: boolean | null;
+  isConditionalLookup?: boolean | null;
 }
 
 interface ITinyTable {
@@ -57,7 +57,6 @@ export class GraphService {
     private readonly referenceService: ReferenceService,
     private readonly fieldSupplementService: FieldSupplementService,
     private readonly fieldCalculationService: FieldCalculationService,
-    private readonly fieldConvertingService: FieldConvertingService,
     private readonly fieldConvertingLinkService: FieldConvertingLinkService,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
     @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig
@@ -66,7 +65,8 @@ export class GraphService {
   private getFieldNodesAndCombos(
     fieldId: string,
     fieldRawsMap: Record<string, ITinyField[]>,
-    tableRaws: ITinyTable[]
+    tableRaws: ITinyTable[],
+    allowedNodeIds?: Set<string>
   ) {
     const nodes: IGraphNode[] = [];
     const combos: IGraphCombo[] = [];
@@ -76,14 +76,17 @@ export class GraphService {
         label: tableName,
       });
       fieldRawsMap[tableId].forEach((field) => {
-        nodes.push({
-          id: field.id,
-          label: field.name,
-          comboId: tableId,
-          fieldType: field.type,
-          isLookup: field.isLookup,
-          isSelected: field.id === fieldId,
-        });
+        if (!allowedNodeIds || allowedNodeIds.has(field.id)) {
+          nodes.push({
+            id: field.id,
+            label: field.name,
+            comboId: tableId,
+            fieldType: field.type,
+            isLookup: field.isLookup,
+            isConditionalLookup: field.isConditionalLookup,
+            isSelected: field.id === fieldId,
+          });
+        }
       });
     });
     return {
@@ -112,7 +115,14 @@ export class GraphService {
     );
     const fieldRaws = await this.prismaService.field.findMany({
       where: { id: { in: allFieldIds } },
-      select: { id: true, name: true, type: true, isLookup: true, tableId: true },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        isLookup: true,
+        isConditionalLookup: true,
+        tableId: true,
+      },
     });
 
     fieldRaws.push({
@@ -120,6 +130,7 @@ export class GraphService {
       name: field.name,
       type: field.type,
       isLookup: field.isLookup || null,
+      isConditionalLookup: field.isConditionalLookup || null,
       tableId,
     });
 
@@ -133,16 +144,46 @@ export class GraphService {
 
     const fieldRawsMap = groupBy(fieldRaws, 'tableId');
 
-    const edges = directedGraph.map<IGraphEdge>((node) => {
-      const field = fieldMap[node.toFieldId];
+    // Normalize edges for display: dedupe and hide link -> lookup edge
+    const seen = new Set<string>();
+    const filteredGraph = directedGraph.filter(({ fromFieldId, toFieldId }) => {
+      // Hide the link -> lookup edge for readability in graph
+      const lookupOptions = field.lookupOptions;
+      if (
+        toFieldId === field.id &&
+        lookupOptions &&
+        isLinkLookupOptions(lookupOptions) &&
+        fromFieldId === lookupOptions.linkFieldId
+      ) {
+        return false;
+      }
+      const key = `${fromFieldId}->${toFieldId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const edges = filteredGraph.map<IGraphEdge>((node) => {
+      const f = fieldMap[node.toFieldId];
       return {
         source: node.fromFieldId,
         target: node.toFieldId,
-        label: field.isLookup ? 'lookup' : field.type,
+        label: f.isLookup ? 'lookup' : f.type,
       };
     }, []);
 
-    const { nodes, combos } = this.getFieldNodesAndCombos(field.id, fieldRawsMap, tableRaws);
+    // Only include nodes that appear in edges, plus the host field
+    const nodeIds = new Set<string>([field.id]);
+    for (const e of filteredGraph) {
+      nodeIds.add(e.fromFieldId);
+      nodeIds.add(e.toFieldId);
+    }
+    const { nodes, combos } = this.getFieldNodesAndCombos(
+      field.id,
+      fieldRawsMap,
+      tableRaws,
+      nodeIds
+    );
     const updateCellCount = await this.affectedCellCount(
       field.id,
       [field.id],
@@ -271,7 +312,26 @@ export class GraphService {
     const { fieldId, directedGraph, allFieldIds, fieldMap, tableId2DbTableName, fieldId2TableId } =
       params;
 
-    const edges = directedGraph.map<IGraphEdge>((node) => {
+    // 1) Dedupe edges and hide link -> lookup edge for display
+    const edgeSeen = new Set<string>();
+    const filtered = directedGraph.filter(({ fromFieldId, toFieldId }) => {
+      const to = fieldMap[toFieldId];
+      const lookupOptions = to?.lookupOptions;
+      if (
+        lookupOptions &&
+        isLinkLookupOptions(lookupOptions) &&
+        fromFieldId === lookupOptions.linkFieldId
+      ) {
+        // Hide the link field as a dependency in the display graph
+        return false;
+      }
+      const key = `${fromFieldId}->${toFieldId}`;
+      if (edgeSeen.has(key)) return false;
+      edgeSeen.add(key);
+      return true;
+    });
+
+    const edges = filtered.map<IGraphEdge>((node) => {
       const field = fieldMap[node.toFieldId];
       return {
         source: node.fromFieldId,
@@ -291,7 +351,13 @@ export class GraphService {
       label: table.name,
     }));
 
-    const nodes = allFieldIds.map<IGraphNode>((id) => {
+    // Nodes: from filtered edges plus ensure host field is present
+    const nodeIdSet = new Set<string>([fieldId]);
+    for (const e of filtered) {
+      nodeIdSet.add(e.fromFieldId);
+      nodeIdSet.add(e.toFieldId);
+    }
+    const nodes = Array.from(nodeIdSet).map<IGraphNode>((id) => {
       const tableId = fieldId2TableId[id];
       const field = fieldMap[id];
       return {
@@ -391,19 +457,33 @@ export class GraphService {
   ): Promise<number> {
     const queries = fieldIds.map((fieldId) => {
       const field = fieldMap[fieldId];
-      if (field.id !== hostFieldId && (field.lookupOptions || field.type === FieldType.Link)) {
-        const options = field.lookupOptions || (field.options as ILinkFieldOptions);
-        const { relationship, fkHostTableName, selfKeyName, foreignKeyName } = options;
-        const query =
-          relationship === Relationship.OneOne || relationship === Relationship.ManyOne
-            ? this.knex.count(foreignKeyName, { as: 'count' }).from(fkHostTableName)
-            : this.knex.countDistinct(selfKeyName, { as: 'count' }).from(fkHostTableName);
+      const lookupOptions = field.lookupOptions;
 
-        return query.toQuery();
-      } else {
-        const dbTableName = fieldId2DbTableName[fieldId];
-        return this.knex.count('*', { as: 'count' }).from(dbTableName).toQuery();
+      if (field.id !== hostFieldId) {
+        if (field.type === FieldType.Link) {
+          const { relationship, fkHostTableName, selfKeyName, foreignKeyName } =
+            field.options as ILinkFieldOptions;
+          const query =
+            relationship === Relationship.OneOne || relationship === Relationship.ManyOne
+              ? this.knex.count(foreignKeyName, { as: 'count' }).from(fkHostTableName)
+              : this.knex.countDistinct(selfKeyName, { as: 'count' }).from(fkHostTableName);
+
+          return query.toQuery();
+        }
+
+        if (lookupOptions && isLinkLookupOptions(lookupOptions)) {
+          const { relationship, fkHostTableName, selfKeyName, foreignKeyName } = lookupOptions;
+          const query =
+            relationship === Relationship.OneOne || relationship === Relationship.ManyOne
+              ? this.knex.count(foreignKeyName, { as: 'count' }).from(fkHostTableName)
+              : this.knex.countDistinct(selfKeyName, { as: 'count' }).from(fkHostTableName);
+
+          return query.toQuery();
+        }
       }
+
+      const dbTableName = fieldId2DbTableName[fieldId];
+      return this.knex.count('*', { as: 'count' }).from(dbTableName).toQuery();
     });
     // console.log('queries', queries);
 
@@ -537,6 +617,7 @@ export class GraphService {
         type: true,
         options: true,
         isLookup: true,
+        lookupLinkedFieldId: true,
       },
       orderBy: {
         order: 'asc',
@@ -623,12 +704,18 @@ export class GraphService {
       options: ILinkFieldOptions;
     })[];
     tableMap: Record<string, Pick<TableMeta, 'id' | 'name' | 'icon'>>;
-    fieldMap: Record<string, Pick<Field, 'id' | 'tableId' | 'name' | 'type' | 'isLookup'>>;
+    fieldMap: Record<
+      string,
+      Pick<Field, 'id' | 'tableId' | 'name' | 'type' | 'isLookup' | 'lookupLinkedFieldId'>
+    >;
     crossBaseLinkFieldRaws: (Pick<Field, 'id' | 'name' | 'type' | 'tableId'> & {
       options: ILinkFieldOptions;
     })[];
     crossBaseTableMap: Record<string, Pick<TableMeta, 'id' | 'name' | 'icon'>>;
-    crossBaseFieldMap: Record<string, Pick<Field, 'id' | 'tableId' | 'name' | 'type' | 'isLookup'>>;
+    crossBaseFieldMap: Record<
+      string,
+      Pick<Field, 'id' | 'tableId' | 'name' | 'type' | 'isLookup' | 'lookupLinkedFieldId'>
+    >;
     references: { fromFieldId: string; toFieldId: string }[];
   }) {
     const {
@@ -686,13 +773,26 @@ export class GraphService {
 
     for (const { fromFieldId, toFieldId } of references) {
       const fromField = fieldMap[fromFieldId] ?? crossBaseFieldMap[fromFieldId];
-      const fromTable = tableMap[fromField.tableId] ?? crossBaseTableMap[fromField.tableId];
       const toField = fieldMap[toFieldId] ?? crossBaseFieldMap[toFieldId];
+
+      if (!fromField || !toField) {
+        continue;
+      }
+
+      const fromTable = tableMap[fromField.tableId] ?? crossBaseTableMap[fromField.tableId];
       const toTable = tableMap[toField.tableId] ?? crossBaseTableMap[toField.tableId];
+
+      if (!fromTable || !toTable) {
+        continue;
+      }
 
       const key = `${fromField.id}-${toField.id}`;
       const reverseKey = `${toField.id}-${fromField.id}`;
       if (fieldEdgeMap.has(key) || fieldEdgeMap.has(reverseKey)) {
+        continue;
+      }
+
+      if (toField.lookupLinkedFieldId && toField.lookupLinkedFieldId === fromField.id) {
         continue;
       }
 
@@ -712,6 +812,7 @@ export class GraphService {
         type: toField.isLookup ? 'lookup' : (toField.type as FieldType),
       };
       edges.push(edge);
+      fieldEdgeMap.set(key, true);
     }
 
     return edges.map((edge) => {

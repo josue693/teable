@@ -3,9 +3,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { type INestApplication } from '@nestjs/common';
 import type {
+  IConditionalRollupFieldOptions,
   IFieldRo,
   IFieldVo,
+  IFilter,
   ILinkFieldOptions,
+  ILookupLinkOptions,
   ILookupOptionsRo,
   INumberFieldOptions,
   LinkFieldCore,
@@ -26,9 +29,11 @@ import {
   createTable,
   permanentDeleteTable,
   getFields,
+  getField,
   getRecord,
   initApp,
   updateRecordByApi,
+  convertField,
 } from './utils/init-app';
 
 // All kind of field type (except link)
@@ -359,6 +364,62 @@ describe('OpenAPI Lookup field (e2e)', () => {
 
       const record6 = await getRecord(table2.id, table2.records[1].id);
       expect(record6.fields[lookupFieldVo.id]).toEqual(123);
+    });
+
+    it('should preserve lookup metadata when renaming via convertField', async () => {
+      const linkField = getFieldByType(table1.fields, FieldType.Link) as LinkFieldCore;
+      const foreignTable = tables.find((t) => t.id === linkField.options.foreignTableId)!;
+      const lookedUpField = getFieldByType(foreignTable.fields, FieldType.SingleLineText);
+      const lookupName = 'lookup rename safeguard';
+
+      const lookupField = await createField(table1.id, {
+        name: lookupName,
+        type: lookedUpField.type,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: foreignTable.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: lookedUpField.id,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      await updateTableFields(table1);
+      const fieldId = lookupField.id;
+      const beforeDetail = await getField(table1.id, fieldId);
+      const rawLookupOptions = beforeDetail.lookupOptions as ILookupLinkOptions | undefined;
+      const normalizedLookupOptions: ILookupOptionsRo | undefined = rawLookupOptions
+        ? {
+            foreignTableId: rawLookupOptions.foreignTableId,
+            lookupFieldId: rawLookupOptions.lookupFieldId,
+            linkFieldId: rawLookupOptions.linkFieldId,
+            filter: rawLookupOptions.filter,
+          }
+        : undefined;
+      const recordBefore = await getRecord(table1.id, table1.records[0].id);
+      const baseline = recordBefore.fields[fieldId];
+
+      try {
+        const renamed = await convertField(table1.id, fieldId, {
+          name: `${lookupName} renamed`,
+          type: lookedUpField.type,
+          isLookup: true,
+          lookupOptions: normalizedLookupOptions,
+          options: beforeDetail.options,
+        } as IFieldRo);
+
+        expect(renamed.dbFieldType).toBe(beforeDetail.dbFieldType);
+        expect(renamed.isMultipleCellValue).toBe(beforeDetail.isMultipleCellValue);
+        expect(renamed.isComputed).toBe(true);
+        expect(renamed.lookupOptions).toMatchObject(
+          beforeDetail.lookupOptions as Record<string, unknown>
+        );
+
+        const recordAfter = await getRecord(table1.id, table1.records[0].id);
+        expect(recordAfter.fields[fieldId]).toEqual(baseline);
+      } finally {
+        await deleteField(table1.id, fieldId);
+        await updateTableFields(table1);
+      }
     });
 
     it('should update many - one lookupField by replace a linkRecord from cell', async () => {
@@ -1066,6 +1127,256 @@ describe('OpenAPI Lookup field (e2e)', () => {
       //  check lookup field
       const recordAfter = await getRecord(table1.id, table1.records[0].id);
       expect(recordAfter.fields[lookupField.id]).toBeUndefined();
+    });
+  });
+
+  describe('conditional lookup chains', () => {
+    const normalizeLookupValues = (value: unknown): unknown[] | undefined => {
+      if (value === undefined) {
+        return undefined;
+      }
+      const normalized: unknown[] = [];
+      const collect = (item: unknown) => {
+        if (Array.isArray(item)) {
+          item.forEach(collect);
+        } else {
+          normalized.push(item);
+        }
+      };
+      collect(value);
+      return normalized;
+    };
+
+    let leaf: ITableFullVo;
+    let middle: ITableFullVo;
+    let root: ITableFullVo;
+
+    let middleLinkToLeaf: IFieldVo;
+    let leafNameFieldId: string;
+    let leafScoreFieldId: string;
+    let middleCategoryFieldId: string;
+    let rootCategoryFilterFieldId: string;
+
+    let middleLeafNameLookup: IFieldVo;
+    let middleLeafScoreLookup: IFieldVo;
+    let middleLeafScoreRollup: IFieldVo;
+
+    let rootConditionalNameLookup: IFieldVo;
+    let rootConditionalScoreLookup: IFieldVo;
+    let rootConditionalRollup: IFieldVo;
+
+    let hardwareRootRecordId: string;
+    let softwareRootRecordId: string;
+
+    let categoryMatchFilter: IFilter;
+
+    beforeAll(async () => {
+      leaf = await createTable(baseId, {
+        name: 'ConditionalLeaf',
+        fields: [
+          { name: 'LeafName', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'LeafScore', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          { fields: { LeafName: 'Alpha', LeafScore: 10 } },
+          { fields: { LeafName: 'Beta', LeafScore: 20 } },
+          { fields: { LeafName: 'Gamma', LeafScore: 30 } },
+        ],
+      });
+      leafNameFieldId = leaf.fields.find((field) => field.name === 'LeafName')!.id;
+      leafScoreFieldId = leaf.fields.find((field) => field.name === 'LeafScore')!.id;
+
+      middle = await createTable(baseId, {
+        name: 'ConditionalMiddle',
+        fields: [{ name: 'Category', type: FieldType.SingleLineText } as IFieldRo],
+        records: [
+          { fields: { Category: 'Hardware' } },
+          { fields: { Category: 'Hardware' } },
+          { fields: { Category: 'Software' } },
+        ],
+      });
+      middleCategoryFieldId = middle.fields.find((field) => field.name === 'Category')!.id;
+
+      middleLinkToLeaf = await createField(middle.id, {
+        name: 'LeafLink',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyMany,
+          foreignTableId: leaf.id,
+        },
+      });
+
+      middleLeafNameLookup = await createField(middle.id, {
+        name: 'LeafNames',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: leaf.id,
+          linkFieldId: middleLinkToLeaf.id,
+          lookupFieldId: leafNameFieldId,
+        } as ILookupOptionsRo,
+      });
+
+      middleLeafScoreLookup = await createField(middle.id, {
+        name: 'LeafScores',
+        type: FieldType.Number,
+        isLookup: true,
+        options: {
+          formatting: {
+            type: NumberFormattingType.Decimal,
+            precision: 0,
+          },
+        },
+        lookupOptions: {
+          foreignTableId: leaf.id,
+          linkFieldId: middleLinkToLeaf.id,
+          lookupFieldId: leafScoreFieldId,
+        } as ILookupOptionsRo,
+      });
+
+      middleLeafScoreRollup = await createField(middle.id, {
+        name: 'LeafScoreTotal',
+        type: FieldType.Rollup,
+        options: {
+          expression: 'sum({values})',
+        },
+        lookupOptions: {
+          foreignTableId: leaf.id,
+          linkFieldId: middleLinkToLeaf.id,
+          lookupFieldId: leafScoreFieldId,
+        },
+      } as IFieldRo);
+
+      // Connect middle records to leaf records for lookup resolution
+      await updateRecordByApi(middle.id, middle.records[0].id, middleLinkToLeaf.id, [
+        { id: leaf.records[0].id },
+      ]);
+      await updateRecordByApi(middle.id, middle.records[1].id, middleLinkToLeaf.id, [
+        { id: leaf.records[1].id },
+      ]);
+      await updateRecordByApi(middle.id, middle.records[2].id, middleLinkToLeaf.id, [
+        { id: leaf.records[2].id },
+      ]);
+
+      root = await createTable(baseId, {
+        name: 'ConditionalRoot',
+        fields: [{ name: 'CategoryFilter', type: FieldType.SingleLineText } as IFieldRo],
+        records: [
+          { fields: { CategoryFilter: 'Hardware' } },
+          { fields: { CategoryFilter: 'Software' } },
+        ],
+      });
+      rootCategoryFilterFieldId = root.fields.find((field) => field.name === 'CategoryFilter')!.id;
+      hardwareRootRecordId = root.records[0].id;
+      softwareRootRecordId = root.records[1].id;
+
+      categoryMatchFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: middleCategoryFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: rootCategoryFilterFieldId },
+          },
+        ],
+      };
+
+      rootConditionalNameLookup = await createField(root.id, {
+        name: 'FilteredLeafNames',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: middle.id,
+          lookupFieldId: middleLeafNameLookup.id,
+          filter: categoryMatchFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      rootConditionalScoreLookup = await createField(root.id, {
+        name: 'FilteredLeafScores',
+        type: FieldType.Number,
+        isLookup: true,
+        isConditionalLookup: true,
+        options: {
+          formatting: {
+            type: NumberFormattingType.Decimal,
+            precision: 0,
+          },
+        },
+        lookupOptions: {
+          foreignTableId: middle.id,
+          lookupFieldId: middleLeafScoreLookup.id,
+          filter: categoryMatchFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      rootConditionalRollup = await createField(root.id, {
+        name: 'FilteredLeafScoreSum',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: middle.id,
+          lookupFieldId: middleLeafScoreRollup.id,
+          expression: 'sum({values})',
+          filter: categoryMatchFilter,
+        } as IConditionalRollupFieldOptions,
+      } as IFieldRo);
+
+      // Link root records to the appropriate middle records
+      const rootLinkToMiddle = await createField(root.id, {
+        name: 'MiddleLink',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyMany,
+          foreignTableId: middle.id,
+        },
+      });
+      await updateRecordByApi(root.id, hardwareRootRecordId, rootLinkToMiddle.id, [
+        { id: middle.records[0].id },
+        { id: middle.records[1].id },
+      ]);
+      await updateRecordByApi(root.id, softwareRootRecordId, rootLinkToMiddle.id, [
+        { id: middle.records[2].id },
+      ]);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, root.id);
+      await permanentDeleteTable(baseId, middle.id);
+      await permanentDeleteTable(baseId, leaf.id);
+    });
+
+    it('should resolve multi-layer conditional lookup returning text values', async () => {
+      const hardwareRecord = await getRecord(root.id, hardwareRootRecordId);
+      const softwareRecord = await getRecord(root.id, softwareRootRecordId);
+
+      expect(normalizeLookupValues(hardwareRecord.fields[rootConditionalNameLookup.id])).toEqual([
+        'Alpha',
+        'Beta',
+      ]);
+      expect(normalizeLookupValues(softwareRecord.fields[rootConditionalNameLookup.id])).toEqual([
+        'Gamma',
+      ]);
+    });
+
+    it('should resolve multi-layer conditional lookup returning number values', async () => {
+      const hardwareRecord = await getRecord(root.id, hardwareRootRecordId);
+      const softwareRecord = await getRecord(root.id, softwareRootRecordId);
+
+      expect(normalizeLookupValues(hardwareRecord.fields[rootConditionalScoreLookup.id])).toEqual([
+        10, 20,
+      ]);
+      expect(normalizeLookupValues(softwareRecord.fields[rootConditionalScoreLookup.id])).toEqual([
+        30,
+      ]);
+    });
+
+    it('should compute conditional rollup values from nested lookups', async () => {
+      const hardwareRecord = await getRecord(root.id, hardwareRootRecordId);
+      const softwareRecord = await getRecord(root.id, softwareRootRecordId);
+
+      expect(hardwareRecord.fields[rootConditionalRollup.id]).toEqual(30);
+      expect(softwareRecord.fields[rootConditionalRollup.id]).toEqual(30);
     });
   });
 });

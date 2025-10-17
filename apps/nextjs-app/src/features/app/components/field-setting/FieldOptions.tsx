@@ -14,10 +14,12 @@ import type {
   ICheckboxFieldOptions,
   ILongTextFieldOptions,
   IButtonFieldOptions,
+  IConditionalRollupFieldOptions,
 } from '@teable/core';
 import { FieldType } from '@teable/core';
 import { ButtonOptions } from './options/ButtonOptions';
 import { CheckboxOptions } from './options/CheckboxOptions';
+import { ConditionalRollupOptions } from './options/ConditionalRollupOptions';
 import { CreatedTimeOptions } from './options/CreatedTimeOptions';
 import { DateOptions } from './options/DateOptions';
 import { FormulaOptions } from './options/FormulaOptions';
@@ -144,6 +146,14 @@ export const FieldOptions: React.FC<IFieldOptionsProps> = ({ field, onChange, on
           isLookup={isLookup}
           cellValueType={cellValueType}
           isMultipleCellValue={isMultipleCellValue}
+          onChange={onChange}
+        />
+      );
+    case FieldType.ConditionalRollup:
+      return (
+        <ConditionalRollupOptions
+          fieldId={id}
+          options={options as IConditionalRollupFieldOptions}
           onChange={onChange}
         />
       );

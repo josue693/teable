@@ -36,7 +36,8 @@ import { IDbProvider } from '../../db-provider/db.provider.interface';
 import type { IClsStore } from '../../types/cls';
 import { convertViewVoAttachmentUrl } from '../../utils/convert-view-vo-attachment-url';
 import { isNotHiddenField } from '../../utils/is-not-hidden-field';
-import { AggregationService } from '../aggregation/aggregation.service';
+import { IAggregationService } from '../aggregation/aggregation.service.interface';
+import { InjectAggregationService } from '../aggregation/aggregation.service.provider';
 import { getPublicFullStorageUrl } from '../attachments/plugins/utils';
 import { CollaboratorService } from '../collaborator/collaborator.service';
 import { FieldService } from '../field/field.service';
@@ -59,7 +60,7 @@ export class ShareService {
     private readonly prismaService: PrismaService,
     private readonly fieldService: FieldService,
     private readonly recordService: RecordService,
-    private readonly aggregationService: AggregationService,
+    @InjectAggregationService() private readonly aggregationService: IAggregationService,
     private readonly recordOpenApiService: RecordOpenApiService,
     private readonly selectionService: SelectionService,
     private readonly collaboratorService: CollaboratorService,
@@ -86,15 +87,19 @@ export class ShareService {
     let records: IRecordsVo['records'] = [];
     let extra: ShareViewGetVo['extra'];
     if (shareMeta?.includeRecords) {
-      const recordsData = await this.recordService.getRecords(tableId, {
-        viewId,
-        skip: 0,
-        take: 50,
-        filter,
-        groupBy: group,
-        fieldKeyType: FieldKeyType.Id,
-        projection: filteredFields.map((f) => f.id),
-      });
+      const recordsData = await this.recordService.getRecords(
+        tableId,
+        {
+          viewId,
+          skip: 0,
+          take: 50,
+          filter,
+          groupBy: group,
+          fieldKeyType: FieldKeyType.Id,
+          projection: filteredFields.map((f) => f.id),
+        },
+        true
+      );
       records = recordsData.records;
       extra = recordsData.extra;
     }
@@ -303,17 +308,21 @@ export class ShareService {
       field.options as ILinkFieldOptions;
     const { take, skip, search } = query;
 
-    return this.recordService.getRecords(foreignTableId, {
-      viewId: filterByViewId ?? undefined,
-      filter,
-      take,
-      skip,
-      search: search ? [search, lookupFieldId, true] : undefined,
-      projection: [lookupFieldId],
-      fieldKeyType: FieldKeyType.Id,
-      filterLinkCellCandidate: field.id,
-      cellFormat: CellFormat.Text,
-    });
+    return this.recordService.getRecords(
+      foreignTableId,
+      {
+        viewId: filterByViewId ?? undefined,
+        filter,
+        take,
+        skip,
+        search: search ? [search, lookupFieldId, true] : undefined,
+        projection: [lookupFieldId],
+        fieldKeyType: FieldKeyType.Id,
+        filterLinkCellCandidate: field.id,
+        cellFormat: CellFormat.Text,
+      },
+      true
+    );
   }
 
   async getViewFilterLinkRecords(field: IFieldVo, query: IShareViewLinkRecordsRo) {
@@ -321,15 +330,19 @@ export class ShareService {
 
     const { foreignTableId, lookupFieldId } = field.options as ILinkFieldOptions;
 
-    return this.recordService.getRecords(foreignTableId, {
-      skip,
-      take,
-      search: search ? [search, lookupFieldId, true] : undefined,
-      fieldKeyType: FieldKeyType.Id,
-      projection: [lookupFieldId],
-      filterLinkCellSelected: fieldId,
-      cellFormat: CellFormat.Text,
-    });
+    return this.recordService.getRecords(
+      foreignTableId,
+      {
+        skip,
+        take,
+        search: search ? [search, lookupFieldId, true] : undefined,
+        fieldKeyType: FieldKeyType.Id,
+        projection: [lookupFieldId],
+        filterLinkCellSelected: fieldId,
+        cellFormat: CellFormat.Text,
+      },
+      true
+    );
   }
 
   async getViewGroupPoints(

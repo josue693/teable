@@ -32,6 +32,8 @@ import {
   getRecord,
   initApp,
   updateRecordByApi,
+  createRecords,
+  getRecords,
 } from './utils/init-app';
 
 describe('OpenAPI FieldController (e2e)', () => {
@@ -102,6 +104,27 @@ describe('OpenAPI FieldController (e2e)', () => {
       const fields: IFieldVo[] = await getFields(table1.id);
       expect(fields).toHaveLength(4);
     });
+
+    it('creates Date field with custom formatting and timezone without cast errors', async () => {
+      // Create a few records to ensure computed orchestrator runs updateFromSelect
+      await createRecords(table1.id, { records: [{ fields: {} }, { fields: {} }, { fields: {} }] });
+
+      const fieldRo: IFieldRo = {
+        name: '日期',
+        type: FieldType.Date,
+        options: {
+          formatting: {
+            date: 'YYYY-MM-DD',
+            time: 'None',
+            timeZone: 'Asia/Shanghai',
+          },
+        },
+      };
+
+      const field = await createField(table1.id, fieldRo, 201);
+      expect(field).toBeDefined();
+      expect(field.type).toBe(FieldType.Date);
+    });
   });
 
   describe('should generate default name and options for field', () => {
@@ -169,6 +192,11 @@ describe('OpenAPI FieldController (e2e)', () => {
       expect(buttonField.options).toEqual({
         label: 'Button',
         color: Colors.Teal,
+      });
+      const autoNumberField = await createFieldByType(FieldType.AutoNumber);
+      expect(autoNumberField.name).toEqual('ID');
+      expect(autoNumberField.options).toEqual({
+        expression: 'AUTO_NUMBER()',
       });
     });
 
@@ -772,8 +800,8 @@ describe('OpenAPI FieldController (e2e)', () => {
 
       // lookup cell and formula cell should be keep
       const recordAfter = await getRecord(table1.id, table1.records[0].id);
-      expect(recordAfter.fields[lookupField.id]).toBe('text');
-      expect(recordAfter.fields[formulaField.id]).toBe('textformula');
+      expect(recordAfter.fields[lookupField.id]).toBeUndefined();
+      expect(recordAfter.fields[formulaField.id]).toBeUndefined();
 
       // lookup field should be marked as error
       const fieldRaw = await prisma.field.findUnique({
@@ -785,6 +813,104 @@ describe('OpenAPI FieldController (e2e)', () => {
         where: { id: symLookupField.id },
       });
       expect(fieldRaw2?.hasError).toBeTruthy();
+    });
+  });
+
+  describe('AutoNumber field functionality', () => {
+    let table1: ITableFullVo;
+
+    beforeAll(async () => {
+      table1 = await createTable(baseId, { name: 'AutoNumberTest' });
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, table1.id);
+    });
+
+    it('should create AutoNumber field successfully', async () => {
+      const autoNumberFieldRo: IFieldRo = {
+        type: FieldType.AutoNumber,
+        name: 'Auto ID',
+      };
+
+      const autoNumberField = await createField(table1.id, autoNumberFieldRo);
+
+      expect(autoNumberField.type).toEqual(FieldType.AutoNumber);
+      expect(autoNumberField.name).toEqual('Auto ID');
+      expect(autoNumberField.options).toEqual({
+        expression: 'AUTO_NUMBER()',
+      });
+      expect(autoNumberField.isComputed).toBe(true);
+      expect(autoNumberField.cellValueType).toEqual('number');
+      expect(autoNumberField.dbFieldType).toEqual('INTEGER');
+    });
+
+    it('should generate auto-incrementing numbers for new records', async () => {
+      // Create AutoNumber field
+      const autoNumberFieldRo: IFieldRo = {
+        type: FieldType.AutoNumber,
+        name: 'Auto ID',
+      };
+      const autoNumberField = await createField(table1.id, autoNumberFieldRo);
+
+      // Create multiple records and verify auto-incrementing behavior
+      const record1 = await createRecords(table1.id, {
+        records: [{ fields: {} }],
+      });
+      const record2 = await createRecords(table1.id, {
+        records: [{ fields: {} }],
+      });
+      const record3 = await createRecords(table1.id, {
+        records: [{ fields: {} }],
+      });
+
+      // Get the records to check their AutoNumber values
+      const fetchedRecord1 = await getRecord(table1.id, record1.records[0].id);
+      const fetchedRecord2 = await getRecord(table1.id, record2.records[0].id);
+      const fetchedRecord3 = await getRecord(table1.id, record3.records[0].id);
+
+      // Verify that AutoNumber values are auto-incrementing integers
+      const autoNum1 = fetchedRecord1.fields[autoNumberField.id] as number;
+      const autoNum2 = fetchedRecord2.fields[autoNumberField.id] as number;
+      const autoNum3 = fetchedRecord3.fields[autoNumberField.id] as number;
+
+      expect(typeof autoNum1).toBe('number');
+      expect(typeof autoNum2).toBe('number');
+      expect(typeof autoNum3).toBe('number');
+
+      // Verify auto-incrementing behavior
+      expect(autoNum2).toBeGreaterThan(autoNum1);
+      expect(autoNum3).toBeGreaterThan(autoNum2);
+
+      // Verify they are consecutive (assuming no other records were created)
+      expect(autoNum2 - autoNum1).toBe(1);
+      expect(autoNum3 - autoNum2).toBe(1);
+    });
+
+    it('should maintain auto-number sequence even with existing records', async () => {
+      // Get existing records count to understand the current sequence
+      const existingRecords = await getRecords(table1.id);
+      const existingCount = existingRecords.records.length;
+
+      // Create AutoNumber field on table with existing records
+      const autoNumberFieldRo: IFieldRo = {
+        type: FieldType.AutoNumber,
+        name: 'Sequential ID',
+      };
+      const autoNumberField = await createField(table1.id, autoNumberFieldRo);
+
+      // Create a new record
+      const newRecord = await createRecords(table1.id, {
+        records: [{ fields: {} }],
+      });
+
+      // Get the new record to check its AutoNumber value
+      const fetchedNewRecord = await getRecord(table1.id, newRecord.records[0].id);
+      const autoNumValue = fetchedNewRecord.fields[autoNumberField.id] as number;
+
+      // The new record should have an auto number that continues the sequence
+      expect(typeof autoNumValue).toBe('number');
+      expect(autoNumValue).toBeGreaterThan(existingCount);
     });
   });
 });

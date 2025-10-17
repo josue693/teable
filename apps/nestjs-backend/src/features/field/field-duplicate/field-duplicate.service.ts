@@ -4,8 +4,17 @@ import type {
   IFormulaFieldOptions,
   ILinkFieldOptions,
   ILookupOptionsRo,
+  IConditionalRollupFieldOptions,
+  IConditionalLookupOptions,
+  IFilter,
 } from '@teable/core';
-import { FieldType, HttpErrorCode } from '@teable/core';
+import {
+  FieldType,
+  HttpErrorCode,
+  extractFieldIdsFromFilter,
+  isConditionalLookupOptions,
+  isLinkLookupOptions,
+} from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { IBaseJson, IFieldJson, IFieldWithTableIdJson } from '@teable/openapi';
 import { Knex } from 'knex';
@@ -17,10 +26,11 @@ import { IDbProvider } from '../../../db-provider/db.provider.interface';
 import { extractFieldReferences } from '../../../utils';
 import { DEFAULT_EXPRESSION } from '../../base/constant';
 import { replaceStringByMap } from '../../base/utils';
+import { TableDomainQueryService } from '../../table-domain/table-domain-query.service';
+import { LinkFieldQueryService } from '../field-calculate/link-field-query.service';
 import type { IFieldInstance } from '../model/factory';
 import { createFieldInstanceByRaw } from '../model/factory';
 import { FieldOpenApiService } from '../open-api/field-open-api.service';
-import { dbType2knexFormat } from '../util';
 
 @Injectable()
 export class FieldDuplicateService {
@@ -29,8 +39,10 @@ export class FieldDuplicateService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly fieldOpenApiService: FieldOpenApiService,
+    private readonly linkFieldQueryService: LinkFieldQueryService,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
-    @InjectDbProvider() private readonly dbProvider: IDbProvider
+    @InjectDbProvider() private readonly dbProvider: IDbProvider,
+    private readonly tableDomainQueryService: TableDomainQueryService
   ) {}
 
   async createCommonFields(fields: IFieldWithTableIdJson[], fieldMap: Record<string, string>) {
@@ -115,6 +127,15 @@ export class FieldDuplicateService {
         },
         name,
       });
+      // Ensure meta is present for Postgres generated columns
+      // In duplication flow, we use a safe default expression that is supported as generated column
+      // Explicitly persist meta to satisfy consumers expecting it on error formulas
+      if (newField.meta) {
+        await this.prismaService.txClient().field.update({
+          where: { id: newField.id },
+          data: { meta: JSON.stringify(newField.meta) },
+        });
+      }
       await this.replenishmentConstraint(newField.id, targetTableId, order, {
         notNull,
         unique,
@@ -130,6 +151,8 @@ export class FieldDuplicateService {
           },
           data: {
             hasError,
+            // error formulas should not be persisted as generated columns
+            meta: null,
           },
         });
       }
@@ -141,15 +164,7 @@ export class FieldDuplicateService {
     fieldMap: Record<string, string>
   ) {
     for (const field of primaryFormulaFields) {
-      const {
-        id,
-        options,
-        dbFieldType,
-        targetTableId,
-        dbFieldName,
-        cellValueType,
-        isMultipleCellValue,
-      } = field;
+      const { id, options, dbFieldType, targetTableId, cellValueType, isMultipleCellValue } = field;
       const { dbTableName } = await this.prismaService.txClient().tableMeta.findUniqueOrThrow({
         where: {
           id: targetTableId,
@@ -158,6 +173,7 @@ export class FieldDuplicateService {
           dbTableName: true,
         },
       });
+      const tableDomain = await this.tableDomainQueryService.getTableDomainById(targetTableId);
       const newOptions = replaceStringByMap(options, { fieldMap });
       const { dbFieldType: currentDbFieldType } = await this.prismaService.txClient().field.update({
         where: {
@@ -169,11 +185,33 @@ export class FieldDuplicateService {
         },
       });
       if (currentDbFieldType !== dbFieldType) {
-        const schemaType = dbType2knexFormat(this.knex, dbFieldType);
+        // Create field instance for the updated field
+        const updatedFieldRaw = await this.prismaService.txClient().field.findUniqueOrThrow({
+          where: { id: fieldMap[id] },
+        });
+        const fieldInstance = createFieldInstanceByRaw({
+          ...updatedFieldRaw,
+          dbFieldType,
+          cellValueType,
+          isMultipleCellValue: isMultipleCellValue ?? null,
+        });
+
+        // Build table name map for link field operations
+        const tableNameMap = await this.linkFieldQueryService.getTableNameMapForLinkFields(
+          targetTableId,
+          [fieldInstance]
+        );
+
+        // Check if we need link context
+        const needsLinkContext = fieldInstance.type === FieldType.Link && !fieldInstance.isLookup;
+        const linkContext = needsLinkContext ? { tableId: targetTableId, tableNameMap } : undefined;
+
         const modifyColumnSql = this.dbProvider.modifyColumnSchema(
           dbTableName,
-          dbFieldName,
-          schemaType
+          fieldInstance,
+          fieldInstance,
+          tableDomain,
+          linkContext
         );
 
         for (const alterTableQuery of modifyColumnSql) {
@@ -267,6 +305,7 @@ export class FieldDuplicateService {
     await this.createCommonLinkFields(commonLinkFields, tableIdMap, fieldMap, fkMap);
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   async createSelfLinkFields(
     fields: IFieldWithTableIdJson[],
     fieldMap: Record<string, string>,
@@ -417,14 +456,21 @@ export class FieldDuplicateService {
       });
 
       if (genDbFieldName !== groupField.dbFieldName) {
-        const alterTableSql = this.dbProvider.renameColumn(
+        const exists = await this.dbProvider.checkColumnExist(
           targetDbTableName,
           genDbFieldName,
-          groupField.dbFieldName
+          this.prismaService.txClient()
         );
+        if (exists) {
+          const alterTableSql = this.dbProvider.renameColumn(
+            targetDbTableName,
+            genDbFieldName,
+            groupField.dbFieldName
+          );
 
-        for (const sql of alterTableSql) {
-          await this.prismaService.txClient().$executeRawUnsafe(sql);
+          for (const sql of alterTableSql) {
+            await this.prismaService.txClient().$executeRawUnsafe(sql);
+          }
         }
       }
     }
@@ -591,14 +637,31 @@ export class FieldDuplicateService {
     });
 
     if (genDbFieldName !== dbFieldName) {
-      const alterTableSql = this.dbProvider.renameColumn(
+      const exists = await this.dbProvider.checkColumnExist(
         targetDbTableName,
         genDbFieldName,
-        dbFieldName
+        this.prismaService.txClient()
       );
+      if (exists) {
+        // Debug logging for rename operation to diagnose failures
+        // eslint-disable-next-line no-console
+        console.log('[repairSymmetricField] renameColumn info', {
+          targetDbTableName,
+          genDbFieldName,
+          desiredDbFieldName: dbFieldName,
+          symmetricFieldId: newFieldId,
+        });
+        const alterTableSql = this.dbProvider.renameColumn(
+          targetDbTableName,
+          genDbFieldName,
+          dbFieldName
+        );
 
-      for (const sql of alterTableSql) {
-        await this.prismaService.txClient().$executeRawUnsafe(sql);
+        for (const sql of alterTableSql) {
+          // eslint-disable-next-line no-console
+          console.log('[repairSymmetricField] executing SQL', sql);
+          await this.prismaService.txClient().$executeRawUnsafe(sql);
+        }
       }
     }
   }
@@ -626,6 +689,9 @@ export class FieldDuplicateService {
     );
     const lookupFields = targetFields.filter((field) => field.isLookup);
     const rollupFields = targetFields.filter((field) => field.type === FieldType.Rollup);
+    const conditionalRollupFields = targetFields.filter(
+      (field) => field.type === FieldType.ConditionalRollup
+    );
 
     for (const field of linkFields) {
       const { options, id } = field;
@@ -655,6 +721,15 @@ export class FieldDuplicateService {
         data: {
           options: JSON.stringify(newOptions),
         },
+      });
+    }
+    for (const field of conditionalRollupFields) {
+      const { options, id } = field;
+      const newOptions = replaceStringByMap(options, { tableIdMap, fieldIdMap, viewIdMap }, false);
+
+      await prisma.field.update({
+        where: { id },
+        data: { options: JSON.stringify(newOptions) },
       });
     }
     for (const field of [...lookupFields, ...rollupFields]) {
@@ -770,6 +845,7 @@ export class FieldDuplicateService {
     const isAiConfig = field.aiConfig && !field.isLookup;
     const isLookup = field.isLookup;
     const isRollup = field.type === FieldType.Rollup && !field.isLookup;
+    const isConditionalRollup = field.type === FieldType.ConditionalRollup;
     const isFormula = field.type === FieldType.Formula && !field.isLookup;
 
     switch (true) {
@@ -791,6 +867,15 @@ export class FieldDuplicateService {
         break;
       case isRollup:
         await this.duplicateRollupField(
+          sourceTableId,
+          targetTableId,
+          field,
+          tableIdMap,
+          sourceToTargetFieldMap
+        );
+        break;
+      case isConditionalRollup:
+        await this.duplicateConditionalRollupField(
           sourceTableId,
           targetTableId,
           field,
@@ -822,9 +907,8 @@ export class FieldDuplicateService {
       description,
       isPrimary,
       type: lookupFieldType,
+      isConditionalLookup,
     } = field;
-    const { foreignTableId, linkFieldId, lookupFieldId } = lookupOptions as ILookupOptionsRo;
-    const isSelfLink = foreignTableId === sourceTableId;
 
     const mockFieldId = Object.values(sourceToTargetFieldMap)[0];
     const { type: mockType } = await this.prismaService.txClient().field.findUniqueOrThrow({
@@ -836,25 +920,124 @@ export class FieldDuplicateService {
         type: true,
       },
     });
-    const newField = await this.fieldOpenApiService.createField(targetTableId, {
-      type: (hasError ? mockType : lookupFieldType) as FieldType,
-      dbFieldName,
-      description,
-      isLookup: true,
-      lookupOptions: {
-        // foreignTableId may are cross base table id, so we need to use tableIdMap to get the target table id
-        foreignTableId: (isSelfLink ? targetTableId : tableIdMap[foreignTableId]) || foreignTableId,
-        linkFieldId: sourceToTargetFieldMap[linkFieldId],
-        lookupFieldId: isSelfLink
-          ? hasError
-            ? mockFieldId
-            : sourceToTargetFieldMap[lookupFieldId]
-          : hasError
-            ? mockFieldId
-            : sourceToTargetFieldMap[lookupFieldId] || lookupFieldId,
-      },
-      name,
-    });
+    let newField;
+
+    const lookupOptionsRo = lookupOptions as ILookupOptionsRo | undefined;
+
+    if (isConditionalLookup) {
+      const conditionalOptions = isConditionalLookupOptions(lookupOptionsRo)
+        ? (lookupOptionsRo as IConditionalLookupOptions)
+        : undefined;
+      const originalForeignTableId = conditionalOptions?.foreignTableId;
+      const originalLookupFieldId = conditionalOptions?.lookupFieldId;
+      const mappedForeignTableId = originalForeignTableId
+        ? originalForeignTableId === sourceTableId
+          ? targetTableId
+          : tableIdMap[originalForeignTableId] || originalForeignTableId
+        : undefined;
+      const mappedLookupFieldId = originalLookupFieldId
+        ? sourceToTargetFieldMap[originalLookupFieldId] || originalLookupFieldId
+        : undefined;
+      const remappedLookupOptions = conditionalOptions
+        ? (replaceStringByMap(
+            conditionalOptions,
+            { tableIdMap, fieldIdMap: sourceToTargetFieldMap },
+            false
+          ) as IConditionalLookupOptions)
+        : undefined;
+
+      if (!mappedForeignTableId || !(hasError || mappedLookupFieldId)) {
+        throw new BadGatewayException(
+          'Unable to resolve conditional lookup references during duplication'
+        );
+      }
+
+      const effectiveLookupFieldId = hasError ? mockFieldId : (mappedLookupFieldId as string);
+
+      newField = await this.fieldOpenApiService.createField(targetTableId, {
+        type: (hasError ? mockType : lookupFieldType) as FieldType,
+        dbFieldName,
+        description,
+        isLookup: true,
+        isConditionalLookup: true,
+        name,
+        options,
+        lookupOptions: {
+          baseId: remappedLookupOptions?.baseId ?? conditionalOptions?.baseId,
+          foreignTableId: remappedLookupOptions?.foreignTableId ?? mappedForeignTableId,
+          lookupFieldId: effectiveLookupFieldId,
+          filter: remappedLookupOptions?.filter ?? conditionalOptions?.filter ?? null,
+          sort: remappedLookupOptions?.sort ?? conditionalOptions?.sort ?? undefined,
+          limit: remappedLookupOptions?.limit ?? conditionalOptions?.limit ?? undefined,
+        },
+      });
+
+      if (hasError) {
+        await this.prismaService.txClient().field.update({
+          where: {
+            id: newField.id,
+          },
+          data: {
+            hasError,
+            type: lookupFieldType,
+            lookupOptions: JSON.stringify({
+              ...newField.lookupOptions,
+              lookupFieldId: conditionalOptions?.lookupFieldId,
+              filter: conditionalOptions?.filter ?? null,
+              sort: conditionalOptions?.sort ?? undefined,
+              limit: conditionalOptions?.limit ?? undefined,
+            }),
+            options: JSON.stringify(options),
+          },
+        });
+      }
+    } else {
+      if (!lookupOptionsRo || !isLinkLookupOptions(lookupOptionsRo)) {
+        throw new BadGatewayException(
+          'Lookup options missing link configuration during duplication'
+        );
+      }
+
+      const { foreignTableId, linkFieldId, lookupFieldId } = lookupOptionsRo;
+      const isSelfLink = foreignTableId === sourceTableId;
+
+      newField = await this.fieldOpenApiService.createField(targetTableId, {
+        type: (hasError ? mockType : lookupFieldType) as FieldType,
+        dbFieldName,
+        description,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId:
+            (isSelfLink ? targetTableId : tableIdMap[foreignTableId]) || foreignTableId,
+          linkFieldId: sourceToTargetFieldMap[linkFieldId],
+          lookupFieldId: isSelfLink
+            ? hasError
+              ? mockFieldId
+              : sourceToTargetFieldMap[lookupFieldId]
+            : hasError
+              ? mockFieldId
+              : sourceToTargetFieldMap[lookupFieldId] || lookupFieldId,
+        },
+        name,
+      });
+
+      if (hasError) {
+        await this.prismaService.txClient().field.update({
+          where: {
+            id: newField.id,
+          },
+          data: {
+            hasError,
+            type: lookupFieldType,
+            lookupOptions: JSON.stringify({
+              ...newField.lookupOptions,
+              lookupFieldId,
+            }),
+            options: JSON.stringify(options),
+          },
+        });
+      }
+    }
     await this.replenishmentConstraint(newField.id, targetTableId, field.order, {
       notNull,
       unique,
@@ -862,22 +1045,6 @@ export class FieldDuplicateService {
       isPrimary,
     });
     sourceToTargetFieldMap[id] = newField.id;
-    if (hasError) {
-      await this.prismaService.txClient().field.update({
-        where: {
-          id: newField.id,
-        },
-        data: {
-          hasError,
-          type: lookupFieldType,
-          lookupOptions: JSON.stringify({
-            ...newField.lookupOptions,
-            lookupFieldId: lookupFieldId,
-          }),
-          options: JSON.stringify(options),
-        },
-      });
-    }
   }
 
   async duplicateRollupField(
@@ -900,7 +1067,10 @@ export class FieldDuplicateService {
       isPrimary,
       type: lookupFieldType,
     } = fieldInstance;
-    const { foreignTableId, linkFieldId, lookupFieldId } = lookupOptions as ILookupOptionsRo;
+    if (!lookupOptions || !isLinkLookupOptions(lookupOptions)) {
+      throw new BadGatewayException('Rollup field without link lookup options during duplication');
+    }
+    const { foreignTableId, linkFieldId, lookupFieldId } = lookupOptions;
     const isSelfLink = foreignTableId === sourceTableId;
 
     const mockFieldId = Object.values(sourceToTargetFieldMap)[0];
@@ -942,6 +1112,72 @@ export class FieldDuplicateService {
             ...newField.lookupOptions,
             lookupFieldId: lookupFieldId,
           }),
+          options: JSON.stringify(options),
+        },
+      });
+    }
+  }
+
+  async duplicateConditionalRollupField(
+    _sourceTableId: string,
+    targetTableId: string,
+    fieldInstance: IFieldWithTableIdJson,
+    tableIdMap: Record<string, string>,
+    sourceToTargetFieldMap: Record<string, string>
+  ) {
+    const {
+      dbFieldName,
+      name,
+      id,
+      hasError,
+      options,
+      notNull,
+      unique,
+      description,
+      isPrimary,
+      type,
+    } = fieldInstance;
+
+    const referenceOptions = options as IConditionalRollupFieldOptions;
+    const mockFieldId = Object.values(sourceToTargetFieldMap)[0];
+
+    const remappedOptions = replaceStringByMap(
+      {
+        ...referenceOptions,
+        foreignTableId:
+          tableIdMap[referenceOptions.foreignTableId!] || referenceOptions.foreignTableId,
+        lookupFieldId: hasError
+          ? mockFieldId
+          : sourceToTargetFieldMap[referenceOptions.lookupFieldId!] ||
+            referenceOptions.lookupFieldId,
+      },
+      { tableIdMap, fieldIdMap: sourceToTargetFieldMap },
+      false
+    ) as IConditionalRollupFieldOptions;
+
+    const newField = await this.fieldOpenApiService.createField(targetTableId, {
+      type: FieldType.ConditionalRollup,
+      dbFieldName,
+      description,
+      options: remappedOptions,
+      name,
+    });
+
+    await this.replenishmentConstraint(newField.id, targetTableId, fieldInstance.order, {
+      notNull,
+      unique,
+      dbFieldName,
+      isPrimary,
+    });
+
+    sourceToTargetFieldMap[id] = newField.id;
+
+    if (hasError) {
+      await this.prismaService.txClient().field.update({
+        where: { id: newField.id },
+        data: {
+          hasError,
+          type,
           options: JSON.stringify(options),
         },
       });
@@ -1003,24 +1239,43 @@ export class FieldDuplicateService {
             ...options,
             expression: newExpression ? JSON.parse(newExpression) : undefined,
           }),
+          // error formulas should not be persisted as generated columns
+          meta: null,
         },
       });
     }
 
     if (dbFieldType !== newField.dbFieldType) {
-      const { dbTableName } = await this.prismaService.txClient().tableMeta.findUniqueOrThrow({
-        where: {
-          id: targetTableId,
-        },
-        select: {
-          dbTableName: true,
-        },
+      const tableDomain = await this.tableDomainQueryService.getTableDomainById(targetTableId);
+      const { dbTableName } = tableDomain;
+
+      // Create field instance for the updated field
+      const updatedFieldRaw = await this.prismaService.txClient().field.findUniqueOrThrow({
+        where: { id: newField.id },
       });
-      const schemaType = dbType2knexFormat(this.knex, dbFieldType);
+      const fieldInstance = createFieldInstanceByRaw({
+        ...updatedFieldRaw,
+        dbFieldType,
+        cellValueType,
+        isMultipleCellValue: isMultipleCellValue ?? null,
+      });
+
+      // Build table name map for link field operations
+      const tableNameMap = await this.linkFieldQueryService.getTableNameMapForLinkFields(
+        targetTableId,
+        [fieldInstance]
+      );
+
+      // Check if we need link context
+      const needsLinkContext = fieldInstance.type === FieldType.Link && !fieldInstance.isLookup;
+      const linkContext = needsLinkContext ? { tableId: targetTableId, tableNameMap } : undefined;
+
       const modifyColumnSql = this.dbProvider.modifyColumnSchema(
         dbTableName,
-        dbFieldName,
-        schemaType
+        fieldInstance,
+        fieldInstance,
+        tableDomain,
+        linkContext
       );
 
       for (const alterTableQuery of modifyColumnSql) {
@@ -1159,7 +1414,7 @@ export class FieldDuplicateService {
     fieldMap: Record<string, string>,
     scope: 'base' | 'table' = 'base'
   ) {
-    const { isLookup, type } = field;
+    const { isLookup, type, isConditionalLookup } = field;
     if (field.aiConfig) {
       const { aiConfig } = field;
 
@@ -1182,9 +1437,48 @@ export class FieldDuplicateService {
       return referencedFields.every((field) => keys.includes(field));
     }
 
+    if (type === FieldType.ConditionalRollup) {
+      const options = field.options as IConditionalRollupFieldOptions | undefined;
+      if (!options) {
+        return false;
+      }
+
+      if (options.baseId) {
+        return true;
+      }
+
+      const dependencies = this.collectConditionalDependencies({
+        lookupFieldId: options.lookupFieldId,
+        filter: options.filter,
+        sortFieldId: options.sort?.fieldId,
+      });
+      return this.areDependenciesResolved(fieldMap, dependencies);
+    }
+
+    if (isLookup && isConditionalLookup) {
+      const lookupOptions = field.lookupOptions as IConditionalLookupOptions | undefined;
+      if (!lookupOptions) {
+        return false;
+      }
+
+      if (lookupOptions.baseId) {
+        return true;
+      }
+
+      const dependencies = this.collectConditionalDependencies({
+        lookupFieldId: lookupOptions.lookupFieldId,
+        filter: lookupOptions.filter,
+        sortFieldId: lookupOptions.sort?.fieldId,
+      });
+      return this.areDependenciesResolved(fieldMap, dependencies);
+    }
+
     if (isLookup || type === FieldType.Rollup) {
       const { lookupOptions, sourceTableId } = field;
-      const { linkFieldId, lookupFieldId, foreignTableId } = lookupOptions as ILookupOptionsRo;
+      if (!lookupOptions || !isLinkLookupOptions(lookupOptions)) {
+        return false;
+      }
+      const { linkFieldId, lookupFieldId, foreignTableId } = lookupOptions;
       const isSelfLink = foreignTableId === sourceTableId;
       const linkField = await this.prismaService.txClient().field.findUnique({
         where: {
@@ -1220,5 +1514,43 @@ export class FieldDuplicateService {
       return [];
     }
     return matches.map((match) => match.slice(1, -1));
+  }
+
+  private collectConditionalDependencies({
+    lookupFieldId,
+    filter,
+    sortFieldId,
+  }: {
+    lookupFieldId?: string | null;
+    filter?: IFilter | null;
+    sortFieldId?: string | null;
+  }): string[] {
+    const dependencies = new Set<string>();
+
+    if (lookupFieldId) {
+      dependencies.add(lookupFieldId);
+    }
+
+    extractFieldIdsFromFilter(filter || undefined, true).forEach((fieldId) => {
+      dependencies.add(fieldId);
+    });
+
+    if (sortFieldId) {
+      dependencies.add(sortFieldId);
+    }
+
+    return [...dependencies];
+  }
+
+  private areDependenciesResolved(
+    fieldMap: Record<string, string>,
+    dependencies: string[]
+  ): boolean {
+    if (!dependencies.length) {
+      return true;
+    }
+
+    const knownFieldIds = new Set(Object.keys(fieldMap));
+    return dependencies.every((fieldId) => knownFieldIds.has(fieldId));
   }
 }

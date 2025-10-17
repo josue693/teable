@@ -4,6 +4,7 @@ import {
   CommandEmpty,
   CommandInput,
   CommandItem,
+  CommandGroup,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -40,6 +41,7 @@ function BaseSingleSelect<V extends string, O extends IOption<V> = IOption<V>>(
     cancelable = false,
     defaultLabel = t('common.untitled'),
     modal,
+    groupHeading,
   } = props;
   const [open, setOpen] = useState(false);
 
@@ -79,6 +81,33 @@ function BaseSingleSelect<V extends string, O extends IOption<V> = IOption<V>>(
     }
   }, [searchValue, isComposing, onSearch, setApplySearchDebounced]);
 
+  const renderOptions = () =>
+    options?.map((option) => (
+      <CommandItem
+        key={option.value}
+        value={option.value}
+        onSelect={() => {
+          // support re-select to reset selection when cancelable is enabled
+          if (cancelable && value === option.value) {
+            onSelect(null);
+            setOpen(false);
+            return;
+          }
+          onSelect(option.value);
+          setOpen(false);
+        }}
+        className="truncate text-sm"
+      >
+        <Check
+          className={cn(
+            'mr-2 h-4 w-4 shrink-0',
+            value === option.value ? 'opacity-100' : 'opacity-0'
+          )}
+        />
+        {optionRender?.(option) ?? option.label ?? defaultLabel}
+      </CommandItem>
+    ));
+
   return (
     <Popover open={open} onOpenChange={setOpen} modal={modal}>
       <PopoverTrigger asChild>
@@ -114,31 +143,11 @@ function BaseSingleSelect<V extends string, O extends IOption<V> = IOption<V>>(
           ) : null}
           <CommandEmpty>{notFoundText}</CommandEmpty>
           <CommandList className="mt-1">
-            {options?.map((option) => (
-              <CommandItem
-                key={option.value}
-                value={option.value}
-                onSelect={() => {
-                  // set cancelable support select same value will be reset to null
-                  if (cancelable && value === option.value) {
-                    onSelect(null);
-                    setOpen(false);
-                    return;
-                  }
-                  onSelect(option.value);
-                  setOpen(false);
-                }}
-                className="truncate text-sm"
-              >
-                <Check
-                  className={cn(
-                    'mr-2 h-4 w-4 shrink-0',
-                    value === option.value ? 'opacity-100' : 'opacity-0'
-                  )}
-                />
-                {optionRender?.(option) ?? option.label ?? defaultLabel}
-              </CommandItem>
-            ))}
+            {groupHeading ? (
+              <CommandGroup heading={groupHeading}>{renderOptions()}</CommandGroup>
+            ) : (
+              renderOptions()
+            )}
           </CommandList>
         </Command>
       </PopoverContent>

@@ -5,31 +5,14 @@ import utc from 'dayjs/plugin/utc';
 import { z } from 'zod';
 import type { FieldType, CellValueType } from '../constant';
 import { FieldCore } from '../field';
-import {
-  TimeFormatting,
-  datetimeFormattingSchema,
-  defaultDatetimeFormatting,
-  formatDateToString,
-} from '../formatting';
+import type { IFieldVisitor } from '../field-visitor.interface';
+import { TimeFormatting, defaultDatetimeFormatting, formatDateToString } from '../formatting';
+import type { IDateFieldOptions } from './date-option.schema';
+import { dateFieldOptionsSchema } from './date-option.schema';
 
 extend(timezone);
 extend(customParseFormat);
 extend(utc);
-
-export const dateFieldOptionsSchema = z
-  .object({
-    formatting: datetimeFormattingSchema,
-    defaultValue: z
-      .enum(['now'] as const)
-      .optional()
-      .openapi({
-        description:
-          'Whether the new row is automatically filled with the current time, caveat: the defaultValue is just a flag, it dose not effect the storing value of the record',
-      }),
-  })
-  .describe('options for date fields');
-
-export type IDateFieldOptions = z.infer<typeof dateFieldOptionsSchema>;
 
 export const dataFieldCellValueSchema = z.string().datetime({ precision: 3, offset: true });
 
@@ -39,6 +22,8 @@ export class DateFieldCore extends FieldCore {
   type!: FieldType.Date;
 
   options!: IDateFieldOptions;
+
+  meta?: undefined;
 
   cellValueType!: CellValueType.DateTime;
 
@@ -95,6 +80,7 @@ export class DateFieldCore extends FieldCore {
     }
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   convertStringToCellValue(value: string): string | null {
     if (this.isLookup) {
       return null;
@@ -118,6 +104,11 @@ export class DateFieldCore extends FieldCore {
       } catch {
         // ignore
       }
+    }
+
+    const dayjsObj = dayjs(value);
+    if (dayjsObj.isValid() && dayjsObj.toISOString() === value) {
+      return value;
     }
 
     const formatted = this.parseUsingFieldFormatting(value);
@@ -158,5 +149,9 @@ export class DateFieldCore extends FieldCore {
       return z.array(z.string()).nonempty().nullable().safeParse(cellValue);
     }
     return z.string().nullable().safeParse(cellValue);
+  }
+
+  accept<T>(visitor: IFieldVisitor<T>): T {
+    return visitor.visitDateField(this);
   }
 }

@@ -1,4 +1,5 @@
 import { FieldType, PRIMARY_SUPPORTED_TYPES } from '@teable/core';
+import { ConditionalLookup as ConditionalLookupIcon } from '@teable/icons';
 import { FIELD_TYPE_ORDER, useFieldStaticGetter } from '@teable/sdk';
 import SearchIcon from '@teable/ui-lib/icons/app/search.svg';
 import {
@@ -13,18 +14,23 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from '@teable/ui-lib/shadcn';
 import { Check, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'next-i18next';
 import { useMemo, useRef, useState } from 'react';
 import { tableConfig } from '@/features/i18n/table.config';
 
-type InnerFieldType = FieldType | 'lookup';
+type InnerFieldType = FieldType | 'lookup' | 'conditionalLookup';
 
 interface ISelectorItem {
   id: InnerFieldType;
   name: string;
   icon?: React.ReactNode;
+  description?: string;
 }
 
 export const FIELD_TYPE_ORDER1 = [
@@ -41,6 +47,7 @@ export const FIELD_TYPE_ORDER1 = [
   FieldType.Formula,
   FieldType.Link,
   FieldType.Rollup,
+  FieldType.ConditionalRollup,
   FieldType.Button,
   FieldType.CreatedTime,
   FieldType.LastModifiedTime,
@@ -66,6 +73,7 @@ const ADVANCED_FIELD_TYPE_ORDER = [
   FieldType.Formula,
   FieldType.Link,
   FieldType.Rollup,
+  FieldType.ConditionalRollup,
   FieldType.Button,
   FieldType.AutoNumber,
 ];
@@ -83,7 +91,16 @@ const fieldTypeItem = (
   setOpen: (open: boolean) => void,
   onChange?: (type: InnerFieldType) => void
 ) => {
-  const { id, name, icon } = item;
+  const { id, name, icon, description } = item;
+
+  const content = (
+    <div className="flex w-full min-w-0 items-center gap-2">
+      <Check className={cn('h-4 w-4 flex-shrink-0', id === value ? 'opacity-100' : 'opacity-0')} />
+      {icon}
+      <span className={cn('truncate flex-1', name ? '' : 'text-primary/60')}>{name}</span>
+    </div>
+  );
+
   return (
     <CommandItem
       key={id}
@@ -92,12 +109,19 @@ const fieldTypeItem = (
         onChange?.(id);
         setOpen(false);
       }}
-      title={name}
-      className="flex min-w-0 items-center gap-2"
+      title={description || name}
+      className="flex"
     >
-      <Check className={cn('h-4 w-4 flex-shrink-0', id === value ? 'opacity-100' : 'opacity-0')} />
-      {icon}
-      <span className={cn('truncate flex-1', name ? '' : 'text-primary/60')}>{name}</span>
+      {description ? (
+        <Tooltip delayDuration={50}>
+          <TooltipTrigger asChild>{content}</TooltipTrigger>
+          <TooltipContent side="right" sideOffset={8} className="max-w-56 text-xs leading-snug">
+            {description}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        content
+      )}
     </CommandItem>
   );
 };
@@ -121,13 +145,14 @@ export const SelectFieldType = (props: {
       ? BASE_FIELD_TYPE.filter((type) => PRIMARY_SUPPORTED_TYPES.has(type))
       : BASE_FIELD_TYPE;
     return fieldTypes.map((type) => {
-      const { title, Icon } = getFieldStatic(type, {
+      const { title, description, Icon } = getFieldStatic(type, {
         isLookup: false,
         hasAiConfig: false,
       });
       return {
         id: type,
         name: title,
+        description,
         icon: <Icon className="size-4" />,
       };
     });
@@ -138,13 +163,14 @@ export const SelectFieldType = (props: {
       ? ADVANCED_FIELD_TYPE_ORDER.filter((type) => PRIMARY_SUPPORTED_TYPES.has(type))
       : ADVANCED_FIELD_TYPE_ORDER;
     const list: ISelectorItem[] = fieldTypes.map((type) => {
-      const { title, Icon } = getFieldStatic(type, {
+      const { title, description, Icon } = getFieldStatic(type, {
         isLookup: false,
         hasAiConfig: false,
       });
       return {
         id: type,
         name: title,
+        description,
         icon: <Icon className="size-4" />,
       };
     });
@@ -152,7 +178,14 @@ export const SelectFieldType = (props: {
       list.push({
         id: 'lookup',
         name: t('sdk:field.title.lookup'),
+        description: t('sdk:field.description.lookup'),
         icon: <SearchIcon className="size-4" />,
+      });
+      list.push({
+        id: 'conditionalLookup',
+        name: t('sdk:field.title.conditionalLookup'),
+        description: t('sdk:field.description.conditionalLookup'),
+        icon: <ConditionalLookupIcon className="size-4" />,
       });
     }
     return list;
@@ -163,13 +196,14 @@ export const SelectFieldType = (props: {
       ? SYSTEM_FIELD_TYPE_ORDER.filter((type) => PRIMARY_SUPPORTED_TYPES.has(type))
       : SYSTEM_FIELD_TYPE_ORDER;
     return fieldTypes.map((type) => {
-      const { title, Icon } = getFieldStatic(type, {
+      const { title, description, Icon } = getFieldStatic(type, {
         isLookup: false,
         hasAiConfig: false,
       });
       return {
         id: type,
         name: title,
+        description,
         icon: <Icon className="size-4" />,
       };
     });
@@ -180,24 +214,34 @@ export const SelectFieldType = (props: {
       ? FIELD_TYPE_ORDER.filter((type) => PRIMARY_SUPPORTED_TYPES.has(type))
       : FIELD_TYPE_ORDER;
     const result = fieldTypes.map<ISelectorItem>((type) => {
-      const { title, Icon } = getFieldStatic(type, {
+      const { title, description, Icon } = getFieldStatic(type, {
         isLookup: false,
         hasAiConfig: false,
       });
       return {
         id: type,
         name: title,
+        description,
         icon: <Icon className="size-4" />,
       };
     });
 
     return isPrimary
       ? result
-      : result.concat({
-          id: 'lookup',
-          name: t('sdk:field.title.lookup'),
-          icon: <SearchIcon className="size-4" />,
-        });
+      : result.concat(
+          {
+            id: 'lookup',
+            name: t('sdk:field.title.lookup'),
+            description: t('sdk:field.description.lookup'),
+            icon: <SearchIcon className="size-4" />,
+          },
+          {
+            id: 'conditionalLookup',
+            name: t('sdk:field.title.conditionalLookup'),
+            description: t('sdk:field.description.conditionalLookup'),
+            icon: <SearchIcon className="size-4" />,
+          }
+        );
   }, [getFieldStatic, t, isPrimary]);
 
   const candidatesMap = useMemo(
@@ -230,35 +274,37 @@ export const SelectFieldType = (props: {
         </Button>
       </PopoverTrigger>
       <PopoverContent className={cn('w-96 p-0', 'select-field-type')}>
-        <Command
-          filter={(value, search) => {
-            if (!search) return 1;
-            const item = candidatesMap[value];
-            const text = item?.name || item?.id;
-            if (text?.toLocaleLowerCase().includes(search.toLocaleLowerCase())) return 1;
-            return 0;
-          }}
-        >
-          <CommandInput placeholder={searchTip} />
-          <CommandEmpty>{emptyTip}</CommandEmpty>
-          <CommandList>
-            <CommandGroup className="border-b border-border">
-              <div className="grid grid-cols-2 gap-1">
-                {baseGroup.map((item) => fieldTypeItem(item, value, setOpen, onChange))}
-              </div>
-            </CommandGroup>
-            <CommandGroup className="border-b border-border">
-              <div className="grid grid-cols-2 gap-1">
-                {advancedGroup.map((item) => fieldTypeItem(item, value, setOpen, onChange))}
-              </div>
-            </CommandGroup>
-            <CommandGroup>
-              <div className="grid grid-cols-2 gap-1">
-                {systemGroup.map((item) => fieldTypeItem(item, value, setOpen, onChange))}
-              </div>
-            </CommandGroup>
-          </CommandList>
-        </Command>
+        <TooltipProvider delayDuration={200}>
+          <Command
+            filter={(value, search) => {
+              if (!search) return 1;
+              const item = candidatesMap[value];
+              const text = item?.name || item?.id;
+              if (text?.toLocaleLowerCase().includes(search.toLocaleLowerCase())) return 1;
+              return 0;
+            }}
+          >
+            <CommandInput placeholder={searchTip} />
+            <CommandEmpty>{emptyTip}</CommandEmpty>
+            <CommandList>
+              <CommandGroup className="border-b border-border">
+                <div className="grid grid-cols-2 gap-1">
+                  {baseGroup.map((item) => fieldTypeItem(item, value, setOpen, onChange))}
+                </div>
+              </CommandGroup>
+              <CommandGroup className="border-b border-border">
+                <div className="grid grid-cols-2 gap-1">
+                  {advancedGroup.map((item) => fieldTypeItem(item, value, setOpen, onChange))}
+                </div>
+              </CommandGroup>
+              <CommandGroup>
+                <div className="grid grid-cols-2 gap-1">
+                  {systemGroup.map((item) => fieldTypeItem(item, value, setOpen, onChange))}
+                </div>
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </TooltipProvider>
       </PopoverContent>
     </Popover>
   );

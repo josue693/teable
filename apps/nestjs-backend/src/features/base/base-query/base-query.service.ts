@@ -16,6 +16,7 @@ import {
   createFieldInstanceByVo,
   type IFieldInstance,
 } from '../../field/model/factory';
+import type { FormulaFieldDto } from '../../field/model/field-dto/formula-field.dto';
 import { RecordService } from '../../record/record.service';
 import { QueryAggregation } from './parse/aggregation';
 import { QueryFilter } from './parse/filter';
@@ -38,12 +39,32 @@ export class BaseQueryService {
     private readonly recordService: RecordService
   ) {}
 
+  private getQueryColumnName(field: IFieldInstance): string {
+    return field.dbFieldName;
+  }
+
+  // Quote an identifier if not already quoted
+  private quoteIdentifier(name: string): string {
+    if (!name) return name as unknown as string;
+    if (name.startsWith('"') && name.endsWith('"')) return name;
+    return `"${name}"`;
+  }
+
+  // Quote a composite table name like schema.table
+  private quoteDbTableName(dbTableName: string): string {
+    const parts = dbTableName.split('.');
+    if (parts.length === 2) {
+      return `${this.quoteIdentifier(parts[0])}.${this.quoteIdentifier(parts[1])}`;
+    }
+    return this.quoteIdentifier(dbTableName);
+  }
+
   private convertFieldMapToColumn(fieldMap: Record<string, IFieldInstance>): IBaseQueryColumn[] {
     return Object.values(fieldMap).map((field) => {
       const type = getQueryColumnTypeByFieldInstance(field);
 
       return {
-        column: type === BaseQueryColumnType.Field ? field.dbFieldName : field.id,
+        column: type === BaseQueryColumnType.Field ? this.getQueryColumnName(field) : field.id,
         name: field.name,
         type,
         fieldSource:
@@ -139,9 +160,16 @@ export class BaseQueryService {
     return this.parseBaseQueryFromTable(baseQuery, {
       fieldMap: Object.keys(fieldMap).reduce(
         (acc, key) => {
+          const original = fieldMap[key];
+          const lastSegment = (original.dbFieldName ?? '').split('.').pop() as string;
+          const isAggregation =
+            getQueryColumnTypeByFieldInstance(original) === BaseQueryColumnType.Aggregation;
           acc[key] = createFieldInstanceByVo({
-            ...fieldMap[key],
-            dbFieldName: `${alias}.${fieldMap[key].dbFieldName}`,
+            ...original,
+            // 对于聚合字段，外层应按聚合别名排序/筛选，因此只保留别名本身，避免再加表别名导致歧义
+            dbFieldName: isAggregation
+              ? this.quoteIdentifier(lastSegment)
+              : `${this.quoteIdentifier(alias)}.${this.quoteIdentifier(lastSegment)}`,
           });
           return acc;
         },
@@ -190,6 +218,7 @@ export class BaseQueryService {
         dbProvider: this.dbProvider,
         queryBuilder: currentQueryBuilder,
         fieldMap: currentFieldMap,
+        knex: this.knex,
       }
     );
     currentFieldMap = groupedFieldMap;
@@ -250,6 +279,8 @@ export class BaseQueryService {
   ) {
     const { baseId, fieldMap, queryBuilder } = context;
     let resFieldMap = { ...fieldMap };
+
+    const unquotePath = (ref: string) => ref.replace(/"/g, '');
     for (const join of joins) {
       const joinTable = join.table;
       const joinDbTableName = await this.getDbTableName(baseId, joinTable);
@@ -261,33 +292,37 @@ export class BaseQueryService {
         case BaseQueryJoinType.Inner:
           queryBuilder.innerJoin(
             joinDbTableName,
-            joinedField.dbFieldName,
-            '=',
-            joinField.dbFieldName
+            this.knex.raw('?? = ??', [
+              unquotePath(joinedField.dbFieldName),
+              unquotePath(joinField.dbFieldName),
+            ])
           );
           break;
         case BaseQueryJoinType.Left:
           queryBuilder.leftJoin(
             joinDbTableName,
-            joinedField.dbFieldName,
-            '=',
-            joinField.dbFieldName
+            this.knex.raw('?? = ??', [
+              unquotePath(joinedField.dbFieldName),
+              unquotePath(joinField.dbFieldName),
+            ])
           );
           break;
         case BaseQueryJoinType.Right:
           queryBuilder.rightJoin(
             joinDbTableName,
-            joinedField.dbFieldName,
-            '=',
-            joinField.dbFieldName
+            this.knex.raw('?? = ??', [
+              unquotePath(joinedField.dbFieldName),
+              unquotePath(joinField.dbFieldName),
+            ])
           );
           break;
         case BaseQueryJoinType.Full:
           queryBuilder.fullOuterJoin(
             joinDbTableName,
-            joinedField.dbFieldName,
-            '=',
-            joinField.dbFieldName
+            this.knex.raw('?? = ??', [
+              unquotePath(joinedField.dbFieldName),
+              unquotePath(joinField.dbFieldName),
+            ])
           );
           break;
         default:
@@ -302,7 +337,8 @@ export class BaseQueryService {
     return fields.reduce(
       (acc, field) => {
         if (dbTableName) {
-          field.dbFieldName = `${dbTableName}.${field.dbFieldName}`;
+          const qualifiedTable = this.quoteDbTableName(dbTableName);
+          field.dbFieldName = `${qualifiedTable}.${this.quoteIdentifier(field.dbFieldName)}`;
         }
         acc[field.id] = field;
         return acc;

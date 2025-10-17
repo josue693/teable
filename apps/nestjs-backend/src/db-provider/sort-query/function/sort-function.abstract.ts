@@ -1,7 +1,8 @@
 import { InternalServerErrorException } from '@nestjs/common';
+import type { FieldCore } from '@teable/core';
 import { SortFunc } from '@teable/core';
 import type { Knex } from 'knex';
-import type { IFieldInstance } from '../../../features/field/model/factory';
+import type { IRecordQuerySortContext } from '../../../features/record/query-builder/record-query-builder.interface';
 import type { ISortFunctionInterface } from './sort-function.interface';
 
 export abstract class AbstractSortFunction implements ISortFunctionInterface {
@@ -9,11 +10,17 @@ export abstract class AbstractSortFunction implements ISortFunctionInterface {
 
   constructor(
     protected readonly knex: Knex,
-    protected readonly field: IFieldInstance
+    protected readonly field: FieldCore,
+    protected readonly context?: IRecordQuerySortContext
   ) {
-    const { dbFieldName } = this.field;
+    const { dbFieldName, id } = field;
 
-    this.columnName = dbFieldName;
+    const selection = context?.selectionMap.get(id);
+    if (selection) {
+      this.columnName = selection as string;
+    } else {
+      this.columnName = dbFieldName;
+    }
   }
 
   compiler(builderClient: Knex.QueryBuilder, sortFunc: SortFunc) {
@@ -45,21 +52,21 @@ export abstract class AbstractSortFunction implements ISortFunctionInterface {
   }
 
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
-    builderClient.orderByRaw(`?? ASC NULLS FIRST`, [this.columnName]);
+    builderClient.orderByRaw(`${this.columnName} ASC NULLS FIRST`);
     return builderClient;
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
-    builderClient.orderByRaw(`?? DESC NULLS LAST`, [this.columnName]);
+    builderClient.orderByRaw(`${this.columnName} DESC NULLS LAST`);
     return builderClient;
   }
 
   getAscSQL() {
-    return this.knex.raw(`?? ASC NULLS FIRST`, [this.columnName]).toQuery();
+    return this.knex.raw(`${this.columnName} ASC NULLS FIRST`).toQuery();
   }
 
   getDescSQL() {
-    return this.knex.raw(`?? DESC NULLS LAST`, [this.columnName]).toQuery();
+    return this.knex.raw(`${this.columnName} DESC NULLS LAST`).toQuery();
   }
 
   protected createSqlPlaceholders(values: unknown[]): string {

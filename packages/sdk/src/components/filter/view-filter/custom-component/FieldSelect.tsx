@@ -1,7 +1,7 @@
-import { getValidFilterOperators } from '@teable/core';
+import { getValidFilterOperators, isFieldReferenceValue } from '@teable/core';
 import { cn } from '@teable/ui-lib';
 import { useCallback, useMemo } from 'react';
-import { useFieldStaticGetter } from '../../../../hooks';
+import { useFieldStaticGetter, useTables } from '../../../../hooks';
 import { useCrud } from '../../hooks';
 import type { IBaseFilterCustomComponentProps, IConditionItemProperty } from '../../types';
 import { DefaultErrorLabel } from '../component';
@@ -16,7 +16,7 @@ export const FieldSelect = <T extends IConditionItemProperty = IViewFilterCondit
   props: IFieldSelectProps<T>
 ) => {
   const fields = useFields();
-  const { path, value, modal = true } = props;
+  const { path, value, modal = true, item } = props;
   const { onChange } = useCrud();
   const options = useMemo(() => {
     return fields.map((field) => ({
@@ -26,10 +26,32 @@ export const FieldSelect = <T extends IConditionItemProperty = IViewFilterCondit
     }));
   }, [fields]);
   const fieldStaticGetter = useFieldStaticGetter();
+  const tables = useTables();
+
+  const fieldReferenceValue = useMemo(() => {
+    const candidate = item?.value;
+    return isFieldReferenceValue(candidate) ? candidate : undefined;
+  }, [item?.value]);
+
+  const headingTableId = fieldReferenceValue?.tableId ?? fields[0]?.tableId;
+
+  const groupHeading = useMemo(() => {
+    if (!fieldReferenceValue) {
+      return undefined;
+    }
+    if (headingTableId) {
+      const tableName = tables?.find((table) => table.id === headingTableId)?.name;
+      if (tableName) {
+        return tableName;
+      }
+    }
+    return undefined;
+  }, [fieldReferenceValue, headingTableId, tables]);
   const optionRender = useCallback(
     (option: (typeof options)[number]) => {
       const { Icon } = fieldStaticGetter(option.type, {
         isLookup: option.isLookup,
+        isConditionalLookup: option.isConditionalLookup,
         hasAiConfig: Boolean(option.aiConfig),
       });
       return (
@@ -54,11 +76,13 @@ export const FieldSelect = <T extends IConditionItemProperty = IViewFilterCondit
           return;
         }
         const operators = getValidFilterOperators(field);
-        // change the field, meanwhile, reset the operator and value
+        const currentValue = item?.value;
+        const nextValue = isFieldReferenceValue(currentValue) ? currentValue : null;
+        // change the field, meanwhile, reset the operator and value (keep field reference)
         onChange(newPath, {
           field: value,
           operator: operators[0] || null,
-          value: null,
+          value: nextValue,
         });
       }}
       value={value}
@@ -70,6 +94,7 @@ export const FieldSelect = <T extends IConditionItemProperty = IViewFilterCondit
         const { type, isLookup, label, aiConfig, recordRead } = selectedField;
         const { Icon } = fieldStaticGetter(type, {
           isLookup,
+          isConditionalLookup: selectedField.isConditionalLookup,
           hasAiConfig: Boolean(aiConfig),
           deniedReadRecord: recordRead === false,
         });
@@ -80,6 +105,7 @@ export const FieldSelect = <T extends IConditionItemProperty = IViewFilterCondit
           </div>
         );
       }}
+      groupHeading={groupHeading}
     />
   );
 };

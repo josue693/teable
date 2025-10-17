@@ -1,17 +1,8 @@
 import { z } from 'zod';
 import type { CellValueType, FieldType } from '../constant';
 import { FieldCore } from '../field';
-
-export const longTextFieldOptionsSchema = z
-  .object({
-    defaultValue: z
-      .string()
-      .optional()
-      .transform((value) => (typeof value === 'string' ? value.trim() : value)),
-  })
-  .strict();
-
-export type ILongTextFieldOptions = z.infer<typeof longTextFieldOptionsSchema>;
+import type { IFieldVisitor } from '../field-visitor.interface';
+import { longTextFieldOptionsSchema, type ILongTextFieldOptions } from './long-text-option.schema';
 
 export const longTextCelValueSchema = z.string();
 
@@ -21,6 +12,8 @@ export class LongTextFieldCore extends FieldCore {
   type!: FieldType.LongText;
 
   options!: ILongTextFieldOptions;
+
+  meta?: undefined;
 
   cellValueType!: CellValueType.String;
 
@@ -76,5 +69,9 @@ export class LongTextFieldCore extends FieldCore {
       .transform((val) => (val === '' ? null : val))
       .nullable()
       .safeParse(value);
+  }
+
+  accept<T>(visitor: IFieldVisitor<T>): T {
+    return visitor.visitLongTextField(this);
   }
 }

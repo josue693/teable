@@ -1,4 +1,9 @@
-import type { IRollupFieldOptions, IUnionFormatting, IUnionShowAs } from '@teable/core';
+import type {
+  IRollupFieldOptions,
+  IUnionFormatting,
+  IUnionShowAs,
+  RollupFunction,
+} from '@teable/core';
 import {
   assertNever,
   ROLLUP_FUNCTIONS,
@@ -42,6 +47,10 @@ export const RollupOptions = (props: {
   cellValueType?: CellValueType;
   isMultipleCellValue?: boolean;
   isLookup?: boolean;
+  availableExpressions?: IRollupFieldOptions['expression'][];
+  expressionLabelOverrides?: Partial<
+    Record<RollupFunction, { label?: string; description?: string }>
+  >;
   onChange?: (options: Partial<IRollupFieldOptions>) => void;
 }) => {
   const {
@@ -49,6 +58,8 @@ export const RollupOptions = (props: {
     isLookup,
     cellValueType = CellValueType.String,
     isMultipleCellValue,
+    availableExpressions,
+    expressionLabelOverrides,
     onChange,
   } = props;
   const { expression, formatting, showAs } = options;
@@ -123,7 +134,8 @@ export const RollupOptions = (props: {
   );
 
   const candidates = useMemo(() => {
-    return ROLLUP_FUNCTIONS.map((f) => {
+    const expressions = availableExpressions ?? ROLLUP_FUNCTIONS;
+    return expressions.map((f) => {
       let name;
       let description;
       switch (f) {
@@ -142,6 +154,10 @@ export const RollupOptions = (props: {
         case 'sum({values})':
           name = t('field.default.rollup.func.sum');
           description = t('field.default.rollup.funcDesc.sum');
+          break;
+        case 'average({values})':
+          name = t('field.default.rollup.func.average');
+          description = t('field.default.rollup.funcDesc.average');
           break;
         case 'max({values})':
           name = t('field.default.rollup.func.max');
@@ -182,13 +198,21 @@ export const RollupOptions = (props: {
         default:
           assertNever(f);
       }
+
+      const override = expressionLabelOverrides?.[f];
+      if (override?.label) {
+        name = override.label;
+      }
+      if (override?.description) {
+        description = override.description;
+      }
       return {
         value: f,
         label: name,
         description,
       };
     });
-  }, [t]);
+  }, [availableExpressions, expressionLabelOverrides, t]);
 
   const displayRender = (option: (typeof candidates)[number]) => {
     const { label } = option;

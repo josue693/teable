@@ -115,6 +115,12 @@
       "expressionRequired": "Expression is required",
       "unsupportedTip": "Rollup only support link and rollup field"
     },
+    "conditionalRollup": {
+      "filterRequired": "Filter must contain at least one condition"
+    },
+    "conditionalLookup": {
+      "filterRequired": "Conditional lookup requires at least one filter condition"
+    },
     "aiConfig": {
       "modelKeyRequired": "Model is required",
       "typeNotSupported": "Unsupported AI type",
@@ -181,6 +187,10 @@
         "isLess": "<",
         "isLessEqual": "≤"
       }
+    },
+    "conditionalRollup": {
+      "switchToField": "Use field value",
+      "switchToValue": "Use manual value"
     },
     "component": {
       "date": {
@@ -293,13 +303,39 @@
       "attachment": "Attachment",
       "checkbox": "Checkbox",
       "rollup": "Rollup",
+      "conditionalRollup": "Conditional rollup",
       "user": "User",
       "rating": "Rating",
       "autoNumber": "Auto number",
       "lookup": "Lookup",
+      "conditionalLookup": "Conditional lookup",
       "button": "Button",
       "createdBy": "Created by",
       "lastModifiedBy": "Last modified by"
+    },
+    "description": {
+      "singleLineText": "Store short text like names or titles.",
+      "longText": "Capture longer notes and descriptions.",
+      "singleSelect": "Choose one option from a list.",
+      "number": "Track numeric values with formatting.",
+      "multipleSelect": "Tag records with multiple choices.",
+      "link": "Link this record to another table.",
+      "formula": "Calculate values from other fields.",
+      "date": "Record dates or times.",
+      "createdTime": "Show when a record was created.",
+      "lastModifiedTime": "Show the most recent update time.",
+      "attachment": "Upload files or images.",
+      "checkbox": "Toggle a simple yes or no.",
+      "rollup": "Summarize linked records with formulas.",
+      "conditionalRollup": "Summarize data from conditions.",
+      "user": "Assign records to workspace members.",
+      "rating": "Score items with configurable icons.",
+      "autoNumber": "Give each record a unique sequence.",
+      "lookup": "Display values from linked records.",
+      "conditionalLookup": "Show linked values that match filters you define.",
+      "button": "Run actions with a clickable button.",
+      "createdBy": "Show who created the record.",
+      "lastModifiedBy": "Show who last modified the record."
     },
     "link": {
       "oneWay": "One Way",

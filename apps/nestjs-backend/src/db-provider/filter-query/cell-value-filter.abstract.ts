@@ -3,7 +3,6 @@ import {
   InternalServerErrorException,
   NotImplementedException,
 } from '@nestjs/common';
-import type { IDateFieldOptions, IDateFilter, IFilterOperator, IFilterValue } from '@teable/core';
 import {
   CellValueType,
   contains,
@@ -32,23 +31,105 @@ import {
   isOnOrBefore,
   isWithIn,
   literalValueListSchema,
+  isFieldReferenceComparable,
+  isFieldReferenceValue,
+} from '@teable/core';
+import type {
+  FieldCore,
+  IDateFieldOptions,
+  IDateFilter,
+  IFilterOperator,
+  IFilterValue,
+  IFieldReferenceValue,
 } from '@teable/core';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import type { Knex } from 'knex';
-import type { IFieldInstance } from '../../features/field/model/factory';
+import type { IRecordQueryFilterContext } from '../../features/record/query-builder/record-query-builder.interface';
+import type { IDbProvider } from '../db.provider.interface';
 import type { ICellValueFilterInterface } from './cell-value-filter.interface';
+
+export class FieldReferenceCompatibilityException extends BadRequestException {
+  static readonly CODE = 'FIELD_REFERENCE_INCOMPATIBLE';
+
+  constructor(sourceField: string, referenceField: string) {
+    super({
+      errorCode: FieldReferenceCompatibilityException.CODE,
+      message: `Field '${referenceField}' is not compatible with '${sourceField}' for filter comparisons`,
+      sourceField,
+      referenceField,
+    });
+  }
+}
 
 export abstract class AbstractCellValueFilter implements ICellValueFilterInterface {
   protected tableColumnRef: string;
 
-  constructor(protected readonly field: IFieldInstance) {
-    const { dbFieldName } = this.field;
+  constructor(
+    protected readonly field: FieldCore,
+    readonly context?: IRecordQueryFilterContext
+  ) {
+    const { dbFieldName, id } = field;
 
-    this.tableColumnRef = dbFieldName;
+    const selection = context?.selectionMap.get(id);
+    if (selection) {
+      this.tableColumnRef = selection as string;
+    } else {
+      this.tableColumnRef = dbFieldName;
+    }
   }
 
-  compiler(builderClient: Knex.QueryBuilder, operator: IFilterOperator, value: IFilterValue) {
+  protected ensureLiteralValue(value: IFilterValue, operator: IFilterOperator): void {
+    if (isFieldReferenceValue(value)) {
+      throw new BadRequestException(
+        `Operator '${operator}' does not support comparing against another field`
+      );
+    }
+  }
+
+  protected resolveFieldReference(value: IFieldReferenceValue): string {
+    this.getComparableReferenceField(value);
+
+    const referenceMap = this.context?.fieldReferenceSelectionMap;
+    if (!referenceMap) {
+      throw new BadRequestException('Field reference comparisons are not available here');
+    }
+    const reference = referenceMap.get(value.fieldId);
+    if (!reference) {
+      throw new BadRequestException(
+        `Field '${value.fieldId}' is not available for reference comparisons`
+      );
+    }
+    return reference;
+  }
+
+  protected getFieldReferenceMetadata(fieldId: string): FieldCore | undefined {
+    return this.context?.fieldReferenceFieldMap?.get(fieldId);
+  }
+
+  protected getComparableReferenceField(value: IFieldReferenceValue): FieldCore {
+    const referenceField = this.getFieldReferenceMetadata(value.fieldId);
+    if (!referenceField) {
+      throw new BadRequestException(
+        `Field '${value.fieldId}' is not available for reference comparisons`
+      );
+    }
+
+    if (!isFieldReferenceComparable(this.field, referenceField)) {
+      const sourceName = this.field.name ?? this.field.id;
+      const referenceName = referenceField.name ?? referenceField.id;
+      throw new FieldReferenceCompatibilityException(sourceName, referenceName);
+    }
+
+    return referenceField;
+  }
+
+  compiler(
+    builderClient: Knex.QueryBuilder,
+    operator: IFilterOperator,
+    value: IFilterValue,
+    dbProvider: IDbProvider
+  ) {
     const operatorHandlers = {
       [is.value]: this.isOperatorHandler,
       [isExactly.value]: this.isExactlyOperatorHandler,
@@ -79,24 +160,32 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
       throw new InternalServerErrorException(`Unknown operator ${operator} for filter`);
     }
 
-    return chosenHandler(builderClient, operator, value);
+    return chosenHandler(builderClient, operator, value, dbProvider);
   }
 
   isOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: IFilterValue
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+      builderClient.whereRaw(`${this.tableColumnRef} = ${ref}`);
+      return builderClient;
+    }
+
     const parseValue = this.field.cellValueType === CellValueType.Number ? Number(value) : value;
 
-    builderClient.where(this.tableColumnRef, parseValue);
+    builderClient.whereRaw(`${this.tableColumnRef} = ?`, [parseValue]);
     return builderClient;
   }
 
   isExactlyOperatorHandler(
     _builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    _value: IFilterValue
+    _value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     throw new NotImplementedException();
   }
@@ -104,93 +193,128 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
   abstract isNotOperatorHandler(
     builderClient: Knex.QueryBuilder,
     operator: IFilterOperator,
-    value: IFilterValue
+    value: IFilterValue,
+    dbProvider: IDbProvider
   ): Knex.QueryBuilder;
 
   containsOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: IFilterValue
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
-    builderClient.where(this.tableColumnRef, 'LIKE', `%${value}%`);
+    this.ensureLiteralValue(value, contains.value);
+    builderClient.whereRaw(`${this.tableColumnRef} LIKE ?`, [`%${value}%`]);
     return builderClient;
   }
 
   abstract doesNotContainOperatorHandler(
     builderClient: Knex.QueryBuilder,
     operator: IFilterOperator,
-    value: IFilterValue
+    value: IFilterValue,
+    dbProvider: IDbProvider
   ): Knex.QueryBuilder;
 
   isGreaterOperatorHandler(
     builderClient: Knex.QueryBuilder,
-    operator: IFilterOperator,
-    value: IFilterValue
+    _operator: IFilterOperator,
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+      builderClient.whereRaw(`${this.tableColumnRef} > ${ref}`);
+      return builderClient;
+    }
     const { cellValueType } = this.field;
     const parseValue = cellValueType === CellValueType.Number ? Number(value) : value;
 
-    builderClient.where(this.tableColumnRef, '>', parseValue);
+    builderClient.whereRaw(`${this.tableColumnRef} > ?`, [parseValue]);
     return builderClient;
   }
 
   isGreaterEqualOperatorHandler(
     builderClient: Knex.QueryBuilder,
-    operator: IFilterOperator,
-    value: IFilterValue
+    _operator: IFilterOperator,
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+      builderClient.whereRaw(`${this.tableColumnRef} >= ${ref}`);
+      return builderClient;
+    }
     const { cellValueType } = this.field;
     const parseValue = cellValueType === CellValueType.Number ? Number(value) : value;
 
-    builderClient.where(this.tableColumnRef, '>=', parseValue);
+    builderClient.whereRaw(`${this.tableColumnRef} >= ?`, [parseValue]);
     return builderClient;
   }
 
   isLessOperatorHandler(
     builderClient: Knex.QueryBuilder,
-    operator: IFilterOperator,
-    value: IFilterValue
+    _operator: IFilterOperator,
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+      builderClient.whereRaw(`${this.tableColumnRef} < ${ref}`);
+      return builderClient;
+    }
     const { cellValueType } = this.field;
     const parseValue = cellValueType === CellValueType.Number ? Number(value) : value;
 
-    builderClient.where(this.tableColumnRef, '<', parseValue);
+    builderClient.whereRaw(`${this.tableColumnRef} < ?`, [parseValue]);
     return builderClient;
   }
 
   isLessEqualOperatorHandler(
     builderClient: Knex.QueryBuilder,
-    operator: IFilterOperator,
-    value: IFilterValue
+    _operator: IFilterOperator,
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+      builderClient.whereRaw(`${this.tableColumnRef} <= ${ref}`);
+      return builderClient;
+    }
     const { cellValueType } = this.field;
     const parseValue = cellValueType === CellValueType.Number ? Number(value) : value;
 
-    builderClient.where(this.tableColumnRef, '<=', parseValue);
+    builderClient.whereRaw(`${this.tableColumnRef} <= ?`, [parseValue]);
     return builderClient;
   }
 
   isAnyOfOperatorHandler(
     builderClient: Knex.QueryBuilder,
-    operator: IFilterOperator,
-    value: IFilterValue
+    _operator: IFilterOperator,
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    this.ensureLiteralValue(value, isAnyOf.value);
     const valueList = literalValueListSchema.parse(value);
 
-    builderClient.whereIn(this.tableColumnRef, [...valueList]);
+    builderClient.whereRaw(
+      `${this.tableColumnRef} in (${this.createSqlPlaceholders(valueList)})`,
+      valueList
+    );
     return builderClient;
   }
 
   abstract isNoneOfOperatorHandler(
     builderClient: Knex.QueryBuilder,
     operator: IFilterOperator,
-    value: IFilterValue
+    value: IFilterValue,
+    dbProvider: IDbProvider
   ): Knex.QueryBuilder;
 
   hasAllOfOperatorHandler(
     _builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    _value: IFilterValue
+    _value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     throw new NotImplementedException();
   }
@@ -198,7 +322,8 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
   isNotExactlyOperatorHandler(
     _builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    _value: IFilterValue
+    _value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     throw new NotImplementedException();
   }
@@ -206,7 +331,8 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
   isWithInOperatorHandler(
     _builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    _value: IFilterValue
+    _value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     throw new NotImplementedException();
   }
@@ -214,20 +340,21 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
   isEmptyOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    _value: IFilterValue
+    _value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const tableColumnRef = this.tableColumnRef;
     const { cellValueType, isStructuredCellValue, isMultipleCellValue } = this.field;
 
     builderClient.where(function () {
-      this.whereNull(tableColumnRef);
+      this.whereRaw(`${tableColumnRef} is null`);
 
       if (
         cellValueType === CellValueType.String &&
         !isStructuredCellValue &&
         !isMultipleCellValue
       ) {
-        this.orWhere(tableColumnRef, '=', '');
+        this.orWhereRaw(`${tableColumnRef} = ''`);
       }
     });
     return builderClient;
@@ -236,14 +363,14 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
   isNotEmptyOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    _value: IFilterValue
+    _value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const { cellValueType, isStructuredCellValue, isMultipleCellValue } = this.field;
 
-    builderClient.whereNotNull(this.tableColumnRef);
-
+    builderClient.whereRaw(`${this.tableColumnRef} is not null`);
     if (cellValueType === CellValueType.String && !isStructuredCellValue && !isMultipleCellValue) {
-      builderClient.where(this.tableColumnRef, '!=', '');
+      builderClient.whereRaw(`${this.tableColumnRef} != ''`);
     }
     return builderClient;
   }

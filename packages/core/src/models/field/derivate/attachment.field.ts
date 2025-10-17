@@ -2,10 +2,11 @@ import { z } from 'zod';
 import { IdPrefix } from '../../../utils';
 import { FieldType, CellValueType } from '../constant';
 import { FieldCore } from '../field';
-
-export const attachmentFieldOptionsSchema = z.object({}).strict();
-
-export type IAttachmentFieldOptions = z.infer<typeof attachmentFieldOptionsSchema>;
+import type { IFieldVisitor } from '../field-visitor.interface';
+import {
+  attachmentFieldOptionsSchema,
+  type IAttachmentFieldOptions,
+} from './attachment-option.schema';
 
 export const attachmentItemSchema = z.object({
   id: z.string().startsWith(IdPrefix.Attachment),
@@ -31,6 +32,8 @@ export class AttachmentFieldCore extends FieldCore {
   type: FieldType.Attachment = FieldType.Attachment;
 
   options!: IAttachmentFieldOptions;
+
+  meta?: undefined;
 
   cellValueType = CellValueType.String;
 
@@ -84,5 +87,9 @@ export class AttachmentFieldCore extends FieldCore {
     }
     const { name, token } = value as IAttachmentItem;
     return AttachmentFieldCore.itemString(name, token);
+  }
+
+  accept<T>(visitor: IFieldVisitor<T>): T {
+    return visitor.visitAttachmentField(this);
   }
 }

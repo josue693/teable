@@ -7,22 +7,17 @@ import { BaseViewFilter, FieldValue } from '../view-filter';
 import { FilterLinkBase, FilterLinkSelect, StandDefaultList } from '../view-filter/component';
 import { FilterLinkContext } from '../view-filter/component/filter-link/context';
 import type { IFilterLinkProps } from '../view-filter/component/filter-link/types';
+import type { IFilterReferenceSource } from '../view-filter/custom-component/BaseFieldValue';
 
 interface IFilterWithTableProps {
   value: IFilter | null;
   fields: IFieldInstance[];
   context: IViewFilterLinkContext;
   onChange: (value: IFilter | null) => void;
+  referenceSource?: IFilterReferenceSource;
 }
 
 type ICustomerValueComponentProps = ComponentProps<typeof FieldValue>;
-
-const CustomValueComponent = (props: ICustomerValueComponentProps) => {
-  const components = {
-    [FieldType.Link]: FilterLink,
-  };
-  return <FieldValue {...props} components={components} modal={true} />;
-};
 
 const FilterLinkSelectCom = (props: IFilterLinkProps) => {
   return (
@@ -50,7 +45,21 @@ const FilterLink = (props: IFilterLinkProps) => {
 };
 
 export const FilterWithTable = (props: IFilterWithTableProps) => {
-  const { fields, value, context, onChange } = props;
+  const { fields, value, context, onChange, referenceSource } = props;
+
+  const CustomValueComponent = (valueProps: ICustomerValueComponentProps) => {
+    const components = {
+      [FieldType.Link]: FilterLink,
+    };
+    return (
+      <FieldValue
+        {...valueProps}
+        components={components}
+        modal={true}
+        referenceSource={referenceSource}
+      />
+    );
+  };
 
   return (
     <BaseViewFilter

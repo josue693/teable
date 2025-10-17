@@ -17,6 +17,7 @@ import {
   generateChoiceId,
   HttpErrorCode,
   isMultiValueLink,
+  isLinkLookupOptions,
   PRIMARY_SUPPORTED_TYPES,
   RecordOpBuilder,
 } from '@teable/core';
@@ -34,7 +35,6 @@ import {
 import { BatchService } from '../../calculation/batch.service';
 import { FieldCalculationService } from '../../calculation/field-calculation.service';
 import { LinkService } from '../../calculation/link.service';
-import { ReferenceService } from '../../calculation/reference.service';
 import type { ICellContext } from '../../calculation/utils/changes';
 import { formatChangesToOps } from '../../calculation/utils/changes';
 import type { IOpsMap } from '../../calculation/utils/compose-maps';
@@ -46,6 +46,7 @@ import { FieldService } from '../field.service';
 import type { IFieldInstance, IFieldMap } from '../model/factory';
 import { createFieldInstanceByRaw, createFieldInstanceByVo } from '../model/factory';
 import type { ButtonFieldDto } from '../model/field-dto/button-field.dto';
+import { ConditionalRollupFieldDto } from '../model/field-dto/conditional-rollup-field.dto';
 import { FormulaFieldDto } from '../model/field-dto/formula-field.dto';
 import type { LinkFieldDto } from '../model/field-dto/link-field.dto';
 import type { MultipleSelectFieldDto } from '../model/field-dto/multiple-select-field.dto';
@@ -65,7 +66,6 @@ export class FieldConvertingService {
     private readonly fieldService: FieldService,
     private readonly batchService: BatchService,
     private readonly prismaService: PrismaService,
-    private readonly referenceService: ReferenceService,
     private readonly fieldConvertingLinkService: FieldConvertingLinkService,
     private readonly fieldSupplementService: FieldSupplementService,
     private readonly fieldCalculationService: FieldCalculationService,
@@ -108,9 +108,30 @@ export class FieldConvertingService {
   // eslint-disable-next-line sonarjs/cognitive-complexity
   private updateLookupField(field: IFieldInstance, fieldMap: IFieldMap): IOtOperation[] {
     const ops: (IOtOperation | undefined)[] = [];
-    const lookupOptions = field.lookupOptions as ILookupOptionsVo;
-    const linkField = fieldMap[lookupOptions.linkFieldId] as LinkFieldDto;
+    const lookupOptions = field.lookupOptions;
+    if (!lookupOptions || !isLinkLookupOptions(lookupOptions)) {
+      return [];
+    }
+
+    const linkField = fieldMap[lookupOptions.linkFieldId];
     const lookupField = fieldMap[lookupOptions.lookupFieldId];
+
+    const linkFieldIsValid =
+      linkField &&
+      !linkField.isLookup &&
+      linkField.type === FieldType.Link &&
+      (linkField.options as ILinkFieldOptions | undefined)?.foreignTableId ===
+        lookupOptions.foreignTableId;
+
+    if (!linkFieldIsValid || !lookupField) {
+      const errorOp = this.buildOpAndMutateField(field, 'hasError', true);
+      if (errorOp) {
+        ops.push(errorOp);
+      }
+      return ops.filter(Boolean) as IOtOperation[];
+    }
+
+    const linkFieldDto = linkField as LinkFieldDto;
     const { showAs: _, ...inheritableOptions } = lookupField.options as Record<string, unknown>;
     const {
       formatting = inheritableOptions.formatting,
@@ -119,20 +140,32 @@ export class FieldConvertingService {
     } = field.options as Record<string, unknown>;
     const cellValueTypeChanged = field.cellValueType !== lookupField.cellValueType;
 
+    const clearErrorOp = this.buildOpAndMutateField(field, 'hasError', null);
+    if (clearErrorOp) {
+      ops.push(clearErrorOp);
+    }
+
     if (field.type !== lookupField.type) {
       ops.push(this.buildOpAndMutateField(field, 'type', lookupField.type));
     }
 
-    if (lookupOptions.relationship !== linkField.options.relationship) {
-      ops.push(
-        this.buildOpAndMutateField(field, 'lookupOptions', {
-          ...lookupOptions,
-          relationship: linkField.options.relationship,
-          fkHostTableName: linkField.options.fkHostTableName,
-          selfKeyName: linkField.options.selfKeyName,
-          foreignKeyName: linkField.options.foreignKeyName,
-        } as ILookupOptionsVo)
-      );
+    // Only sync link-related lookupOptions when the linked field is still a Link.
+    // If the linked field has been converted to a non-link type, keep the existing
+    // relationship and linkage metadata so clients can still introspect prior config
+    // while the lookup is marked as errored.
+    // eslint-disable-next-line sonarjs/no-collapsible-if
+    if (linkFieldDto.type === FieldType.Link) {
+      if (lookupOptions.relationship !== linkFieldDto.options.relationship) {
+        ops.push(
+          this.buildOpAndMutateField(field, 'lookupOptions', {
+            ...lookupOptions,
+            relationship: linkFieldDto.options.relationship,
+            fkHostTableName: linkFieldDto.options.fkHostTableName,
+            selfKeyName: linkFieldDto.options.selfKeyName,
+            foreignKeyName: linkFieldDto.options.foreignKeyName,
+          } as ILookupOptionsVo)
+        );
+      }
     }
 
     if (!isEqual(inheritOptions, inheritableOptions)) {
@@ -152,7 +185,10 @@ export class FieldConvertingService {
       }
     }
 
-    const isMultipleCellValue = lookupField.isMultipleCellValue || linkField.isMultipleCellValue;
+    const isMultipleCellValue =
+      lookupField.isMultipleCellValue ||
+      (linkFieldDto.type === FieldType.Link && linkFieldDto.isMultipleCellValue) ||
+      false;
     if (field.isMultipleCellValue !== isMultipleCellValue) {
       ops.push(this.buildOpAndMutateField(field, 'isMultipleCellValue', isMultipleCellValue));
       // clean showAs
@@ -187,7 +223,12 @@ export class FieldConvertingService {
 
   private updateRollupField(field: RollupFieldDto, fieldMap: IFieldMap) {
     const ops: (IOtOperation | undefined)[] = [];
-    const { lookupFieldId, relationship } = field.lookupOptions;
+    const { lookupOptions } = field;
+    if (!isLinkLookupOptions(lookupOptions)) {
+      return ops.filter(Boolean) as IOtOperation[];
+    }
+
+    const { lookupFieldId, relationship } = lookupOptions;
     const lookupField = fieldMap[lookupFieldId];
     const { cellValueType, isMultipleCellValue } = RollupFieldDto.getParsedValueType(
       field.options.expression,
@@ -202,6 +243,63 @@ export class FieldConvertingService {
       ops.push(this.buildOpAndMutateField(field, 'isMultipleCellValue', isMultipleCellValue));
     }
     return ops.filter(Boolean) as IOtOperation[];
+  }
+
+  private updateConditionalRollupField(
+    field: ConditionalRollupFieldDto,
+    fieldMap: IFieldMap
+  ): IOtOperation[] {
+    const ops: IOtOperation[] = [];
+    const lookupFieldId = field.options.lookupFieldId;
+    const referencedFieldIds = this.fieldSupplementService
+      .getFieldReferenceIds(field)
+      .filter((id) => !!id && id !== field.id);
+
+    const hasMissingDependency = !lookupFieldId || referencedFieldIds.some((id) => !fieldMap[id]);
+    const hasErroredDependency = referencedFieldIds.some((id) => fieldMap[id]?.hasError);
+
+    if (hasMissingDependency || hasErroredDependency) {
+      const op = this.buildOpAndMutateField(field, 'hasError', true);
+      if (op) {
+        ops.push(op);
+      }
+      return ops;
+    }
+
+    const lookupField = fieldMap[lookupFieldId];
+    if (!lookupField) {
+      const op = this.buildOpAndMutateField(field, 'hasError', true);
+      if (op) {
+        ops.push(op);
+      }
+      return ops;
+    }
+
+    const clearErrorOp = this.buildOpAndMutateField(field, 'hasError', null);
+    if (clearErrorOp) {
+      ops.push(clearErrorOp);
+    }
+
+    const { cellValueType, isMultipleCellValue } = ConditionalRollupFieldDto.getParsedValueType(
+      field.options.expression,
+      lookupField.cellValueType,
+      true
+    );
+
+    const cellTypeOp = this.buildOpAndMutateField(field, 'cellValueType', cellValueType);
+    if (cellTypeOp) {
+      ops.push(cellTypeOp);
+    }
+    const multiValueOp = this.buildOpAndMutateField(
+      field,
+      'isMultipleCellValue',
+      isMultipleCellValue
+    );
+    if (multiValueOp) {
+      ops.push(multiValueOp);
+    }
+
+    return ops;
   }
 
   private updateDbFieldType(field: IFieldInstance) {
@@ -262,6 +360,8 @@ export class FieldConvertingService {
         pushOpsMap(tableId, curField.id, this.updateFormulaField(curField, fieldMap));
       } else if (curField.type === FieldType.Rollup) {
         pushOpsMap(tableId, curField.id, this.updateRollupField(curField, fieldMap));
+      } else if (curField.type === FieldType.ConditionalRollup) {
+        pushOpsMap(tableId, curField.id, this.updateConditionalRollupField(curField, fieldMap));
       }
       pushOpsMap(tableId, curField.id, this.updateDbFieldType(curField));
     }
@@ -531,7 +631,10 @@ export class FieldConvertingService {
       >(nativeSql.sql, ...nativeSql.bindings);
 
     for (const row of result) {
-      const oldCellValue = field.convertDBValue2CellValue(row[field.dbFieldName]) as string;
+      let oldCellValue = field.convertDBValue2CellValue(row[field.dbFieldName]) as string;
+      if (field.isLookup && Array.isArray(oldCellValue)) {
+        oldCellValue = oldCellValue[0] as string;
+      }
 
       opsMap[row.__id] = [
         RecordOpBuilder.editor.setRecord.build({
@@ -624,7 +727,10 @@ export class FieldConvertingService {
       >(nativeSql.sql, ...nativeSql.bindings);
 
     for (const row of result) {
-      const oldCellValue = field.convertDBValue2CellValue(row[dbFieldName]) as number;
+      let oldCellValue = field.convertDBValue2CellValue(row[dbFieldName]) as number;
+      if (field.isLookup && Array.isArray(oldCellValue)) {
+        oldCellValue = oldCellValue[0] as number;
+      }
 
       opsMap[row.__id] = [
         RecordOpBuilder.editor.setRecord.build({
@@ -671,6 +777,7 @@ export class FieldConvertingService {
 
     for (const row of result) {
       const oldCellValue = field.convertDBValue2CellValue(row[dbFieldName]);
+
       let newCellValue;
 
       if (field.isMultipleCellValue && !Array.isArray(oldCellValue)) {
@@ -848,6 +955,7 @@ export class FieldConvertingService {
     };
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   private async calculateAndSaveRecords(
     tableId: string,
     field: IFieldInstance,
@@ -860,11 +968,24 @@ export class FieldConvertingService {
     if (field.type === FieldType.Link && !field.isLookup) {
       const result = await this.getDerivateByLink(tableId, recordOpsMap[tableId]);
       recordOpsMap = composeOpMaps([recordOpsMap, result.opsMapByLink]);
+
+      // Also derive link updates for any other tables present in the ops map.
+      // This covers scenarios where conversions schedule updates on symmetric link fields
+      // in foreign tables (e.g., one-way → two-way), which need link derivations too.
+      for (const otherTableId of Object.keys(recordOpsMap)) {
+        if (otherTableId === tableId) continue;
+        const opsForOther = recordOpsMap[otherTableId];
+        if (!opsForOther || isEmpty(opsForOther)) continue;
+        try {
+          const r = await this.getDerivateByLink(otherTableId, opsForOther);
+          recordOpsMap = composeOpMaps([recordOpsMap, r.opsMapByLink]);
+        } catch (_) {
+          // Ignore derivation errors for non-link updates; they'll be handled downstream
+        }
+      }
     }
 
     await this.batchService.updateRecords(recordOpsMap);
-
-    await this.referenceService.calculateOpsMap(recordOpsMap);
   }
 
   private async getExistRecords(tableId: string, newField: IFieldInstance) {
@@ -1130,8 +1251,9 @@ export class FieldConvertingService {
     // for same field with options change
     if (keys.includes('options')) {
       return (
-        (newField.type === FieldType.Rollup || newField.type === FieldType.Formula) &&
-        newField.options.expression !== (oldField as FormulaFieldDto).options.expression
+        ((newField.type === FieldType.Rollup || newField.type === FieldType.Formula) &&
+          newField.options.expression !== (oldField as FormulaFieldDto).options.expression) ||
+        newField.type === FieldType.ConditionalRollup
       );
     }
 
@@ -1184,7 +1306,6 @@ export class FieldConvertingService {
 
     this.logger.log(`calculating field: ${newField.name}`);
 
-    await this.fieldCalculationService.calculateFields(tableId, [newField.id]);
     await this.fieldService.resolvePending(tableId, [newField.id]);
   }
 
@@ -1399,10 +1520,28 @@ export class FieldConvertingService {
     oldField: IFieldInstance,
     recordOpsMap?: IOpsMap
   ) {
+    // For two-way -> one-way toggles, we still need to apply recordOpsMap
+    // to persist preserved source link values, but can skip computed field recalculation.
+    const skipComputed = this.isTogglingToOneWay(newField, oldField);
+
     // calculate and submit records
     await this.calculateAndSaveRecords(tableId, newField, recordOpsMap);
 
-    // calculate computed fields
-    await this.calculateField(tableId, newField, oldField);
+    // calculate computed fields unless explicitly skipped
+    if (!skipComputed) {
+      await this.calculateField(tableId, newField, oldField);
+    }
+  }
+
+  private isTogglingToOneWay(newField: IFieldInstance, oldField: IFieldInstance): boolean {
+    if (newField.type !== FieldType.Link || newField.isLookup) return false;
+    const newOpts = newField.options as ILinkFieldOptions;
+    const oldOpts = oldField.options as ILinkFieldOptions;
+    return (
+      newOpts.foreignTableId === oldOpts.foreignTableId &&
+      newOpts.relationship === oldOpts.relationship &&
+      Boolean(newOpts.isOneWay) &&
+      !oldOpts.isOneWay
+    );
   }
 }

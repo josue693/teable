@@ -1,24 +1,46 @@
-import type { IFilterOperator, IFilterValue, ILiteralValue, ILiteralValueList } from '@teable/core';
-import { FieldType } from '@teable/core';
+import type {
+  FieldCore,
+  IFieldReferenceValue,
+  IFilterOperator,
+  IFilterValue,
+  ILiteralValue,
+  ILiteralValueList,
+} from '@teable/core';
+import { FieldType, isFieldReferenceValue } from '@teable/core';
 import type { Knex } from 'knex';
 import { isUserOrLink } from '../../../../../utils/is-user-or-link';
 import { escapeJsonbRegex } from '../../../../../utils/postgres-regex-escape';
+import type { IDbProvider } from '../../../../db.provider.interface';
 import { CellValueFilterPostgres } from '../cell-value-filter.postgres';
 
 export class JsonCellValueFilterAdapter extends CellValueFilterPostgres {
   isOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValue
+    value: ILiteralValue | IFieldReferenceValue,
+    dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const { type } = this.field;
 
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+
+      if (isUserOrLink(type)) {
+        builderClient.whereRaw(
+          `jsonb_extract_path_text(${this.tableColumnRef}::jsonb, 'id') = jsonb_extract_path_text(${ref}::jsonb, 'id')`
+        );
+        return builderClient;
+      }
+
+      return super.isOperatorHandler(builderClient, _operator, value, dbProvider);
+    }
+
     if (isUserOrLink(type)) {
-      builderClient.whereRaw(`??::jsonb @\\? '$.id \\? (@ == "${value}")'`, [this.tableColumnRef]);
+      builderClient.whereRaw(`${this.tableColumnRef}::jsonb @\\? '$.id \\? (@ == "${value}")'`);
     } else {
-      builderClient.whereRaw(`??::jsonb @\\? '$[*] \\? (@ =~ "${value}" flag "i")'`, [
-        this.tableColumnRef,
-      ]);
+      builderClient.whereRaw(
+        `${this.tableColumnRef}::jsonb @\\? '$[*] \\? (@ =~ "${value}" flag "i")'`
+      );
     }
     return builderClient;
   }
@@ -26,18 +48,31 @@ export class JsonCellValueFilterAdapter extends CellValueFilterPostgres {
   isNotOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValue
+    value: ILiteralValue | IFieldReferenceValue,
+    dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const { type } = this.field;
 
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+
+      if (isUserOrLink(type)) {
+        builderClient.whereRaw(
+          `jsonb_extract_path_text(${this.tableColumnRef}::jsonb, 'id') IS DISTINCT FROM jsonb_extract_path_text(${ref}::jsonb, 'id')`
+        );
+        return builderClient;
+      }
+
+      return super.isNotOperatorHandler(builderClient, _operator, value, dbProvider);
+    }
+
     if (isUserOrLink(type)) {
-      builderClient.whereRaw(`NOT COALESCE(??, '{}')::jsonb @\\? '$.id \\? (@ == "${value}")'`, [
-        this.tableColumnRef,
-      ]);
+      builderClient.whereRaw(
+        `NOT COALESCE(${this.tableColumnRef}, '{}')::jsonb @\\? '$.id \\? (@ == "${value}")'`
+      );
     } else {
       builderClient.whereRaw(
-        `NOT COALESCE(??, '[]')::jsonb @\\? '$[*] \\? (@ =~ "${value}" flag "i")'`,
-        [this.tableColumnRef]
+        `NOT COALESCE(${this.tableColumnRef}, '[]')::jsonb @\\? '$[*] \\? (@ =~ "${value}" flag "i")'`
       );
     }
     return builderClient;
@@ -46,20 +81,28 @@ export class JsonCellValueFilterAdapter extends CellValueFilterPostgres {
   isAnyOfOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue
   ): Knex.QueryBuilder {
     const { type } = this.field;
 
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      const referenceTextArray = this.buildTextArrayExpression(referenceArray);
+      builderClient.whereRaw(`jsonb_exists_any(${selfArray}, ${referenceTextArray})`);
+      return builderClient;
+    }
+
     if (isUserOrLink(type)) {
       builderClient.whereRaw(
-        `jsonb_extract_path_text(??::jsonb, 'id') IN (${this.createSqlPlaceholders(value)})`,
-        [this.tableColumnRef, ...value]
+        `jsonb_extract_path_text(${this.tableColumnRef}::jsonb, 'id') IN (${this.createSqlPlaceholders(value)})`,
+        value
       );
     } else {
-      builderClient.whereRaw(`??::jsonb \\?| ARRAY[${this.createSqlPlaceholders(value)}]`, [
-        this.tableColumnRef,
-        ...value,
-      ]);
+      builderClient.whereRaw(
+        `${this.tableColumnRef}::jsonb \\?| ARRAY[${this.createSqlPlaceholders(value)}]`,
+        value
+      );
     }
     return builderClient;
   }
@@ -67,21 +110,31 @@ export class JsonCellValueFilterAdapter extends CellValueFilterPostgres {
   isNoneOfOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: ILiteralValueList
+    value: ILiteralValueList | IFieldReferenceValue
   ): Knex.QueryBuilder {
     const { type } = this.field;
 
+    if (isFieldReferenceValue(value)) {
+      const referenceArray = this.buildReferenceJsonArray(value);
+      const selfArray = this.buildJsonArrayExpression(this.tableColumnRef, this.field);
+      const referenceTextArray = this.buildTextArrayExpression(referenceArray);
+      builderClient.whereRaw(
+        `NOT jsonb_exists_any(COALESCE(${selfArray}, '[]'::jsonb), ${referenceTextArray})`
+      );
+      return builderClient;
+    }
+
     if (isUserOrLink(type)) {
       builderClient.whereRaw(
-        `COALESCE(jsonb_extract_path_text(COALESCE(??, '{}')::jsonb, 'id'), '') NOT IN (${this.createSqlPlaceholders(
+        `COALESCE(jsonb_extract_path_text(COALESCE(${this.tableColumnRef}, '{}')::jsonb, 'id'), '') NOT IN (${this.createSqlPlaceholders(
           value
         )})`,
-        [this.tableColumnRef, ...value]
+        value
       );
     } else {
       builderClient.whereRaw(
-        `NOT COALESCE(??, '[]')::jsonb \\?| ARRAY[${this.createSqlPlaceholders(value)}]`,
-        [this.tableColumnRef, ...value]
+        `NOT COALESCE(${this.tableColumnRef}, '[]')::jsonb \\?| ARRAY[${this.createSqlPlaceholders(value)}]`,
+        value
       );
     }
     return builderClient;
@@ -96,15 +149,13 @@ export class JsonCellValueFilterAdapter extends CellValueFilterPostgres {
     const escapedValue = escapeJsonbRegex(String(value));
 
     if (type === FieldType.Link) {
-      builderClient.whereRaw(`??::jsonb @\\? '$.title \\? (@ like_regex ?? flag "i")'`, [
-        this.tableColumnRef,
-        escapedValue,
-      ]);
+      builderClient.whereRaw(
+        `${this.tableColumnRef}::jsonb @\\? '$.title \\? (@ like_regex "${escapedValue}" flag "i")'`
+      );
     } else {
-      builderClient.whereRaw(`??::jsonb @\\? '$[*] \\? (@ like_regex ?? flag "i")'`, [
-        this.tableColumnRef,
-        escapedValue,
-      ]);
+      builderClient.whereRaw(
+        `${this.tableColumnRef}::jsonb @\\? '$[*] \\? (@ like_regex "${escapedValue}" flag "i")'`
+      );
     }
     return builderClient;
   }
@@ -119,15 +170,38 @@ export class JsonCellValueFilterAdapter extends CellValueFilterPostgres {
 
     if (type === FieldType.Link) {
       builderClient.whereRaw(
-        `NOT COALESCE(??, '{}')::jsonb @\\? '$.title \\? (@ like_regex "${escapedValue}" flag "i")'`,
-        [this.tableColumnRef]
+        `NOT COALESCE(${this.tableColumnRef}, '{}')::jsonb @\\? '$.title \\? (@ like_regex "${escapedValue}" flag "i")'`
       );
     } else {
       builderClient.whereRaw(
-        `NOT COALESCE(??, '[]')::jsonb @\\? '$[*] \\? (@ like_regex "${escapedValue}" flag "i")'`,
-        [this.tableColumnRef]
+        `NOT COALESCE(${this.tableColumnRef}, '[]')::jsonb @\\? '$[*] \\? (@ like_regex "${escapedValue}" flag "i")'`
       );
     }
     return builderClient;
+  }
+
+  private buildReferenceJsonArray(value: IFieldReferenceValue): string {
+    const referenceExpression = this.resolveFieldReference(value);
+    const referenceField = this.getComparableReferenceField(value);
+    return this.buildJsonArrayExpression(referenceExpression, referenceField);
+  }
+
+  private buildJsonArrayExpression(columnExpression: string, field?: FieldCore): string {
+    const targetField = field ?? this.field;
+    const fallback = targetField.isMultipleCellValue ? "'[]'::jsonb" : "'null'::jsonb'";
+    return `jsonb_path_query_array(COALESCE(${columnExpression}, ${fallback}), ${this.getJsonPath(
+      targetField
+    )})`;
+  }
+
+  private buildTextArrayExpression(jsonArrayExpression: string): string {
+    return `COALESCE((SELECT array_agg(value) FROM jsonb_array_elements_text(${jsonArrayExpression}) AS value), ARRAY[]::text[])`;
+  }
+
+  private getJsonPath(field: FieldCore): string {
+    if (isUserOrLink(field.type)) {
+      return field.isMultipleCellValue ? "'$[*].id'" : "'$.id'";
+    }
+    return field.isMultipleCellValue ? "'$[*]'" : "'$'";
   }
 }

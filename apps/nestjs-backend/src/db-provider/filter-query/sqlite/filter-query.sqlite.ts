@@ -1,4 +1,7 @@
-import type { IFieldInstance } from '../../../features/field/model/factory';
+import type { FieldCore, IFilter } from '@teable/core';
+import type { Knex } from 'knex';
+import type { IRecordQueryFilterContext } from '../../../features/record/query-builder/record-query-builder.interface';
+import type { IDbProvider, IFilterQueryExtra } from '../../db.provider.interface';
 import type { AbstractCellValueFilter } from '../cell-value-filter.abstract';
 import { AbstractFilterQuery } from '../filter-query.abstract';
 import {
@@ -16,43 +19,53 @@ import {
 import type { CellValueFilterSqlite } from './cell-value-filter/cell-value-filter.sqlite';
 
 export class FilterQuerySqlite extends AbstractFilterQuery {
-  booleanFilter(field: IFieldInstance): CellValueFilterSqlite {
+  constructor(
+    originQueryBuilder: Knex.QueryBuilder,
+    fields?: { [fieldId: string]: FieldCore },
+    filter?: IFilter,
+    extra?: IFilterQueryExtra,
+    dbProvider?: IDbProvider,
+    context?: IRecordQueryFilterContext
+  ) {
+    super(originQueryBuilder, fields, filter, extra, dbProvider, context);
+  }
+  booleanFilter(field: FieldCore, context?: IRecordQueryFilterContext): CellValueFilterSqlite {
     const { isMultipleCellValue } = field;
     if (isMultipleCellValue) {
-      return new MultipleBooleanCellValueFilterAdapter(field);
+      return new MultipleBooleanCellValueFilterAdapter(field, context);
     }
-    return new BooleanCellValueFilterAdapter(field);
+    return new BooleanCellValueFilterAdapter(field, context);
   }
 
-  numberFilter(field: IFieldInstance): CellValueFilterSqlite {
+  numberFilter(field: FieldCore, context?: IRecordQueryFilterContext): CellValueFilterSqlite {
     const { isMultipleCellValue } = field;
     if (isMultipleCellValue) {
-      return new MultipleNumberCellValueFilterAdapter(field);
+      return new MultipleNumberCellValueFilterAdapter(field, context);
     }
-    return new NumberCellValueFilterAdapter(field);
+    return new NumberCellValueFilterAdapter(field, context);
   }
 
-  dateTimeFilter(field: IFieldInstance): CellValueFilterSqlite {
+  dateTimeFilter(field: FieldCore, context?: IRecordQueryFilterContext): CellValueFilterSqlite {
     const { isMultipleCellValue } = field;
     if (isMultipleCellValue) {
-      return new MultipleDatetimeCellValueFilterAdapter(field);
+      return new MultipleDatetimeCellValueFilterAdapter(field, context);
     }
-    return new DatetimeCellValueFilterAdapter(field);
+    return new DatetimeCellValueFilterAdapter(field, context);
   }
 
-  stringFilter(field: IFieldInstance): CellValueFilterSqlite {
+  stringFilter(field: FieldCore, context?: IRecordQueryFilterContext): CellValueFilterSqlite {
     const { isMultipleCellValue } = field;
     if (isMultipleCellValue) {
-      return new MultipleStringCellValueFilterAdapter(field);
+      return new MultipleStringCellValueFilterAdapter(field, context);
     }
-    return new StringCellValueFilterAdapter(field);
+    return new StringCellValueFilterAdapter(field, context);
   }
 
-  jsonFilter(field: IFieldInstance): AbstractCellValueFilter {
+  jsonFilter(field: FieldCore, context?: IRecordQueryFilterContext): AbstractCellValueFilter {
     const { isMultipleCellValue } = field;
     if (isMultipleCellValue) {
-      return new MultipleJsonCellValueFilterAdapter(field);
+      return new MultipleJsonCellValueFilterAdapter(field, context);
     }
-    return new JsonCellValueFilterAdapter(field);
+    return new JsonCellValueFilterAdapter(field, context);
   }
 }
