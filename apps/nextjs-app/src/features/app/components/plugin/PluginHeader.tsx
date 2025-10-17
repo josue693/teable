@@ -92,7 +92,7 @@ export const PluginHeader = (props: {
         />
       </div>
       <div
-        className={cn('flex  gap-1 overflow-hidden min-w-0 group-hover:w-auto', {
+        className={cn('flex gap-1 overflow-hidden min-w-0 group-hover:w-auto', {
           'w-0': !menuOpen,
         })}
       >
