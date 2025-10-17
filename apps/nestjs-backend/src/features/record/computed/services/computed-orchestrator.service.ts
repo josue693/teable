@@ -263,12 +263,28 @@ export class ComputedOrchestratorService {
   }> {
     await update();
 
+    const publishTargetIds = new Set<string>();
+    for (const source of sources) {
+      if (!source.fieldIds?.length) continue;
+      for (const fid of source.fieldIds) publishTargetIds.add(fid);
+    }
+
     const impact = await this.collector.collectForFieldChanges(sources);
     if (!Object.keys(impact).length) return { publishedOps: 0, impact: {} };
+
+    const exclude = new Set<string>();
+    if (publishTargetIds.size) {
+      for (const group of Object.values(impact)) {
+        for (const fid of group.fieldIds) {
+          if (!publishTargetIds.has(fid)) exclude.add(fid);
+        }
+      }
+    }
 
     const total = await this.evaluator.evaluate(impact, {
       versionBaseline: 'current',
       preferAutoNumberPaging: true,
+      ...(exclude.size ? { excludeFieldIds: exclude } : {}),
     });
 
     return { publishedOps: total, impact: buildResultImpact(impact) };

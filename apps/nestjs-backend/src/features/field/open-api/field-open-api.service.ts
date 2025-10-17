@@ -410,9 +410,10 @@ export class FieldOpenApiService {
           const field = fields[i];
           const { columnMeta, references, ...fieldVo } = field;
           const fieldInstance = createFieldInstanceByVo(fieldVo);
+          const sourceEntries = [{ tableId, fieldIds: [fieldInstance.id] }];
 
           await this.computedOrchestrator.computeCellChangesForFieldsAfterCreate(
-            [{ tableId, fieldIds: [fieldInstance.id] }],
+            sourceEntries,
             async () => {
               const createResult = await this.fieldCreatingService.alterCreateField(
                 tableId,
@@ -439,6 +440,14 @@ export class FieldOpenApiService {
               }
               created.push(...createResult);
               for (const { tableId: tid, field } of createResult) {
+                let entry = sourceEntries.find((s) => s.tableId === tid);
+                if (!entry) {
+                  entry = { tableId: tid, fieldIds: [] };
+                  sourceEntries.push(entry);
+                }
+                if (!entry.fieldIds.includes(field.id)) {
+                  entry.fieldIds.push(field.id);
+                }
                 if (field.isComputed) {
                   await this.fieldService.resolvePending(tid, [field.id]);
                 }
@@ -485,8 +494,9 @@ export class FieldOpenApiService {
     const newFields = await this.prismaService.$tx(
       async () => {
         let created: { tableId: string; field: IFieldInstance }[] = [];
+        const sourceEntries = [{ tableId, fieldIds: [fieldInstance.id] }];
         await this.computedOrchestrator.computeCellChangesForFieldsAfterCreate(
-          [{ tableId, fieldIds: [fieldInstance.id] }],
+          sourceEntries,
           async () => {
             created = await this.fieldCreatingService.alterCreateField(
               tableId,
@@ -494,6 +504,14 @@ export class FieldOpenApiService {
               columnMeta
             );
             for (const { tableId: tid, field } of created) {
+              let entry = sourceEntries.find((s) => s.tableId === tid);
+              if (!entry) {
+                entry = { tableId: tid, fieldIds: [] };
+                sourceEntries.push(entry);
+              }
+              if (!entry.fieldIds.includes(field.id)) {
+                entry.fieldIds.push(field.id);
+              }
               if (field.isComputed) {
                 await this.fieldService.resolvePending(tid, [field.id]);
               }
