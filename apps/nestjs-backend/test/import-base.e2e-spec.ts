@@ -43,7 +43,49 @@ import {
   getTable,
   permanentDeleteBase,
   getRecords,
+  getRecord,
 } from './utils/init-app';
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitForComputedRecord(
+  tableId: string,
+  recordId: string,
+  fieldIds: string[],
+  timeoutMs = 8000
+) {
+  const start = Date.now();
+  let latestRecord = await getRecord(tableId, recordId);
+  while (Date.now() - start < timeoutMs) {
+    const hasAllValues = fieldIds.every((fieldId) => latestRecord.fields?.[fieldId] !== undefined);
+    if (hasAllValues) {
+      return latestRecord;
+    }
+    await sleep(200);
+    latestRecord = await getRecord(tableId, recordId);
+  }
+  return latestRecord;
+}
+
+async function waitForRecordWithFieldValue(
+  tableId: string,
+  fieldId: string,
+  expectedValue: unknown,
+  timeoutMs = 8000
+) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const records = await getRecords(tableId, {
+      fieldKeyType: FieldKeyType.Id,
+    });
+    const matched = records.records.find((record) => record.fields?.[fieldId] === expectedValue);
+    if (matched) {
+      return matched;
+    }
+    await sleep(200);
+  }
+  return undefined;
+}
 
 function getAttachmentService(app: INestApplication) {
   return app.get<AttachmentsService>(AttachmentsService);
@@ -487,21 +529,34 @@ describe('OpenAPI BaseController for base import (e2e)', () => {
 
       const importedStatusFilter = importedFields.find((field) => field.name === 'StatusFilter')!;
 
-      const importedRecords = await getRecords(importedHostMeta.id, {
-        fieldKeyType: FieldKeyType.Id,
-      });
-
-      const activeRecord = importedRecords.records.find(
-        (record) => record.fields?.[importedStatusFilter.id] === 'Active'
+      const activeRecordMeta = await waitForRecordWithFieldValue(
+        importedHostMeta.id,
+        importedStatusFilter.id,
+        'Active'
       );
-      const inactiveRecord = importedRecords.records.find(
-        (record) => record.fields?.[importedStatusFilter.id] === 'Inactive'
+      const inactiveRecordMeta = await waitForRecordWithFieldValue(
+        importedHostMeta.id,
+        importedStatusFilter.id,
+        'Inactive'
       );
 
-      expect(activeRecord?.fields?.[importedRollupField.id]).toBe('Alpha');
-      expect(inactiveRecord?.fields?.[importedRollupField.id]).toBe('Beta');
-      expect(activeRecord?.fields?.[importedLookupField.id]).toEqual(['Alpha']);
-      expect(inactiveRecord?.fields?.[importedLookupField.id]).toEqual(['Beta']);
+      expect(activeRecordMeta).toBeDefined();
+      expect(inactiveRecordMeta).toBeDefined();
+
+      const activeRecord = await waitForComputedRecord(importedHostMeta.id, activeRecordMeta!.id, [
+        importedRollupField.id,
+        importedLookupField.id,
+      ]);
+      const inactiveRecord = await waitForComputedRecord(
+        importedHostMeta.id,
+        inactiveRecordMeta!.id,
+        [importedRollupField.id, importedLookupField.id]
+      );
+
+      expect(activeRecord.fields?.[importedRollupField.id]).toBe('Alpha');
+      expect(inactiveRecord.fields?.[importedRollupField.id]).toBe('Beta');
+      expect(activeRecord.fields?.[importedLookupField.id]).toEqual(['Alpha']);
+      expect(inactiveRecord.fields?.[importedLookupField.id]).toEqual(['Beta']);
     });
   });
 });
