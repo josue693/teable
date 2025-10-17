@@ -8,6 +8,7 @@ import type {
   IFilterOperator,
   IFilterSet,
   ILiteralValueList,
+  IFieldReferenceValue,
 } from '@teable/core';
 import {
   CellValueType,
@@ -18,12 +19,14 @@ import {
   isEmpty,
   isMeTag,
   isNotEmpty,
+  isFieldReferenceValue,
 } from '@teable/core';
 import type { Knex } from 'knex';
 import { includes, invert, isObject } from 'lodash';
 import type { IRecordQueryFilterContext } from '../../features/record/query-builder/record-query-builder.interface';
 import type { IDbProvider, IFilterQueryExtra } from '../db.provider.interface';
 import type { AbstractCellValueFilter } from './cell-value-filter.abstract';
+import { FieldReferenceCompatibilityException } from './cell-value-filter.abstract';
 import type { IFilterQueryInterface } from './filter-query.interface';
 
 export abstract class AbstractFilterQuery implements IFilterQueryInterface {
@@ -89,6 +92,21 @@ export abstract class AbstractFilterQuery implements IFilterQueryInterface {
     }
 
     if (!includes(validFilterOperators, convertOperator)) {
+      let referenceFieldId: string | undefined;
+      if (isFieldReferenceValue(value)) {
+        referenceFieldId = value.fieldId;
+      } else if (Array.isArray(value)) {
+        referenceFieldId = (
+          value.find((entry) => isFieldReferenceValue(entry)) as IFieldReferenceValue | undefined
+        )?.fieldId;
+      }
+
+      if (referenceFieldId) {
+        const referenceName = this.fields?.[referenceFieldId]?.name ?? referenceFieldId;
+        const sourceName = field.name ?? field.id;
+        throw new FieldReferenceCompatibilityException(sourceName, referenceName);
+      }
+
       throw new BadRequestException(
         `The '${convertOperator}' operation provided for the '${field.name}' filter is invalid. Only the following types are allowed: [${validFilterOperators}]`
       );

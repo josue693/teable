@@ -31,6 +31,7 @@ import {
   isOnOrBefore,
   isWithIn,
   literalValueListSchema,
+  isFieldReferenceComparable,
   isFieldReferenceValue,
 } from '@teable/core';
 import type {
@@ -47,6 +48,19 @@ import type { Knex } from 'knex';
 import type { IRecordQueryFilterContext } from '../../features/record/query-builder/record-query-builder.interface';
 import type { IDbProvider } from '../db.provider.interface';
 import type { ICellValueFilterInterface } from './cell-value-filter.interface';
+
+export class FieldReferenceCompatibilityException extends BadRequestException {
+  static readonly CODE = 'FIELD_REFERENCE_INCOMPATIBLE';
+
+  constructor(sourceField: string, referenceField: string) {
+    super({
+      errorCode: FieldReferenceCompatibilityException.CODE,
+      message: `Field '${referenceField}' is not compatible with '${sourceField}' for filter comparisons`,
+      sourceField,
+      referenceField,
+    });
+  }
+}
 
 export abstract class AbstractCellValueFilter implements ICellValueFilterInterface {
   protected tableColumnRef: string;
@@ -74,6 +88,8 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
   }
 
   protected resolveFieldReference(value: IFieldReferenceValue): string {
+    this.getComparableReferenceField(value);
+
     const referenceMap = this.context?.fieldReferenceSelectionMap;
     if (!referenceMap) {
       throw new BadRequestException('Field reference comparisons are not available here');
@@ -89,6 +105,23 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
 
   protected getFieldReferenceMetadata(fieldId: string): FieldCore | undefined {
     return this.context?.fieldReferenceFieldMap?.get(fieldId);
+  }
+
+  protected getComparableReferenceField(value: IFieldReferenceValue): FieldCore {
+    const referenceField = this.getFieldReferenceMetadata(value.fieldId);
+    if (!referenceField) {
+      throw new BadRequestException(
+        `Field '${value.fieldId}' is not available for reference comparisons`
+      );
+    }
+
+    if (!isFieldReferenceComparable(this.field, referenceField)) {
+      const sourceName = this.field.name ?? this.field.id;
+      const referenceName = referenceField.name ?? referenceField.id;
+      throw new FieldReferenceCompatibilityException(sourceName, referenceName);
+    }
+
+    return referenceField;
   }
 
   compiler(

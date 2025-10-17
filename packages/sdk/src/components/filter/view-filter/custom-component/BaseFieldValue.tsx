@@ -4,6 +4,7 @@ import {
   FieldType,
   isFieldReferenceValue,
   isFieldReferenceOperatorSupported,
+  isFieldReferenceComparable,
 } from '@teable/core';
 import type { IDateFilter, IFilterItem, IFieldReferenceValue, IOperator } from '@teable/core';
 import { Switch } from '@teable/icons';
@@ -15,7 +16,7 @@ import {
   TooltipTrigger,
   cn,
 } from '@teable/ui-lib';
-import { cloneElement, useEffect, useMemo, useState } from 'react';
+import { cloneElement, useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { useTranslation } from '../../../../context/app/i18n';
 import type { DateField, IFieldInstance } from '../../../../model';
@@ -86,12 +87,58 @@ const ConditionalRollupValue = (props: IConditionalRollupValueProps) => {
 
   const toggleDisabled = !referenceFields.length || !operatorSupportsReferences;
 
+  const isReferenceFieldDisabled = useCallback(
+    (candidate: IFieldInstance) => {
+      if (!field) {
+        return false;
+      }
+      return !isFieldReferenceComparable(field, candidate);
+    },
+    [field]
+  );
+
   useEffect(() => {
     if (!toggleDisabled || !isFieldReferenceValue(value)) {
       return;
     }
     onSelect(lastLiteralValue ?? null);
   }, [lastLiteralValue, onSelect, toggleDisabled, value]);
+
+  useEffect(() => {
+    if (!isFieldReferenceValue(value) || !field || !referenceFields.length) {
+      return;
+    }
+
+    const currentField = referenceFields.find((candidate) => candidate.id === value.fieldId);
+    const currentDisabled = currentField ? isReferenceFieldDisabled(currentField) : true;
+
+    if (!currentDisabled) {
+      return;
+    }
+
+    const fallbackField = referenceFields.find(
+      (candidate) => candidate.id !== value.fieldId && !isReferenceFieldDisabled(candidate)
+    );
+
+    if (fallbackField) {
+      onSelect({
+        type: 'field',
+        fieldId: fallbackField.id,
+        tableId: fallbackField.tableId ?? referenceTableId,
+      } satisfies IFieldReferenceValue);
+      return;
+    }
+
+    onSelect(lastLiteralValue ?? null);
+  }, [
+    field,
+    isReferenceFieldDisabled,
+    lastLiteralValue,
+    onSelect,
+    referenceFields,
+    referenceTableId,
+    value,
+  ]);
 
   const handleToggle = () => {
     if (toggleDisabled) {
@@ -143,6 +190,7 @@ const ConditionalRollupValue = (props: IConditionalRollupValueProps) => {
           className="!h-9 w-40 rounded-r-none border-r-0"
           showTableName={Boolean(referenceTableId)}
           tableId={referenceTableId}
+          isOptionDisabled={isReferenceFieldDisabled}
         />
       ) : (
         mergedLiteralComponent

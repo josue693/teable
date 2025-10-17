@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention */
-import type { FieldType } from '../../field/constant';
-import { CellValueType } from '../../field/constant';
+import { CellValueType, FieldType } from '../../field/constant';
 import type { IOperator } from './operator';
 import {
   getValidFilterOperators,
@@ -21,6 +20,55 @@ type FieldShape = {
   type: FieldType;
   isMultipleCellValue?: boolean;
 };
+
+export type FieldReferenceComparisonKind =
+  | 'user'
+  | 'link'
+  | 'attachment'
+  | 'number'
+  | 'boolean'
+  | 'dateTime'
+  | 'string';
+
+const USER_FIELD_TYPES = new Set<FieldType>([
+  FieldType.User,
+  FieldType.CreatedBy,
+  FieldType.LastModifiedBy,
+]);
+
+const LINK_FIELD_TYPES = new Set<FieldType>([FieldType.Link]);
+
+const ATTACHMENT_FIELD_TYPES = new Set<FieldType>([FieldType.Attachment]);
+
+export function getFieldReferenceComparisonKind(field: FieldShape): FieldReferenceComparisonKind {
+  if (USER_FIELD_TYPES.has(field.type)) {
+    return 'user';
+  }
+
+  if (LINK_FIELD_TYPES.has(field.type)) {
+    return 'link';
+  }
+
+  if (ATTACHMENT_FIELD_TYPES.has(field.type)) {
+    return 'attachment';
+  }
+
+  switch (field.cellValueType) {
+    case CellValueType.Number:
+      return 'number';
+    case CellValueType.Boolean:
+      return 'boolean';
+    case CellValueType.DateTime:
+      return 'dateTime';
+    case CellValueType.String:
+    default:
+      return 'string';
+  }
+}
+
+export function isFieldReferenceComparable(field: FieldShape, reference: FieldShape): boolean {
+  return getFieldReferenceComparisonKind(field) === getFieldReferenceComparisonKind(reference);
+}
 
 const FIELD_REFERENCE_OPERATOR_MAP: Record<CellValueType, ReadonlySet<IOperator>> = {
   [CellValueType.String]: new Set<IOperator>([is.value, isNot.value]),

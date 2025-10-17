@@ -252,7 +252,7 @@ export class MultipleNumberCellValueFilterAdapter extends CellValueFilterPostgre
 
   private buildReferenceJsonArray(value: IFieldReferenceValue): string {
     const referenceExpression = this.resolveFieldReference(value);
-    const referenceField = this.getFieldReferenceMetadata(value.fieldId) ?? this.field;
+    const referenceField = this.getComparableReferenceField(value);
     return this.buildJsonArrayExpression(referenceExpression, referenceField);
   }
 

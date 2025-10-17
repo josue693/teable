@@ -273,7 +273,7 @@ export class MultipleJsonCellValueFilterAdapter extends CellValueFilterPostgres 
 
   private buildReferenceJsonArray(value: IFieldReferenceValue): string {
     const referenceExpression = this.resolveFieldReference(value);
-    const referenceField = this.getFieldReferenceMetadata(value.fieldId);
+    const referenceField = this.getComparableReferenceField(value);
     return this.buildJsonArrayExpression(referenceExpression, referenceField);
   }
 

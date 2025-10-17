@@ -2981,7 +2981,131 @@ describe('OpenAPI Conditional Rollup field (e2e)', () => {
     });
   });
 
-  describe.only('numeric array field reference rollups', () => {
+  describe('field reference compatibility validation', () => {
+    it('marks rollup as errored when host reference field type changes', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'ConditionalRollup_Compat_Foreign',
+        fields: [
+          { name: 'Player', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Score', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          { fields: { Player: 'Alpha', Score: 10 } },
+          { fields: { Player: 'Beta', Score: 7 } },
+        ],
+      });
+      const scoreFieldId = foreign.fields.find((field) => field.name === 'Score')!.id;
+
+      const host = await createTable(baseId, {
+        name: 'ConditionalRollup_Compat_Host',
+        fields: [{ name: 'Threshold', type: FieldType.Number } as IFieldRo],
+        records: [{ fields: { Threshold: 8 } }],
+      });
+      const thresholdFieldId = host.fields.find((field) => field.name === 'Threshold')!.id;
+
+      try {
+        const filter: IFilter = {
+          conjunction: 'and',
+          filterSet: [
+            {
+              fieldId: scoreFieldId,
+              operator: isGreater.value,
+              value: { type: 'field', fieldId: thresholdFieldId },
+            },
+          ],
+        };
+
+        const rollupField = await createField(host.id, {
+          name: 'Scores Above Threshold',
+          type: FieldType.ConditionalRollup,
+          options: {
+            foreignTableId: foreign.id,
+            lookupFieldId: scoreFieldId,
+            expression: 'sum({values})',
+            filter,
+          } satisfies IConditionalRollupFieldOptions,
+        } as IFieldRo);
+
+        const initial = await getField(host.id, rollupField.id);
+        expect(initial.hasError).toBeFalsy();
+
+        await convertField(host.id, thresholdFieldId, {
+          name: 'Threshold',
+          type: FieldType.SingleLineText,
+          options: {},
+        } as IFieldRo);
+
+        const afterHostConvert = await getField(host.id, rollupField.id);
+        expect(afterHostConvert.hasError).toBe(true);
+      } finally {
+        await permanentDeleteTable(baseId, host.id);
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
+    it('marks rollup as errored when foreign filter field type changes', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'ConditionalRollup_Compat_ForeignField',
+        fields: [
+          { name: 'Player', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Score', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          { fields: { Player: 'Alpha', Score: 5 } },
+          { fields: { Player: 'Beta', Score: 15 } },
+        ],
+      });
+      const scoreFieldId = foreign.fields.find((field) => field.name === 'Score')!.id;
+
+      const host = await createTable(baseId, {
+        name: 'ConditionalRollup_Compat_HostField',
+        fields: [{ name: 'Threshold', type: FieldType.Number } as IFieldRo],
+        records: [{ fields: { Threshold: 10 } }],
+      });
+      const thresholdFieldId = host.fields.find((field) => field.name === 'Threshold')!.id;
+
+      try {
+        const filter: IFilter = {
+          conjunction: 'and',
+          filterSet: [
+            {
+              fieldId: scoreFieldId,
+              operator: isGreater.value,
+              value: { type: 'field', fieldId: thresholdFieldId },
+            },
+          ],
+        };
+
+        const rollupField = await createField(host.id, {
+          name: 'Filtered Scores',
+          type: FieldType.ConditionalRollup,
+          options: {
+            foreignTableId: foreign.id,
+            lookupFieldId: scoreFieldId,
+            expression: 'count({values})',
+            filter,
+          } satisfies IConditionalRollupFieldOptions,
+        } as IFieldRo);
+
+        const initial = await getField(host.id, rollupField.id);
+        expect(initial.hasError).toBeFalsy();
+
+        await convertField(foreign.id, scoreFieldId, {
+          name: 'Score',
+          type: FieldType.SingleLineText,
+          options: {},
+        } as IFieldRo);
+
+        const afterForeignConvert = await getField(host.id, rollupField.id);
+        expect(afterForeignConvert.hasError).toBe(true);
+      } finally {
+        await permanentDeleteTable(baseId, host.id);
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+  });
+
+  describe('numeric array field reference rollups', () => {
     let games: ITableFullVo;
     let summary: ITableFullVo;
     let gamesLinkFieldId: string;

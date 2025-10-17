@@ -5,6 +5,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  cn,
 } from '@teable/ui-lib';
 import React, { useMemo } from 'react';
 import { useTranslation } from '../../context/app/i18n';
@@ -19,6 +20,7 @@ interface IFieldCommand {
   placeholder?: string;
   emptyHolder?: React.ReactNode;
   groupHeading?: string;
+  isDisabled?: (field: IFieldInstance) => boolean;
 }
 
 export function FieldCommand(props: IFieldCommand) {
@@ -29,6 +31,7 @@ export function FieldCommand(props: IFieldCommand) {
     selectedIds,
     fields: propsFields,
     groupHeading,
+    isDisabled,
   } = props;
   const { t } = useTranslation();
 
@@ -58,13 +61,18 @@ export function FieldCommand(props: IFieldCommand) {
               hasAiConfig: Boolean(field.aiConfig),
               deniedReadRecord: !field.canReadFieldRecord,
             });
+            const disabled = isDisabled?.(field) ?? false;
             return (
               <CommandItem
                 key={field.id}
+                disabled={disabled}
                 onSelect={() => {
+                  if (disabled) {
+                    return;
+                  }
                   onSelect?.(field.id);
                 }}
-                className="flex"
+                className={cn('flex', disabled && 'pointer-events-none opacity-40')}
               >
                 <Icon className="size-4 shrink-0" />
                 <span className="truncate pl-3">{field.name}</span>

@@ -10,6 +10,8 @@ import {
   StatisticsFunc,
   isRollupFunctionSupportedForCellValueType,
   isLinkLookupOptions,
+  isFieldReferenceValue,
+  isFieldReferenceComparable,
 } from '@teable/core';
 import type {
   IFieldVo,
@@ -21,6 +23,8 @@ import type {
   IConditionalRollupFieldOptions,
   IGetFieldsQuery,
   IFilter,
+  IFilterItem,
+  IFieldReferenceValue,
 } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { IDuplicateFieldRo } from '@teable/openapi';
@@ -30,6 +34,7 @@ import { groupBy, omit, pick } from 'lodash';
 import { InjectModel } from 'nest-knexjs';
 import { ClsService } from 'nestjs-cls';
 import { ThresholdConfig, IThresholdConfig } from '../../../configs/threshold.config';
+import { FieldReferenceCompatibilityException } from '../../../db-provider/filter-query/cell-value-filter.abstract';
 import { EventEmitterService } from '../../../event-emitter/event-emitter.service';
 import { Events } from '../../../event-emitter/events';
 import type { IClsStore } from '../../../types/cls';
@@ -87,6 +92,12 @@ export class FieldOpenApiService {
     return await this.graphService.planField(tableId, fieldId);
   }
 
+  private isFieldReferenceCompatibilityError(
+    error: unknown
+  ): error is FieldReferenceCompatibilityException {
+    return error instanceof FieldReferenceCompatibilityException;
+  }
+
   async planFieldCreate(tableId: string, fieldRo: IFieldRo) {
     return await this.graphService.planFieldCreate(tableId, fieldRo);
   }
@@ -131,7 +142,7 @@ export class FieldOpenApiService {
     return true;
   }
 
-  private async validateConditionalRollupAggregation(field: IFieldInstance) {
+  private async validateConditionalRollupAggregation(hostTableId: string, field: IFieldInstance) {
     const options = field.options as IConditionalRollupFieldOptions | undefined;
     const expression = options?.expression;
     const lookupFieldId = options?.lookupFieldId;
@@ -156,10 +167,18 @@ export class FieldOpenApiService {
       ? (rawCellType as CellValueType)
       : CellValueType.String;
 
-    return isRollupFunctionSupportedForCellValueType(expression, cellValueType);
+    const aggregationSupported = isRollupFunctionSupportedForCellValueType(
+      expression,
+      cellValueType
+    );
+    if (!aggregationSupported) {
+      return false;
+    }
+
+    return await this.validateFilterFieldReferences(hostTableId, foreignTableId, options?.filter);
   }
 
-  private async validateConditionalLookup(field: IFieldInstance) {
+  private async validateConditionalLookup(tableId: string, field: IFieldInstance) {
     const meta = field.getConditionalLookupOptions?.();
     const lookupFieldId = meta?.lookupFieldId;
     const foreignTableId = meta?.foreignTableId;
@@ -177,7 +196,136 @@ export class FieldOpenApiService {
       return false;
     }
 
-    return foreignField.type === field.type;
+    if (foreignField.type !== field.type) {
+      return false;
+    }
+
+    return this.validateFilterFieldReferences(tableId, foreignTableId, meta?.filter);
+  }
+
+  private async validateFilterFieldReferences(
+    hostTableId: string,
+    foreignTableId: string,
+    filter?: IFilter | null
+  ): Promise<boolean> {
+    if (!filter) {
+      return true;
+    }
+
+    const foreignFieldIds = new Set<string>();
+    const referenceFieldIds = new Set<string>();
+
+    const collectFieldIds = (node: IFilter | IFilterItem) => {
+      if (!node) {
+        return;
+      }
+
+      if ('fieldId' in node) {
+        foreignFieldIds.add(node.fieldId);
+
+        const { value } = node;
+        if (isFieldReferenceValue(value)) {
+          referenceFieldIds.add(value.fieldId);
+        } else if (Array.isArray(value)) {
+          for (const entry of value) {
+            if (isFieldReferenceValue(entry)) {
+              referenceFieldIds.add(entry.fieldId);
+            }
+          }
+        }
+      } else if ('filterSet' in node) {
+        node.filterSet.forEach((child) => collectFieldIds(child));
+      }
+    };
+
+    collectFieldIds(filter);
+
+    if (!referenceFieldIds.size) {
+      return true;
+    }
+
+    const fieldIdsToFetch = Array.from(new Set([...foreignFieldIds, ...referenceFieldIds]));
+    if (!fieldIdsToFetch.length) {
+      return true;
+    }
+
+    const rawFields = await this.prismaService.txClient().field.findMany({
+      where: { id: { in: fieldIdsToFetch }, deletedTime: null },
+    });
+
+    const instanceMap = new Map<string, IFieldInstance>();
+    const hostFields = new Map<string, IFieldInstance>();
+    const foreignFields = new Map<string, IFieldInstance>();
+
+    for (const raw of rawFields) {
+      const instance = createFieldInstanceByRaw(raw);
+      instanceMap.set(raw.id, instance);
+
+      if (raw.tableId === hostTableId) {
+        hostFields.set(raw.id, instance);
+      }
+
+      if (raw.tableId === foreignTableId) {
+        foreignFields.set(raw.id, instance);
+      }
+    }
+
+    const resolveReferenceField = (reference: IFieldReferenceValue): IFieldInstance | undefined => {
+      if (reference.tableId) {
+        if (reference.tableId === hostTableId) {
+          return hostFields.get(reference.fieldId);
+        }
+        if (reference.tableId === foreignTableId) {
+          return foreignFields.get(reference.fieldId);
+        }
+      }
+
+      return (
+        hostFields.get(reference.fieldId) ??
+        foreignFields.get(reference.fieldId) ??
+        instanceMap.get(reference.fieldId)
+      );
+    };
+
+    // eslint-disable-next-line sonarjs/cognitive-complexity
+    const validateNode = (node: IFilter | IFilterItem): boolean => {
+      if (!node) {
+        return true;
+      }
+
+      if ('fieldId' in node) {
+        const baseField = foreignFields.get(node.fieldId) ?? instanceMap.get(node.fieldId);
+        if (!baseField) {
+          return false;
+        }
+
+        const references: IFieldReferenceValue[] = [];
+        const { value } = node;
+
+        if (isFieldReferenceValue(value)) {
+          references.push(value);
+        } else if (Array.isArray(value)) {
+          for (const entry of value) {
+            if (isFieldReferenceValue(entry)) {
+              references.push(entry);
+            }
+          }
+        }
+
+        return references.every((reference) => {
+          const referenceField = resolveReferenceField(reference);
+          return referenceField ? isFieldReferenceComparable(baseField, referenceField) : false;
+        });
+      }
+
+      if ('filterSet' in node) {
+        return node.filterSet.every((child) => validateNode(child));
+      }
+
+      return true;
+    };
+
+    return validateNode(filter);
   }
 
   private async markError(tableId: string, field: IFieldInstance, hasError: boolean) {
@@ -228,10 +376,10 @@ export class FieldOpenApiService {
       const isValid = await this.validateLookupField(field);
       hasError = !isValid;
     } else if (field.type === FieldType.ConditionalRollup) {
-      const isValid = await this.validateConditionalRollupAggregation(field);
+      const isValid = await this.validateConditionalRollupAggregation(tableId, field);
       hasError = !isValid;
     } else if (field.isConditionalLookup) {
-      const isValid = await this.validateConditionalLookup(field);
+      const isValid = await this.validateConditionalLookup(tableId, field);
       hasError = !isValid;
     }
 
@@ -563,7 +711,32 @@ export class FieldOpenApiService {
       newField: IFieldInstance;
       oldField: IFieldInstance;
     };
-  }) {
+  }): Promise<{ compatibilityIssue: boolean }> {
+    let encounteredCompatibilityIssue = false;
+
+    const runStageCalculate = async (
+      targetTableId: string,
+      targetNewField: IFieldInstance,
+      targetOldField: IFieldInstance,
+      ops?: IOpsMap
+    ) => {
+      try {
+        await this.fieldConvertingService.stageCalculate(
+          targetTableId,
+          targetNewField,
+          targetOldField,
+          ops
+        );
+      } catch (error) {
+        if (this.isFieldReferenceCompatibilityError(error)) {
+          encounteredCompatibilityIssue = true;
+          return;
+        }
+
+        throw error;
+      }
+    };
+
     // 1. stage close constraint
     await this.fieldConvertingService.closeConstraint(tableId, newField, oldField);
 
@@ -577,7 +750,7 @@ export class FieldOpenApiService {
             fieldIds: [supplementChange.newField.id],
           });
 
-        await this.computedOrchestrator.computeCellChangesForFields(sources, async () => {
+        const runCompute = async () => {
           // Update dependencies and schema first so evaluate() sees new schema
           await this.fieldViewSyncService.convertDependenciesByFieldIds(
             tableId,
@@ -596,17 +769,22 @@ export class FieldOpenApiService {
           }
 
           // Then apply record changes (base ops) prior to computed publishing
-          await this.fieldConvertingService.stageCalculate(
-            tableId,
-            newField,
-            oldField,
-            modifiedOps
-          );
+          await runStageCalculate(tableId, newField, oldField, modifiedOps);
           if (supplementChange) {
             const { tableId: sTid, newField: sNew, oldField: sOld } = supplementChange;
-            await this.fieldConvertingService.stageCalculate(sTid, sNew, sOld);
+            await runStageCalculate(sTid, sNew, sOld);
           }
-        });
+        };
+
+        try {
+          await this.computedOrchestrator.computeCellChangesForFields(sources, runCompute);
+        } catch (error) {
+          if (this.isFieldReferenceCompatibilityError(error)) {
+            encounteredCompatibilityIssue = true;
+            return;
+          }
+          throw error;
+        }
       },
       { timeout: this.thresholdConfig.bigTransactionTimeout }
     );
@@ -642,6 +820,8 @@ export class FieldOpenApiService {
     } catch (e) {
       this.logger.warn(`post-convert symmetric persist failed: ${String(e)}`);
     }
+
+    return { compatibilityIssue: encounteredCompatibilityIssue };
   }
 
   // eslint-disable-next-line sonarjs/cognitive-complexity
@@ -655,7 +835,7 @@ export class FieldOpenApiService {
     const { newField, oldField, modifiedOps, supplementChange, references } =
       await this.fieldConvertingService.stageAnalysis(tableId, fieldId, updateFieldRo);
 
-    await this.performConvertField({
+    const { compatibilityIssue } = await this.performConvertField({
       tableId,
       newField,
       oldField,
@@ -687,10 +867,14 @@ export class FieldOpenApiService {
         });
         for (const raw of dependentFieldRaws) {
           const instance = createFieldInstanceByRaw(raw);
-          const requiresValidation = instance.type === FieldType.ConditionalRollup;
-          const isValid = requiresValidation
-            ? await this.validateConditionalRollupAggregation(instance)
-            : true;
+          let isValid = true;
+
+          if (instance.type === FieldType.ConditionalRollup) {
+            isValid = await this.validateConditionalRollupAggregation(raw.tableId, instance);
+          } else if (instance.isConditionalLookup) {
+            isValid = await this.validateConditionalLookup(raw.tableId, instance);
+          }
+
           await this.markError(raw.tableId, instance, !isValid);
         }
 
@@ -718,6 +902,15 @@ export class FieldOpenApiService {
           `convertField: restoreReference/checkError failed for ${fieldId}: ${String(e)}`
         );
       }
+    }
+
+    if (
+      compatibilityIssue &&
+      (newField.isConditionalLookup ||
+        newField.isLookup ||
+        newField.type === FieldType.ConditionalRollup)
+    ) {
+      await this.markError(tableId, newField, true);
     }
 
     const oldFieldVo = instanceToPlain(oldField, { excludePrefixes: ['_'] }) as IFieldVo;
