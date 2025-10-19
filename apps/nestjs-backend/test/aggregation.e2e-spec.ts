@@ -555,6 +555,34 @@ describe('OpenAPI AggregationController (e2e)', () => {
       expect(result.extra?.allGroupHeaderRefs?.length).toEqual(4);
     });
 
+    it('should keep single select group order', async () => {
+      const singleSelectField = table.fields[2];
+      const groupBy = [
+        {
+          fieldId: singleSelectField.id,
+          order: SortFunc.Asc,
+        },
+      ];
+
+      const groupPoints = (await getGroupPoints(table.id, { groupBy })).data!;
+      const headerValues = groupPoints
+        .filter((point): point is IGroupHeaderPoint => point.type === GroupPointType.Header)
+        .filter(({ depth }) => depth === 0)
+        .map(({ value }) => value);
+
+      const expectedOptions = ['x', 'y', 'z'];
+      const startIndex = headerValues[0] == null ? 1 : 0;
+      expect(headerValues.slice(startIndex, startIndex + expectedOptions.length)).toEqual(
+        expectedOptions
+      );
+
+      const tailValues = headerValues.slice(startIndex + expectedOptions.length);
+      expect(tailValues.length <= 1).toBe(true);
+      if (tailValues.length === 1) {
+        expect(tailValues[0]).toBe('Unknown');
+      }
+    });
+
     it('should get group points by user field', async () => {
       const userField = table.fields[5];
       const multipleUserField = table.fields[7];

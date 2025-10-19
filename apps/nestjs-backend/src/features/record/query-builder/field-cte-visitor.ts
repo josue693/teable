@@ -993,6 +993,37 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     return this.state.getFieldCteMap();
   }
 
+  private getBaseIdSubquery(): Knex.QueryBuilder | undefined {
+    const baseCteName = this.state.getBaseCteName();
+    if (!baseCteName) {
+      return undefined;
+    }
+    return this.qb.client.queryBuilder().select(ID_FIELD_NAME).from(baseCteName);
+  }
+
+  private applyMainTableRestriction(builder: Knex.QueryBuilder, alias: string): void {
+    const subquery = this.getBaseIdSubquery();
+    if (!subquery) {
+      return;
+    }
+    builder.whereIn(`${alias}.${ID_FIELD_NAME}`, subquery);
+  }
+
+  private fromTableWithRestriction(
+    builder: Knex.QueryBuilder,
+    table: TableDomain,
+    alias: string
+  ): void {
+    const source =
+      table.id === this.table.id
+        ? this.state.getOriginalMainTableSource() ?? table.dbTableName
+        : table.dbTableName;
+    builder.from(`${source} as ${alias}`);
+    if (table.id === this.table.id) {
+      this.applyMainTableRestriction(builder, alias);
+    }
+  }
+
   /**
    * Apply an explicit cast to align the SQL expression type with the target field's DB column type.
    * This prevents Postgres from rejecting UPDATE ... FROM assignments due to type mismatches
@@ -1264,7 +1295,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         cqb
           .select(`${mainAlias}.${ID_FIELD_NAME} as main_record_id`)
           .select(cqb.client.raw(`(${aggregateSql}) as "conditional_rollup_${field.id}"`))
-          .from(`${table.dbTableName} as ${mainAlias}`);
+          .modify((builder) => this.fromTableWithRestriction(builder, table, mainAlias));
       });
 
       if (joinToMain) {
@@ -1431,7 +1462,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         if (field.type === FieldType.ConditionalRollup) {
           cqb.select(cqb.client.raw(`(${aggregateSql}) as "${rollupAlias}"`));
         }
-        cqb.from(`${table.dbTableName} as ${mainAlias}`);
+        this.fromTableWithRestriction(cqb, table, mainAlias);
       });
 
       if (joinToMain) {
@@ -1624,8 +1655,8 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         }
 
         if (usesJunctionTable) {
+          this.fromTableWithRestriction(cqb, this.table, mainAlias);
           cqb
-            .from(`${this.table.dbTableName} as ${mainAlias}`)
             .leftJoin(
               `${fkHostTableName} as ${JUNCTION_ALIAS}`,
               `${mainAlias}.__id`,
@@ -1659,13 +1690,12 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
           // For non-one-way OneMany relationships, foreign key is stored in the foreign table
           // No junction table needed
 
-          cqb
-            .from(`${this.table.dbTableName} as ${mainAlias}`)
-            .leftJoin(
-              `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
-              `${mainAlias}.__id`,
-              `${foreignAliasUsed}.${selfKeyName}`
-            );
+          this.fromTableWithRestriction(cqb, this.table, mainAlias);
+          cqb.leftJoin(
+            `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+            `${mainAlias}.__id`,
+            `${foreignAliasUsed}.${selfKeyName}`
+          );
 
           // Add LEFT JOINs to nested CTEs
           for (const nestedLinkFieldId of nestedJoins) {
@@ -1700,7 +1730,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
           // But we need to determine the correct join condition based on which table we're querying from
           const isForeignKeyInMainTable = fkHostTableName === this.table.dbTableName;
 
-          cqb.from(`${this.table.dbTableName} as ${mainAlias}`);
+          this.fromTableWithRestriction(cqb, this.table, mainAlias);
 
           if (isForeignKeyInMainTable) {
             // Foreign key is stored in the main table (original field case)
@@ -1985,8 +2015,8 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
       }
 
       if (usesJunctionTable) {
+        this.fromTableWithRestriction(cqb, table, mainAlias);
         cqb
-          .from(`${table.dbTableName} as ${mainAlias}`)
           .leftJoin(
             `${fkHostTableName} as ${JUNCTION_ALIAS}`,
             `${mainAlias}.__id`,
@@ -2019,13 +2049,12 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
           cqb.orderBy(`${JUNCTION_ALIAS}.__id`, 'asc');
         }
       } else if (relationship === Relationship.OneMany) {
-        cqb
-          .from(`${table.dbTableName} as ${mainAlias}`)
-          .leftJoin(
-            `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
-            `${mainAlias}.__id`,
-            `${foreignAliasUsed}.${selfKeyName}`
-          );
+        this.fromTableWithRestriction(cqb, table, mainAlias);
+        cqb.leftJoin(
+          `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+          `${mainAlias}.__id`,
+          `${foreignAliasUsed}.${selfKeyName}`
+        );
 
         // Add LEFT JOINs to nested CTEs
         for (const nestedLinkFieldId of nestedJoins) {
@@ -2050,7 +2079,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         }
       } else if (relationship === Relationship.ManyOne || relationship === Relationship.OneOne) {
         const isForeignKeyInMainTable = fkHostTableName === table.dbTableName;
-        cqb.from(`${table.dbTableName} as ${mainAlias}`);
+        this.fromTableWithRestriction(cqb, table, mainAlias);
 
         if (isForeignKeyInMainTable) {
           cqb.leftJoin(

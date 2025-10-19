@@ -16,6 +16,7 @@ import type {
   IGroup,
   ILinkCellValue,
   IRecord,
+  ISelectFieldOptions,
   ISnapshotBase,
   ISortItem,
 } from '@teable/core';
@@ -549,12 +550,16 @@ export class RecordService {
       | 'filterLinkCellSelected'
       | 'collapsedGroupIds'
       | 'selectedRecordIds'
+      | 'skip'
+      | 'take'
     >,
     useQueryModel = false
   ) {
     // Prepare the base query builder, filtering conditions, sorting rules, grouping rules and field mapping
     const { dbTableName, viewCte, filter, search, orderBy, groupBy, fieldMap } =
       await this.prepareQuery(tableId, query);
+
+    const basicSortIndex = await this.getBasicOrderIndexField(dbTableName, query.viewId);
 
     // Retrieve the current user's ID to build user-related query conditions
     const currentUserId = this.cls.get('user.id');
@@ -569,6 +574,9 @@ export class RecordService {
         // Only select fields required by filter/order/search to avoid touching unrelated columns
         projection: fieldMap ? Object.values(fieldMap).map((f) => f.id) : [],
         useQueryModel,
+        limit: query.take,
+        offset: query.skip,
+        defaultOrderField: basicSortIndex,
       }
     );
 
@@ -625,7 +633,6 @@ export class RecordService {
     if (query.filterLinkCellSelected && Array.isArray(query.filterLinkCellSelected)) {
       await this.buildLinkSelectedSort(qb, alias, query.filterLinkCellSelected);
     } else {
-      const basicSortIndex = await this.getBasicOrderIndexField(dbTableName, query.viewId);
       // view sorting added by default
       qb.orderBy(`${alias}.${basicSortIndex}`, 'asc');
     }
@@ -1810,10 +1817,14 @@ export class RecordService {
       collapsedGroupIds,
       filterLinkCellCandidate,
       filterLinkCellSelected,
+      skip,
+      take,
     });
     skip && queryBuilder.offset(skip);
     take !== -1 && take && queryBuilder.limit(take);
     const sql = queryBuilder.toQuery();
+
+    this.logger.debug('getRecordsFields query: %s', sql);
 
     const result = await this.prismaService
       .txClient()
@@ -1914,6 +1925,14 @@ export class RecordService {
 
         const { dbFieldName } = field;
         const order = groupItem.order ?? SortFunc.Asc;
+        const selectOrderMap =
+          field.type === FieldType.SingleSelect
+            ? new Map(
+                ((field.options as ISelectFieldOptions | undefined)?.choices ?? []).map(
+                  (choice, idx) => [choice.name, idx]
+                )
+              )
+            : null;
 
         return (
           left: { [key: string]: unknown; __c: number },
@@ -1921,6 +1940,11 @@ export class RecordService {
         ) => {
           const leftValue = convertValueToStringify(left[dbFieldName]);
           const rightValue = convertValueToStringify(right[dbFieldName]);
+
+          if (selectOrderMap) {
+            return this.compareSelectGroupValues(selectOrderMap, leftValue, rightValue, order);
+          }
+
           return this.compareGroupValues(leftValue, rightValue, order);
         };
       })
@@ -1990,6 +2014,41 @@ export class RecordService {
     }
 
     return isDesc ? -1 : 1;
+  }
+
+  private compareSelectGroupValues(
+    orderMap: Map<string, number>,
+    left: number | string | null,
+    right: number | string | null,
+    order: SortFunc
+  ): number {
+    if (left === right) {
+      return 0;
+    }
+
+    if (left == null || right == null) {
+      return this.compareGroupValues(left, right, order);
+    }
+
+    const getRank = (value: number | string): number => {
+      if (typeof value === 'string') {
+        const index = orderMap.get(value);
+        if (index != null) {
+          return index + 1;
+        }
+      }
+      return -1;
+    };
+
+    const leftRank = getRank(left);
+    const rightRank = getRank(right);
+
+    if (leftRank === rightRank) {
+      return this.compareGroupValues(left, right, order);
+    }
+
+    const diff = leftRank - rightRank;
+    return order === SortFunc.Desc ? -diff : diff;
   }
 
   @Timing()
