@@ -16,6 +16,7 @@ import type {
   IGroup,
   ILinkCellValue,
   IRecord,
+  ISelectFieldOptions,
   ISnapshotBase,
   ISortItem,
 } from '@teable/core';
@@ -1914,6 +1915,14 @@ export class RecordService {
 
         const { dbFieldName } = field;
         const order = groupItem.order ?? SortFunc.Asc;
+        const selectOrderMap =
+          field.type === FieldType.SingleSelect
+            ? new Map(
+                ((field.options as ISelectFieldOptions | undefined)?.choices ?? []).map(
+                  (choice, idx) => [choice.name, idx]
+                )
+              )
+            : null;
 
         return (
           left: { [key: string]: unknown; __c: number },
@@ -1921,6 +1930,11 @@ export class RecordService {
         ) => {
           const leftValue = convertValueToStringify(left[dbFieldName]);
           const rightValue = convertValueToStringify(right[dbFieldName]);
+
+          if (selectOrderMap) {
+            return this.compareSelectGroupValues(selectOrderMap, leftValue, rightValue, order);
+          }
+
           return this.compareGroupValues(leftValue, rightValue, order);
         };
       })
@@ -1990,6 +2004,41 @@ export class RecordService {
     }
 
     return isDesc ? -1 : 1;
+  }
+
+  private compareSelectGroupValues(
+    orderMap: Map<string, number>,
+    left: number | string | null,
+    right: number | string | null,
+    order: SortFunc
+  ): number {
+    if (left === right) {
+      return 0;
+    }
+
+    if (left == null || right == null) {
+      return this.compareGroupValues(left, right, order);
+    }
+
+    const getRank = (value: number | string): number => {
+      if (typeof value === 'string') {
+        const index = orderMap.get(value);
+        if (index != null) {
+          return index + 1;
+        }
+      }
+      return -1;
+    };
+
+    const leftRank = getRank(left);
+    const rightRank = getRank(right);
+
+    if (leftRank === rightRank) {
+      return this.compareGroupValues(left, right, order);
+    }
+
+    const diff = leftRank - rightRank;
+    return order === SortFunc.Desc ? -diff : diff;
   }
 
   @Timing()
