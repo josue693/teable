@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { extractFieldIdsFromFilter, FieldType } from '@teable/core';
 import type { FieldCore, IFilter, ISortItem, TableDomain, Tables } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
@@ -45,8 +46,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
 
   private async createQueryBuilderFromTable(
     from: string,
-    tableRaw: { id: string },
-    projection?: string[]
+    tableRaw: { id: string }
   ): Promise<{
     qb: Knex.QueryBuilder;
     alias: string;
@@ -60,15 +60,11 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     const qb = this.knex.from({ [mainTableAlias]: from });
 
     const state: IMutableQueryBuilderState = new RecordQueryBuilderManager('table');
-    const visitor = new FieldCteVisitor(
-      qb,
-      this.dbProvider,
-      tables,
-      state,
-      this.dialect,
-      projection
-    );
-    visitor.build();
+    state.setMainTableAlias(mainTableAlias);
+    state.setMainTableSource(table.dbTableName);
+    if (from !== table.dbTableName) {
+      state.setMainTableSource(from);
+    }
 
     return { qb, alias: mainTableAlias, tables, table, state };
   }
@@ -84,6 +80,11 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     const qb = this.knex.from({ [mainTableAlias]: tableRaw.dbViewName });
 
     const state = new RecordQueryBuilderManager('view');
+    state.setMainTableAlias(mainTableAlias);
+    state.setMainTableSource(table.dbTableName);
+    if (tableRaw.dbViewName !== table.dbTableName) {
+      state.setMainTableSource(tableRaw.dbViewName);
+    }
 
     return { qb, table, state, alias: mainTableAlias };
   }
@@ -99,6 +100,8 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     const qb = this.knex.from({ [mainTableAlias]: table.dbTableName });
 
     const state = new RecordQueryBuilderManager('tableCache');
+    state.setMainTableAlias(mainTableAlias);
+    state.setMainTableSource(table.dbTableName);
 
     return { qb, table, state, alias: mainTableAlias };
   }
@@ -106,8 +109,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
   private async createQueryBuilder(
     from: string,
     tableIdOrDbTableName: string,
-    useQueryModel = false,
-    projection?: string[]
+    options: Partial<ICreateRecordQueryBuilderOptions> = {}
   ): Promise<{
     qb: Knex.QueryBuilder;
     alias: string;
@@ -115,16 +117,45 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     state: IMutableQueryBuilderState;
   }> {
     const tableRaw = await this.getTableMeta(tableIdOrDbTableName);
+    const useQueryModel = options.useQueryModel ?? false;
+
+    let builder:
+      | {
+          qb: Knex.QueryBuilder;
+          alias: string;
+          table: TableDomain;
+          state: IMutableQueryBuilderState;
+          tables?: Tables;
+        }
+      | undefined;
+
     if (useQueryModel) {
       try {
-        return await this.createQueryBuilderFromTableCache(tableRaw as { id: string });
+        builder = await this.createQueryBuilderFromTableCache(tableRaw as { id: string });
       } catch (error) {
         this.logger.error(`Failed to create query builder from view: ${error}, use table instead`);
-        return this.createQueryBuilderFromTable(from, tableRaw, projection);
+        builder = await this.createQueryBuilderFromTable(from, tableRaw);
       }
+    } else {
+      builder = await this.createQueryBuilderFromTable(from, tableRaw);
     }
 
-    return this.createQueryBuilderFromTable(from, tableRaw, projection);
+    const { qb, alias, table, state } = builder;
+
+    if (state.getContext() === 'table') {
+      const tables = (builder as unknown as { tables: Tables }).tables;
+      this.applyBasePaginationIfNeeded(qb, table, state, alias, {
+        limit: options.limit,
+        offset: options.offset,
+        filter: options.filter,
+        sort: options.sort,
+        currentUserId: options.currentUserId,
+        defaultOrderField: options.defaultOrderField,
+      });
+      this.buildFieldCtes(qb, tables, state, options.projection);
+    }
+
+    return { qb, alias, table, state };
   }
 
   async prepareView(
@@ -132,8 +163,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     params: IPrepareViewParams
   ): Promise<{ qb: Knex.QueryBuilder; table: TableDomain }> {
     const { tableIdOrDbTableName } = params;
-    const tableRaw = await this.getTableMeta(tableIdOrDbTableName);
-    const { qb, table, state } = await this.createQueryBuilderFromTable(from, tableRaw);
+    const { qb, table, state } = await this.createQueryBuilder(from, tableIdOrDbTableName);
 
     this.buildSelect(qb, table, state);
 
@@ -145,12 +175,16 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     options: ICreateRecordQueryBuilderOptions
   ): Promise<{ qb: Knex.QueryBuilder; alias: string; selectionMap: IReadonlyRecordSelectionMap }> {
     const { tableIdOrDbTableName, filter, sort, currentUserId } = options;
-    const { qb, alias, table, state } = await this.createQueryBuilder(
-      from,
-      tableIdOrDbTableName,
-      options.useQueryModel,
-      options.projection
-    );
+    const { qb, alias, table, state } = await this.createQueryBuilder(from, tableIdOrDbTableName, {
+      useQueryModel: options.useQueryModel,
+      projection: options.projection,
+      limit: options.limit,
+      offset: options.offset,
+      filter,
+      sort,
+      currentUserId,
+      defaultOrderField: options.defaultOrderField,
+    });
 
     this.buildSelect(qb, table, state, options.projection, options.rawProjection);
 
@@ -180,12 +214,12 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       currentUserId,
       useQueryModel,
     } = options;
-    const { qb, table, alias, state } = await this.createQueryBuilder(
-      from,
-      tableIdOrDbTableName,
+    const { qb, table, alias, state } = await this.createQueryBuilder(from, tableIdOrDbTableName, {
       useQueryModel,
-      options.projection
-    );
+      projection: options.projection,
+      filter,
+      currentUserId,
+    });
 
     this.buildAggregateSelect(qb, table, state);
     const selectionMap = state.getSelectionMap();
@@ -221,6 +255,180 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     }
 
     return { qb, alias, selectionMap };
+  }
+
+  private buildFieldCtes(
+    qb: Knex.QueryBuilder,
+    tables: Tables | undefined,
+    state: IMutableQueryBuilderState,
+    projection?: string[]
+  ): void {
+    if (!tables) {
+      return;
+    }
+    const visitor = new FieldCteVisitor(
+      qb,
+      this.dbProvider,
+      tables,
+      state,
+      this.dialect,
+      projection
+    );
+    visitor.build();
+  }
+
+  // eslint-disable-next-line sonarjs/cognitive-complexity
+  private applyBasePaginationIfNeeded(
+    qb: Knex.QueryBuilder,
+    table: TableDomain,
+    state: IMutableQueryBuilderState,
+    alias: string,
+    params: {
+      limit?: number;
+      offset?: number;
+      filter?: IFilter;
+      sort?: ISortItem[];
+      currentUserId?: string;
+      defaultOrderField?: string;
+    }
+  ): void {
+    const { limit, offset, filter, sort, currentUserId, defaultOrderField } = params;
+    state.setBaseCteName(undefined);
+
+    if (state.getContext() !== 'table') {
+      return;
+    }
+
+    const originalSource = state.getOriginalMainTableSource();
+    if (!originalSource) {
+      return;
+    }
+
+    const baseLimit = this.resolveBaseLimit(limit, offset);
+    if (!baseLimit) {
+      return;
+    }
+
+    const requiredFieldIds = this.collectRequiredFieldIds(filter, sort, defaultOrderField);
+    const fieldLookup = this.buildFieldLookup(table);
+
+    if (this.referencesComputedField(requiredFieldIds, fieldLookup)) {
+      return;
+    }
+
+    const baseSelectionMap = this.createBaseSelectionMap(requiredFieldIds, fieldLookup, alias);
+
+    const baseBuilder = this.knex
+      .queryBuilder()
+      .select(this.knex.raw('??.*', [alias]))
+      .from({ [alias]: originalSource });
+
+    if (filter) {
+      this.buildFilter(baseBuilder, table, filter, baseSelectionMap, currentUserId);
+    }
+
+    if (sort && sort.length) {
+      this.buildSort(baseBuilder, table, sort, baseSelectionMap);
+    }
+
+    if (defaultOrderField) {
+      baseBuilder.orderBy(`${alias}.${defaultOrderField}`, 'asc');
+    }
+
+    baseBuilder.limit(baseLimit);
+
+    const baseCteName = `BASE_${alias}`;
+    qb.with(baseCteName, baseBuilder);
+    qb.from({ [alias]: baseCteName });
+    state.setBaseCteName(baseCteName);
+    state.setMainTableSource(baseCteName);
+  }
+
+  private isComputedField(field: FieldCore): boolean {
+    if (field.isLookup) {
+      return true;
+    }
+    switch (field.type) {
+      case FieldType.Rollup:
+      case FieldType.ConditionalRollup:
+      case FieldType.Formula:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private resolveBaseLimit(limit?: number, offset?: number): number | undefined {
+    if (limit === undefined || limit === null) {
+      return undefined;
+    }
+    if (limit < 0 || limit === -1) {
+      return undefined;
+    }
+    const safeOffset = offset && offset > 0 ? offset : 0;
+    const baseLimit = safeOffset + limit;
+    if (!Number.isFinite(baseLimit) || baseLimit <= 0) {
+      return undefined;
+    }
+    return baseLimit;
+  }
+
+  private collectRequiredFieldIds(
+    filter: IFilter | undefined,
+    sort: ISortItem[] | undefined,
+    defaultOrderField?: string
+  ): Set<string> {
+    const ids = new Set<string>();
+    for (const fieldId of extractFieldIdsFromFilter(filter)) {
+      ids.add(fieldId);
+    }
+    sort?.forEach((item) => {
+      if (item.fieldId) {
+        ids.add(item.fieldId);
+      }
+    });
+    if (defaultOrderField) {
+      ids.add(defaultOrderField);
+    }
+    return ids;
+  }
+
+  private buildFieldLookup(table: TableDomain): Map<string, FieldCore> {
+    const lookup = new Map<string, FieldCore>();
+    for (const field of table.fieldList) {
+      lookup.set(field.id, field);
+    }
+    return lookup;
+  }
+
+  private referencesComputedField(
+    fieldIds: Set<string>,
+    fieldLookup: Map<string, FieldCore>
+  ): boolean {
+    for (const fieldId of fieldIds) {
+      const field = fieldLookup.get(fieldId);
+      if (!field) {
+        continue;
+      }
+      if (this.isComputedField(field)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private createBaseSelectionMap(
+    fieldIds: Set<string>,
+    fieldLookup: Map<string, FieldCore>,
+    alias: string
+  ): Map<string, string> {
+    const selectionMap = new Map<string, string>();
+    for (const fieldId of fieldIds) {
+      const field = fieldLookup.get(fieldId);
+      if (!field) continue;
+      selectionMap.set(field.id, `"${alias}"."${field.dbFieldName}"`);
+    }
+    return selectionMap;
   }
 
   private buildSelect(

@@ -13,6 +13,10 @@ export class RecordQueryBuilderManager implements IMutableQueryBuilderState {
   constructor(public readonly context: IRecordQueryContext) {}
   private readonly fieldIdToCteName: Map<string, string> = new Map();
   private readonly fieldIdToSelection: Map<string, IFieldSelectName> = new Map();
+  private mainAlias?: string;
+  private mainSource?: string;
+  private originalMainSource?: string;
+  private baseCteName?: string;
 
   // Readonly API
   getFieldCteMap(): ReadonlyMap<string, string> {
@@ -25,6 +29,22 @@ export class RecordQueryBuilderManager implements IMutableQueryBuilderState {
 
   getContext(): IRecordQueryContext {
     return this.context;
+  }
+
+  getMainTableAlias(): string | undefined {
+    return this.mainAlias;
+  }
+
+  getMainTableSource(): string | undefined {
+    return this.mainSource;
+  }
+
+  getOriginalMainTableSource(): string | undefined {
+    return this.originalMainSource ?? this.mainSource;
+  }
+
+  getBaseCteName(): string | undefined {
+    return this.baseCteName;
   }
 
   hasFieldCte(fieldId: string): boolean {
@@ -54,6 +74,21 @@ export class RecordQueryBuilderManager implements IMutableQueryBuilderState {
 
   clearSelections(): void {
     this.fieldIdToSelection.clear();
+  }
+
+  setMainTableAlias(alias: string): void {
+    this.mainAlias = alias;
+  }
+
+  setMainTableSource(source: string): void {
+    this.mainSource = source;
+    if (!this.originalMainSource) {
+      this.originalMainSource = source;
+    }
+  }
+
+  setBaseCteName(cteName: string | undefined): void {
+    this.baseCteName = cteName;
   }
 }
 
@@ -95,6 +130,22 @@ export class ScopedSelectionState implements IMutableQueryBuilderState {
     return this.base.getCteName(fieldId);
   }
 
+  getMainTableAlias(): string | undefined {
+    return this.base.getMainTableAlias();
+  }
+
+  getMainTableSource(): string | undefined {
+    return this.base.getMainTableSource();
+  }
+
+  getOriginalMainTableSource(): string | undefined {
+    return this.base.getOriginalMainTableSource();
+  }
+
+  getBaseCteName(): string | undefined {
+    return this.base.getBaseCteName();
+  }
+
   // Mutations: selection only
   setSelection(fieldId: string, selection: IFieldSelectName): void {
     this.localSelection.set(fieldId, selection);
@@ -116,5 +167,17 @@ export class ScopedSelectionState implements IMutableQueryBuilderState {
 
   clearFieldCtes(): void {
     throw new Error('clearFieldCtes is not supported on ScopedSelectionState');
+  }
+
+  setMainTableAlias(_alias: string): void {
+    throw new Error('setMainTableAlias is not supported on ScopedSelectionState');
+  }
+
+  setMainTableSource(_source: string): void {
+    throw new Error('setMainTableSource is not supported on ScopedSelectionState');
+  }
+
+  setBaseCteName(_cteName: string | undefined): void {
+    throw new Error('setBaseCteName is not supported on ScopedSelectionState');
   }
 }

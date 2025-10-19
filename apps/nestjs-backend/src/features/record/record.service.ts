@@ -550,12 +550,16 @@ export class RecordService {
       | 'filterLinkCellSelected'
       | 'collapsedGroupIds'
       | 'selectedRecordIds'
+      | 'skip'
+      | 'take'
     >,
     useQueryModel = false
   ) {
     // Prepare the base query builder, filtering conditions, sorting rules, grouping rules and field mapping
     const { dbTableName, viewCte, filter, search, orderBy, groupBy, fieldMap } =
       await this.prepareQuery(tableId, query);
+
+    const basicSortIndex = await this.getBasicOrderIndexField(dbTableName, query.viewId);
 
     // Retrieve the current user's ID to build user-related query conditions
     const currentUserId = this.cls.get('user.id');
@@ -570,6 +574,9 @@ export class RecordService {
         // Only select fields required by filter/order/search to avoid touching unrelated columns
         projection: fieldMap ? Object.values(fieldMap).map((f) => f.id) : [],
         useQueryModel,
+        limit: query.take,
+        offset: query.skip,
+        defaultOrderField: basicSortIndex,
       }
     );
 
@@ -626,7 +633,6 @@ export class RecordService {
     if (query.filterLinkCellSelected && Array.isArray(query.filterLinkCellSelected)) {
       await this.buildLinkSelectedSort(qb, alias, query.filterLinkCellSelected);
     } else {
-      const basicSortIndex = await this.getBasicOrderIndexField(dbTableName, query.viewId);
       // view sorting added by default
       qb.orderBy(`${alias}.${basicSortIndex}`, 'asc');
     }
@@ -1811,10 +1817,14 @@ export class RecordService {
       collapsedGroupIds,
       filterLinkCellCandidate,
       filterLinkCellSelected,
+      skip,
+      take,
     });
     skip && queryBuilder.offset(skip);
     take !== -1 && take && queryBuilder.limit(take);
     const sql = queryBuilder.toQuery();
+
+    this.logger.debug('getRecordsFields query: %s', sql);
 
     const result = await this.prismaService
       .txClient()

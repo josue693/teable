@@ -24,6 +24,12 @@ export interface ICreateRecordQueryBuilderOptions {
   useQueryModel?: boolean;
   /** Limit SELECT to these field IDs (plus system columns) */
   projection?: string[];
+  /** Optional pagination limit (take) */
+  limit?: number;
+  /** Optional pagination offset (skip) */
+  offset?: number;
+  /** Optional fallback field used for default ordering */
+  defaultOrderField?: string;
   /**
    * When true, select raw DB values for fields instead of formatted display values.
    * Useful for UPDATE ... FROM (SELECT ...) operations to avoid type mismatches (e.g., timestamptz vs text).
@@ -126,6 +132,14 @@ export interface IReadonlyQueryBuilderState {
   getSelectionMap(): ReadonlyMap<string, IFieldSelectName>;
   /** Get current query context (table or view) */
   getContext(): IRecordQueryContext;
+  /** Get main table alias used in the top-level FROM */
+  getMainTableAlias(): string | undefined;
+  /** Get the current source relation used for the main table (table/view/base CTE) */
+  getMainTableSource(): string | undefined;
+  /** Get the original physical source relation for the main table */
+  getOriginalMainTableSource(): string | undefined;
+  /** Get the optional pagination base CTE name */
+  getBaseCteName(): string | undefined;
   /** Convenience helpers */
   hasFieldCte(fieldId: string): boolean;
   getCteName(fieldId: string): string | undefined;
@@ -147,4 +161,10 @@ export interface IMutableQueryBuilderState extends IReadonlyQueryBuilderState {
   deleteSelection(fieldId: string): void;
   /** Clear selections */
   clearSelections(): void;
+  /** Set main table alias */
+  setMainTableAlias(alias: string): void;
+  /** Set main table source relation (table/view/cte) */
+  setMainTableSource(source: string): void;
+  /** Set pagination base CTE name */
+  setBaseCteName(cteName: string | undefined): void;
 }
