@@ -1,4 +1,5 @@
 import { DbFieldType } from '@teable/core';
+import type { ISelectFormulaConversionContext } from '../../../features/record/query-builder/sql-conversion.visitor';
 import { SelectQueryAbstract } from '../select-query.abstract';
 
 /**
@@ -8,12 +9,27 @@ import { SelectQueryAbstract } from '../select-query.abstract';
  * mutable functions and have different optimization strategies.
  */
 export class SelectQueryPostgres extends SelectQueryAbstract {
+  private get tableAlias(): string | undefined {
+    const ctx = this.context as ISelectFormulaConversionContext | undefined;
+    return ctx?.tableAlias;
+  }
+
+  private qualifySystemColumn(column: string): string {
+    const quoted = `"${column}"`;
+    const alias = this.tableAlias;
+    return alias ? `"${alias}".${quoted}` : quoted;
+  }
+
   private toNumericSafe(expr: string): string {
     // Safely coerce any scalar to a floating-point number:
     // - Strip everything except digits, sign, decimal point
     // - Map empty string to NULL to avoid casting errors
     // Cast to DOUBLE PRECISION so pg driver returns JS numbers (not strings as with NUMERIC)
     return `NULLIF(REGEXP_REPLACE((${expr})::text, '[^0-9.+-]', '', 'g'), '')::double precision`;
+  }
+
+  private coalesceNumeric(expr: string): string {
+    return `COALESCE(${this.toNumericSafe(expr)}, 0)`;
   }
 
   private isEmptyStringLiteral(value: string): boolean {
@@ -220,12 +236,23 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
   // Numeric Functions
   sum(params: string[]): string {
-    // In SELECT context, we can use window functions and aggregates more freely
-    return `SUM(${this.joinParams(params)})`;
+    if (params.length === 0) {
+      return '0';
+    }
+
+    const terms = params.map((param) => this.coalesceNumeric(param));
+    if (terms.length === 1) {
+      return terms[0];
+    }
+    return `(${terms.join(' + ')})`;
   }
 
   average(params: string[]): string {
-    return `AVG(${this.joinParams(params)})`;
+    if (params.length === 0) {
+      return '0';
+    }
+    const numerator = this.sum(params);
+    return `(${numerator}) / ${params.length}`;
   }
 
   max(params: string[]): string {
@@ -488,7 +515,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
   lastModifiedTime(): string {
     // This would typically reference a system column
-    return `"__last_modified_time"`;
+    return this.qualifySystemColumn('__last_modified_time');
   }
 
   minute(date: string): string {
@@ -539,7 +566,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
   createdTime(): string {
     // This would typically reference a system column
-    return `"__created_time"`;
+    return this.qualifySystemColumn('__created_time');
   }
 
   // Logical Functions
@@ -680,12 +707,12 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   // System Functions
   recordId(): string {
     // This would typically reference the primary key
-    return `__id`;
+    return this.qualifySystemColumn('__id');
   }
 
   autoNumber(): string {
     // This would typically reference an auto-increment column
-    return `__auto_number`;
+    return this.qualifySystemColumn('__auto_number');
   }
 
   textAll(value: string): string {

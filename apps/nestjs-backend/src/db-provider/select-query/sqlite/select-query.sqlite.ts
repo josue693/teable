@@ -1,3 +1,4 @@
+import type { ISelectFormulaConversionContext } from '../../../features/record/query-builder/sql-conversion.visitor';
 import { SelectQueryAbstract } from '../select-query.abstract';
 
 /**
@@ -7,6 +8,17 @@ import { SelectQueryAbstract } from '../select-query.abstract';
  * more functions and have different optimization strategies.
  */
 export class SelectQuerySqlite extends SelectQueryAbstract {
+  private get tableAlias(): string | undefined {
+    const ctx = this.context as ISelectFormulaConversionContext | undefined;
+    return ctx?.tableAlias;
+  }
+
+  private qualifySystemColumn(column: string): string {
+    const quoted = `"${column}"`;
+    const alias = this.tableAlias;
+    return alias ? `"${alias}".${quoted}` : quoted;
+  }
+
   private isEmptyStringLiteral(value: string): boolean {
     return value.trim() === "''";
   }
@@ -31,13 +43,28 @@ export class SelectQuerySqlite extends SelectQueryAbstract {
     return `(${normalizedLeft} ${operator} ${normalizedRight})`;
   }
 
+  private coalesceNumeric(expr: string): string {
+    return `COALESCE(CAST((${expr}) AS REAL), 0)`;
+  }
+
   // Numeric Functions
   sum(params: string[]): string {
-    return `SUM(${this.joinParams(params)})`;
+    if (params.length === 0) {
+      return '0';
+    }
+    const terms = params.map((param) => this.coalesceNumeric(param));
+    if (terms.length === 1) {
+      return terms[0];
+    }
+    return `(${terms.join(' + ')})`;
   }
 
   average(params: string[]): string {
-    return `AVG(${this.joinParams(params)})`;
+    if (params.length === 0) {
+      return '0';
+    }
+    const numerator = this.sum(params);
+    return `(${numerator}) / ${params.length}`;
   }
 
   max(params: string[]): string {
@@ -399,7 +426,7 @@ export class SelectQuerySqlite extends SelectQueryAbstract {
   }
 
   lastModifiedTime(): string {
-    return `"__last_modified_time"`;
+    return this.qualifySystemColumn('__last_modified_time');
   }
 
   minute(date: string): string {
@@ -445,7 +472,7 @@ export class SelectQuerySqlite extends SelectQueryAbstract {
   }
 
   createdTime(): string {
-    return `"__created_time"`;
+    return this.qualifySystemColumn('__created_time');
   }
 
   // Logical Functions
@@ -546,11 +573,11 @@ export class SelectQuerySqlite extends SelectQueryAbstract {
 
   // System Functions
   recordId(): string {
-    return `__id`;
+    return this.qualifySystemColumn('__id');
   }
 
   autoNumber(): string {
-    return `__auto_number`;
+    return this.qualifySystemColumn('__auto_number');
   }
 
   textAll(value: string): string {
