@@ -26,9 +26,9 @@ import {
   UserEdit as LastModifiedByIcon,
   EyeOff,
   MagicAi,
+  MousePointerClick as MousePointerClickIcon,
 } from '@teable/icons';
 
-import { MousePointerClick } from 'lucide-react';
 import { useCallback } from 'react';
 import { useTranslation } from '../context/app/i18n';
 import {
@@ -225,7 +225,7 @@ export const useFieldStaticGetter = () => {
               label: t('common.click'),
               color: Colors.Teal,
             },
-            Icon: getIcon(MousePointerClick),
+            Icon: getIcon(MousePointerClickIcon),
           };
         default:
           throw new Error(`field type: ${type} has not define statics`);
