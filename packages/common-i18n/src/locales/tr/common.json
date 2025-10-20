@@ -143,7 +143,8 @@
     },
     "nav": {
       "settings": "Ayarlar",
-      "logout": "Çıkış yap"
+      "logout": "Çıkış yap",
+      "contactSupport": "Destek ile İletişim"
     },
     "integration": {
       "title": "Entegrasyonlar",
