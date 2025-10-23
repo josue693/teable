@@ -1,5 +1,6 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/naming-convention */
+import https from 'https';
 import { join, resolve } from 'path';
 import type { Readable } from 'stream';
 import {
@@ -12,7 +13,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { getRandomString } from '@teable/core';
 import * as fse from 'fs-extra';
@@ -27,15 +28,20 @@ import type { IPresignParams, IPresignRes, IObjectMeta, IRespHeaders } from './t
 export class S3Storage implements StorageAdapter {
   private s3Client: S3Client;
   private s3ClientPrivateNetwork: S3Client;
+  private httpsAgent: https.Agent;
+  private s3ClientPreSigner: S3Client;
+  private logger = new Logger(S3Storage.name);
 
   constructor(@StorageConfig() readonly config: IStorageConfig) {
     const { endpoint, region, accessKey, secretKey, maxSockets } = this.config.s3;
     this.checkConfig();
+    this.httpsAgent = new https.Agent({
+      maxSockets,
+      keepAlive: true,
+    });
     const requestHandler = maxSockets
       ? new NodeHttpHandler({
-          httpsAgent: {
-            maxSockets: maxSockets,
-          },
+          httpsAgent: this.httpsAgent,
         })
       : undefined;
     this.s3Client = new S3Client({
@@ -49,6 +55,60 @@ export class S3Storage implements StorageAdapter {
     });
     this.s3ClientPrivateNetwork = this.s3Client;
     fse.ensureDirSync(StorageAdapter.TEMPORARY_DIR);
+
+    this.s3ClientPreSigner = this.config.privateBucketEndpoint
+      ? new S3Client({
+          region,
+          endpoint,
+          bucketEndpoint: true,
+          requestHandler,
+          credentials: {
+            accessKeyId: accessKey,
+            secretAccessKey: secretKey,
+          },
+        })
+      : this.s3Client;
+
+    const logS3ConnectionsRate = Number(process.env.LOG_S3_CONNECTIONS_RATE);
+    if (Number.isNaN(logS3ConnectionsRate)) {
+      this.logger.log('LOG_S3_CONNECTIONS_RATE not set, skipping log');
+      return;
+    }
+    this.logger.log(`Logging S3 connections rate every ${logS3ConnectionsRate} milliseconds`);
+    setInterval(() => {
+      const countRecords: Record<
+        string,
+        { socketsCount: number; freeSocketsCount: number; requestsCount: number }
+      > = {};
+      Object.entries(this.httpsAgent.sockets).forEach(([key, sockets]) => {
+        if (sockets) {
+          const currentCountRecord = countRecords[key] ?? {};
+          countRecords[key] = {
+            ...countRecords[key],
+            socketsCount: (currentCountRecord?.socketsCount ?? 0) + sockets.length,
+          };
+        }
+      });
+      Object.entries(this.httpsAgent.freeSockets).forEach(([key, sockets]) => {
+        if (sockets) {
+          const currentCountRecord = countRecords[key] ?? {};
+          countRecords[key] = {
+            ...countRecords[key],
+            freeSocketsCount: (currentCountRecord?.freeSocketsCount ?? 0) + sockets.length,
+          };
+        }
+      });
+      Object.entries(this.httpsAgent.requests).forEach(([key, requests]) => {
+        if (requests) {
+          const currentCountRecord = countRecords[key] ?? {};
+          countRecords[key] = {
+            ...countRecords[key],
+            requestsCount: (currentCountRecord?.requestsCount ?? 0) + requests.length,
+          };
+        }
+      });
+      this.logger.log(`httpsAgent connections: ${JSON.stringify(countRecords, null, 2)}`);
+    }, logS3ConnectionsRate);
   }
 
   private checkConfig() {
@@ -71,6 +131,14 @@ export class S3Storage implements StorageAdapter {
     if (this.config.uploadMethod.toLocaleLowerCase() !== 'put') {
       throw new BadRequestException('S3 upload method must be put');
     }
+  }
+
+  private replaceBucketEndpoint(bucket: string, internal?: boolean) {
+    const { privateBucketEndpoint, privateBucket } = this.config;
+    if (privateBucketEndpoint && bucket === privateBucket && !internal) {
+      return privateBucketEndpoint;
+    }
+    return bucket;
   }
 
   async presigned(bucket: string, dir: string, params: IPresignParams): Promise<IPresignRes> {
@@ -124,7 +192,7 @@ export class S3Storage implements StorageAdapter {
       ContentLength: size,
       ContentType: s3Mimetype = 'application/octet-stream',
       ETag: hash,
-    } = await this.s3Client.send(command);
+    } = await this.s3ClientPrivateNetwork.send(command);
     const mimetype = s3Mimetype || 'application/octet-stream';
     if (!size || !mimetype || !hash) {
       throw new BadRequestException('Invalid object meta');
@@ -142,7 +210,7 @@ export class S3Storage implements StorageAdapter {
       Bucket: bucket,
       Key: path,
     });
-    const { Body } = await this.s3Client.send(getObjectCommand);
+    const { Body } = await this.s3ClientPrivateNetwork.send(getObjectCommand);
     const stream = Body as Readable;
     if (!stream) {
       throw new BadRequestException('Invalid image stream');
@@ -171,12 +239,12 @@ export class S3Storage implements StorageAdapter {
     respHeaders?: IRespHeaders
   ): Promise<string> {
     const command = new GetObjectCommand({
-      Bucket: bucket,
+      Bucket: this.replaceBucketEndpoint(bucket),
       Key: path,
       ResponseContentDisposition: respHeaders?.['Content-Disposition'],
     });
 
-    return getSignedUrl(this.s3Client, command, {
+    return getSignedUrl(this.s3ClientPreSigner, command, {
       expiresIn: expiresIn ?? second(this.config.tokenExpireIn),
     });
   }
@@ -198,7 +266,7 @@ export class S3Storage implements StorageAdapter {
       ContentLanguage: metadata['Content-Language'] as string,
       ContentMD5: metadata['Content-MD5'] as string,
     });
-    return this.s3Client
+    return this.s3ClientPrivateNetwork
       .send(command)
       .then((res) => ({
         hash: res.ETag!,
@@ -268,7 +336,7 @@ export class S3Storage implements StorageAdapter {
         Bucket: bucket,
         Key: path,
       });
-      await this.s3Client.send(command);
+      await this.s3ClientPrivateNetwork.send(command);
       return true;
     } catch (error) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -298,8 +366,9 @@ export class S3Storage implements StorageAdapter {
       Bucket: bucket,
       Key: path,
     });
-    const { Body: stream, ContentType: mimetype } = await this.s3Client.send(command);
+    const { Body: stream, ContentType: mimetype } = await this.s3ClientPrivateNetwork.send(command);
     if (!mimetype?.startsWith('image/')) {
+      (stream as Readable)?.destroy?.();
       throw new BadRequestException('Invalid image');
     }
     if (!stream) {
@@ -332,14 +401,14 @@ export class S3Storage implements StorageAdapter {
       Bucket: bucket,
       Key: path,
     });
-    const { Body: stream } = await this.s3Client.send(command);
+    const { Body: stream } = await this.s3ClientPrivateNetwork.send(command);
     return stream as Readable;
   }
 
   async deleteDir(bucket: string, path: string, throwError: boolean = true) {
     const prefix = path.endsWith('/') ? path : `${path}/`;
 
-    const { Contents } = await this.s3Client.send(
+    const { Contents } = await this.s3ClientPrivateNetwork.send(
       new ListObjectsV2Command({
         Bucket: bucket,
         Prefix: prefix,
@@ -349,7 +418,7 @@ export class S3Storage implements StorageAdapter {
     if (!Contents || Contents.length === 0) return;
 
     try {
-      await this.s3Client.send(
+      await this.s3ClientPrivateNetwork.send(
         new DeleteObjectsCommand({
           Bucket: bucket,
           Delete: {
