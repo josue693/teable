@@ -103,6 +103,12 @@
       "expressionRequired": "式は必須です",
       "unsupportedTip": "ロールアップはリンクフィールドとロールアップフィールドのみサポートします"
     },
+    "conditionalRollup": {
+      "filterRequired": "フィルターには少なくとも1つの条件が必要です"
+    },
+    "conditionalLookup": {
+      "filterRequired": "条件付き検索には少なくとも1つのフィルター条件が必要です"
+    },
     "aiConfig": {
       "modelKeyRequired": "モデルは必須です",
       "typeNotSupported": "サポートされていないAIタイプ",
@@ -271,13 +277,39 @@
       "attachment": "添付ファイル",
       "checkbox": "チェックボックス",
       "rollup": "ロールアップ",
+      "conditionalRollup": "条件付きロールアップ",
       "user": "ユーザー",
       "rating": "評価",
       "autoNumber": "自動番号",
       "lookup": "関連テーブルから検索",
+      "conditionalLookup": "条件付き検索",
       "button": "ボタン",
       "createdBy": "作成者",
       "lastModifiedBy": "最終更新者"
+    },
+    "description": {
+      "singleLineText": "名前やタイトルなどの短いテキストを保存します。",
+      "longText": "長めのメモや説明を記録します。",
+      "singleSelect": "リストから1つの選択肢を選びます。",
+      "number": "書式を保った数値を管理します。",
+      "multipleSelect": "複数の選択肢でレコードにタグ付けします。",
+      "link": "このレコードを別のテーブルと関連付けます。",
+      "formula": "他のフィールドから値を計算します。",
+      "date": "日付や時間を記録します。",
+      "createdTime": "レコードが作成された日時を表示します。",
+      "lastModifiedTime": "最新の更新日時を表示します。",
+      "attachment": "ファイルや画像をアップロードします。",
+      "checkbox": "シンプルなオン／オフを切り替えます。",
+      "rollup": "関連レコードを数式で集計します。",
+      "conditionalRollup": "条件に基づいてデータを集計します。",
+      "user": "レコードをワークスペースメンバーに割り当てます。",
+      "rating": "カスタムアイコンで項目に評価を付けます。",
+      "autoNumber": "各レコードに連番を付与します。",
+      "lookup": "関連レコードの値を表示します。",
+      "conditionalLookup": "設定したフィルター条件に合致する関連値を表示します。",
+      "button": "クリック可能なボタンでアクションを実行します。",
+      "createdBy": "レコードを作成したユーザーを表示します。",
+      "lastModifiedBy": "最後に編集したユーザーを表示します。"
     },
     "link": {
       "oneWay": "一方向",
@@ -758,8 +790,10 @@
     "tip": {
       "editing": "編集中...",
       "edited": "(編集済み)",
-      "onNotify": "オフにすると、あなたに関連するコメントのみ通知されます",
-      "offNotify": "オンにすると、すべてのアクティビティが通知されます",
+      "notifyAll": "すべてのコメントを通知",
+      "notifyRelatedToMe": "関連するコメントを通知",
+      "all": "すべて",
+      "relatedToMe": "関連するコメント",
       "reactionUserSuffix": "{{emoji}}の絵文字でリアクションしました",
       "me": "あなた",
       "connection": "と"
@@ -796,6 +830,9 @@
     "viewNotFound": "ビューが見つかりません",
     "requestTimeout": "要求タイムアウト",
     "failedDependency": "依存操作失敗",
+    "automationNodeParseError": "自動化ノード解析エラー",
+    "automationNodeNeedTest": "自動化ノードはテストが必要です",
+    "automationNodeTestOutdated": "自動化ノードのテストが古くなっています",
     "custom": {
       "fieldValueNotNull": "\"{{tableName}}\" フィールド \"{{fieldName}}\" は空の値を許可しません。送信する前に完全に入力してください。",
       "fieldValueDuplicate": "\"{{tableName}}\" フィールド \"{{fieldName}}\" は重複する値を許可しません。送信する前に一意の値を入力してください。",
@@ -804,8 +841,19 @@
       "searchTimeOut": "検索が期限切れ、検索範囲を狭めて再試行してください。",
       "dependencyNodeRequire": "依存ノードがテストされていません。前のノードをテストしてください。"
     },
+    "email": {
+      "testEmailError": "メール設定エラー {{message}}"
+    },
     "automation": {
-      "buttonClickTriggerDuplicated": "このボタンフィールドはすでに {{name}}[{{id}}] この自動化プロセスにバインドされています。別のボタンフィールドを選択してください"
+      "buttonClickTriggerDuplicated": "このボタンフィールドはすでに {{name}}[{{id}}] この自動化プロセスにバインドされています。別のボタンフィールドを選択してください",
+      "triggerNotFound": "トリガーが見つかりません",
+      "nodeNotFound": "{{nodeId}} ノードが見つかりません",
+      "workflowNotFound": "{{workflowId}} ワークフローが見つかりません",
+      "triggerTestFailed": "トリガーテストが失敗しました。トリガーの設定を確認してください",
+      "workflowTestFailed": "ワークフローテストが失敗しました。ワークフローの設定を確認してください",
+      "nodeParseError": "{{name}} ノード設定が不完全またはエラーがあります。ノード設定を確認してください",
+      "nodeNeedTest": "{{name}} ノードはテストが必要です",
+      "nodeTestOutdated": "{{name}} ノードのテストは古くなっています"
     },
     "permission": {
       "createRecordWithDeniedFields": "フィールド({{fields}})を含むレコードを作成する権限がありません",

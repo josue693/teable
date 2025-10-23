@@ -147,7 +147,12 @@
         "title": "Cálculo",
         "formula": "Fórmula"
       },
-      "lookup": {},
+      "lookup": {
+        "title": "{{lookupFieldName}} (de {{linkFieldName}})"
+      },
+      "conditionalLookup": {
+        "title": "{{lookupFieldName}} (filtrado de {{tableName}})"
+      },
       "rollup": {
         "rollup": "Acurrucado",
         "selectAnRollupFunction": "Seleccione una función enrollable",
@@ -226,7 +231,7 @@
       "self": "Ser",
       "selectTable": "Seleccionar tabla ...",
       "selectBase": "Seleccione una base ...",
-      "linkFromExternalBase": "Enlace desde la base externa",
+      "linkFromAnotherBase": "Enlace desde la base externa",
       "inSelfLink": "en retroceso",
       "betweenTwoTables": "Entre dos mesas",
       "style": "Estilo",
@@ -238,7 +243,8 @@
       "calculating": "Calculador...",
       "doSaveChanges": "¿Quieres guardar los cambios que hiciste?",
       "linkFieldToLookup": "Campo de registro vinculado para usar para la búsqueda",
-      "lookupToTable": "Campo de {{tableName}} que desea buscar",
+      "lookupToTable": "Campo de <bold>{{tableName}}</bold> que desea buscar",
+      "rollupToTable": "Campo de <bold>{{tableName}}</bold> que desea buscar",
       "selectField": "Seleccione un campo ...",
       "linkTable": "Tabla de enlace",
       "linkBase": "Base de enlace",
@@ -255,7 +261,18 @@
       "filter": "Registros de filtro",
       "hideFields": "Ocultar campos",
       "moreOptions": "Más opciones",
-      "allowNewOptionsWhenEditing": "Permitir nuevas opciones al editar"
+      "allowNewOptionsWhenEditing": "Permitir nuevas opciones al editar",
+      "conditionalLookup": {
+        "sortLimitToggleLabel": "Sort linked records and limit the number of matches",
+        "sortLabel": "Sort results",
+        "orderPlaceholder": "Select an order",
+        "clearSort": "Clear sort",
+        "limitLabel": "Maximum records to include",
+        "limitPlaceholder": "Leave blank to include all matches",
+        "limitHint": "We only keep up to {{limit}} matching records.",
+        "sortMissingWarningTitle": "Sorting field unavailable",
+        "sortMissingWarningDescription": "The field that powered this sort was deleted. Results ignore the sort and only enforce the limit."
+      }
     },
     "subTitle": {
       "link": "Enlace a los registros en la tabla que elija",
@@ -272,6 +289,7 @@
       "rating": "Agregue una calificación en una escala predefinida.",
       "formula": "Calcule los valores basados ​​en los campos.",
       "rollup": "Resumir los datos de los registros vinculados.",
+      "conditionalLookup": "Muestra valores vinculados que cumplen sus filtros.",
       "count": "Cuente el número de registros vinculados.",
       "createdTime": "Vea la fecha y hora en que se creó cada registro.",
       "lastModifiedTime": "Vea la fecha y hora de la edición más reciente a algunos o todos los campos en un registro.",

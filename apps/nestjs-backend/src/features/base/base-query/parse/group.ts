@@ -10,6 +10,7 @@ export class QueryGroup {
       dbProvider: IDbProvider;
       queryBuilder: Knex.QueryBuilder;
       fieldMap: Record<string, IFieldInstance>;
+      knex: Knex;
     }
   ): {
     queryBuilder: Knex.QueryBuilder;
@@ -18,18 +19,21 @@ export class QueryGroup {
     if (!group) {
       return { queryBuilder: content.queryBuilder, fieldMap: content.fieldMap };
     }
-    const { queryBuilder, fieldMap, dbProvider } = content;
+    const { queryBuilder, fieldMap, dbProvider, knex } = content;
     const fieldGroup = group.filter((v) => v.type === BaseQueryColumnType.Field);
     const aggregationGroup = group.filter((v) => v.type === BaseQueryColumnType.Aggregation);
     dbProvider
       .groupQuery(
         queryBuilder,
         fieldMap,
-        fieldGroup.map((v) => v.column)
+        fieldGroup.map((v) => v.column),
+        undefined,
+        undefined
       )
       .appendGroupBuilder();
     aggregationGroup.forEach((v) => {
-      queryBuilder.groupBy(fieldMap[v.column].dbFieldName);
+      // Group by the aggregation column alias, quoted to preserve case
+      queryBuilder.groupBy(knex.ref(v.column));
     });
     return {
       queryBuilder,

@@ -18,6 +18,17 @@ type IRecordUpdatePayload = {
   oldField: IFieldVo | undefined;
 };
 
+export function getFieldIdsFromRecord(record: IRecord | IRecord[]) {
+  const records = Array.isArray(record) ? record : [record];
+  const fieldIds: string[] = [];
+  for (const r of records) {
+    if (r?.fields) {
+      fieldIds.push(...Object.keys(r.fields));
+    }
+  }
+  return fieldIds;
+}
+
 export class RecordCreateEvent extends OpEvent<IRecordCreatePayload> {
   public readonly name = Events.TABLE_RECORD_CREATE;
   public readonly rawOpType = RawOpType.Create;

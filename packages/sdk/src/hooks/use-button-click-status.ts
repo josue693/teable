@@ -39,7 +39,7 @@ export const useButtonClickStatus = (tableId: string, shareId?: string) => {
         runId: res.data.runId,
         recordId: ro.recordId,
         fieldId: ro.fieldId,
-        loading: true,
+        loading: !!res.data.runId,
         name: ro.name,
       });
     },

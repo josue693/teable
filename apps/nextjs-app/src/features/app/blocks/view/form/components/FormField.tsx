@@ -24,6 +24,7 @@ export const FormField: FC<IFormFieldEditorProps> = (props) => {
   const { id: fieldId, type, name, description, isLookup, aiConfig } = field;
   const Icon = getFieldStatic(type, {
     isLookup,
+    isConditionalLookup: field.isConditionalLookup,
     hasAiConfig: Boolean(aiConfig),
   }).Icon;
 
@@ -45,7 +46,7 @@ export const FormField: FC<IFormFieldEditorProps> = (props) => {
         cellValue={value}
         field={field}
         onChange={onChange}
-        className={isError ? 'border-red-500' : ''}
+        className={isError ? 'border-red-500 focus-visible:ring-transparent' : ''}
       />
 
       {isError && <div className="mt-1 text-xs text-red-500">{t('required')}</div>}

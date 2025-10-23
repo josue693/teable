@@ -1,7 +1,10 @@
+import { useMutation } from '@tanstack/react-query';
 import { ViewType } from '@teable/core';
 import { Pencil, Trash2, Export, Copy, Lock, Star } from '@teable/icons';
+import { duplicateView } from '@teable/openapi';
 import { useTableId, useTablePermission } from '@teable/sdk/hooks';
 import type { IViewInstance } from '@teable/sdk/model';
+import { Spin } from '@teable/ui-lib/base';
 import {
   Button,
   Separator,
@@ -23,26 +26,42 @@ import { VIEW_ICON_MAP } from '../constant';
 import { useGridSearchStore } from '../grid/useGridSearchStore';
 import { PinViewItem } from './PinViewItem';
 import { useDeleteView } from './useDeleteView';
-import { useDuplicateView } from './useDuplicateView';
 
 interface IProps {
   view: IViewInstance;
   removable: boolean;
   isActive: boolean;
+  onEdit: (value: boolean) => void;
 }
 
-export const ViewListItem: React.FC<IProps> = ({ view, removable, isActive }) => {
+export const ViewListItem: React.FC<IProps> = ({ view, removable, isActive, onEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [open, setOpen] = useState(false);
   const tableId = useTableId();
   const router = useRouter();
   const baseId = router.query.baseId as string;
-  const duplicateView = useDuplicateView(view);
   const deleteView = useDeleteView(view.id);
   const permission = useTablePermission();
   const { t } = useTranslation('table');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewItemRef = useRef<HTMLDivElement>(null);
+  const { mutateAsync: duplicateViewFn, isLoading: isDuplicateViewLoading } = useMutation({
+    mutationFn: () => duplicateView(tableId!, view.id),
+    onSuccess: (data) => {
+      const { id } = data?.data || {};
+      if (!id) {
+        return;
+      }
+      router.push(
+        {
+          pathname: '/base/[baseId]/[tableId]/[viewId]',
+          query: { baseId, tableId: tableId, viewId: id },
+        },
+        undefined,
+        { shallow: Boolean(id) }
+      );
+    },
+  });
   const { trigger } = useDownload({
     downloadUrl: `/api/export/${tableId}?viewId=${view.id}`,
     key: 'view',
@@ -50,12 +69,13 @@ export const ViewListItem: React.FC<IProps> = ({ view, removable, isActive }) =>
   const { resetSearchHandler } = useGridSearchStore();
 
   useEffect(() => {
-    isActive &&
+    if (isActive) {
       setTimeout(() => {
         viewItemRef.current?.scrollIntoView({
           behavior: 'smooth',
         });
       }, 0);
+    }
   }, [isActive]);
 
   const navigateHandler = () => {
@@ -108,6 +128,7 @@ export const ViewListItem: React.FC<IProps> = ({ view, removable, isActive }) =>
               view.updateName(e.target.value);
             }
             setIsEditing(false);
+            onEdit(false);
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -115,6 +136,7 @@ export const ViewListItem: React.FC<IProps> = ({ view, removable, isActive }) =>
                 view.updateName(e.currentTarget.value);
               }
               setIsEditing(false);
+              onEdit(false);
             }
             e.stopPropagation();
           }}
@@ -135,7 +157,10 @@ export const ViewListItem: React.FC<IProps> = ({ view, removable, isActive }) =>
         }
       )}
       onDoubleClick={() => {
-        permission['view|update'] && setIsEditing(true);
+        if (permission['view|update']) {
+          setIsEditing(true);
+          onEdit(true);
+        }
       }}
       onKeyDown={(e) => {
         if (isEditing) {
@@ -177,6 +202,7 @@ export const ViewListItem: React.FC<IProps> = ({ view, removable, isActive }) =>
                   variant="ghost"
                   onClick={() => {
                     setIsEditing(true);
+                    onEdit(true);
                   }}
                   className="flex justify-start"
                 >
@@ -203,13 +229,15 @@ export const ViewListItem: React.FC<IProps> = ({ view, removable, isActive }) =>
                     size="xs"
                     variant="ghost"
                     onClick={async () => {
-                      await duplicateView();
+                      await duplicateViewFn();
                       setOpen(false);
                     }}
                     className="flex justify-start"
+                    disabled={isDuplicateViewLoading}
                   >
                     <Copy className="size-3" />
                     {t('view.action.duplicate')}
+                    {isDuplicateViewLoading && <Spin className="size-3 shrink-0" />}
                   </Button>
                 </>
               )}

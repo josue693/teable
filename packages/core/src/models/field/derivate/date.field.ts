@@ -5,31 +5,14 @@ import utc from 'dayjs/plugin/utc';
 import { z } from 'zod';
 import type { FieldType, CellValueType } from '../constant';
 import { FieldCore } from '../field';
-import {
-  TimeFormatting,
-  datetimeFormattingSchema,
-  defaultDatetimeFormatting,
-  formatDateToString,
-} from '../formatting';
+import type { IFieldVisitor } from '../field-visitor.interface';
+import { TimeFormatting, defaultDatetimeFormatting, formatDateToString } from '../formatting';
+import type { IDateFieldOptions } from './date-option.schema';
+import { dateFieldOptionsSchema } from './date-option.schema';
 
 extend(timezone);
 extend(customParseFormat);
 extend(utc);
-
-export const dateFieldOptionsSchema = z
-  .object({
-    formatting: datetimeFormattingSchema,
-    defaultValue: z
-      .enum(['now'] as const)
-      .optional()
-      .openapi({
-        description:
-          'Whether the new row is automatically filled with the current time, caveat: the defaultValue is just a flag, it dose not effect the storing value of the record',
-      }),
-  })
-  .describe('options for date fields');
-
-export type IDateFieldOptions = z.infer<typeof dateFieldOptionsSchema>;
 
 export const dataFieldCellValueSchema = z.string().datetime({ precision: 3, offset: true });
 
@@ -39,6 +22,8 @@ export class DateFieldCore extends FieldCore {
   type!: FieldType.Date;
 
   options!: IDateFieldOptions;
+
+  meta?: undefined;
 
   cellValueType!: CellValueType.DateTime;
 
@@ -56,16 +41,40 @@ export class DateFieldCore extends FieldCore {
 
     return this.item2String(cellValue as string);
   }
+
   private defaultTzFormat(value: string) {
     try {
       const formatValue = dayjs.tz(value, this.options.formatting.timeZone);
       if (!formatValue.isValid()) return null;
       return formatValue.toISOString();
-    } catch (e) {
+    } catch {
       return null;
     }
   }
 
+  private parseUsingFieldFormatting(value: string): string | null {
+    const hasTime = /\d{1,2}:\d{2}(?::\d{2})?/.test(value);
+    const dateFormat = this.options.formatting.date;
+    const timeFormat =
+      hasTime && this.options.formatting.time !== TimeFormatting.None
+        ? this.options.formatting.time
+        : null;
+    const format = timeFormat ? `${dateFormat} ${timeFormat}` : dateFormat;
+
+    try {
+      const check = dayjs(value, format, true).isValid();
+      if (!check) return null;
+      const formatValue = dayjs.tz(value, format, this.options.formatting.timeZone);
+      if (!formatValue.isValid()) return null;
+      const isoString = formatValue.toISOString();
+      if (isoString.startsWith('-')) return null;
+      return isoString;
+    } catch {
+      return null;
+    }
+  }
+
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   convertStringToCellValue(value: string): string | null {
     if (this.isLookup) {
       return null;
@@ -77,22 +86,15 @@ export class DateFieldCore extends FieldCore {
       return dayjs().toISOString();
     }
 
-    const hasTime = /\d{1,2}:\d{2}(?::\d{2})?/.test(value);
-
-    const format = `${this.options.formatting.date}${hasTime && this.options.formatting.time !== TimeFormatting.None ? ' ' + this.options.formatting.time : ''}`;
-
-    try {
-      const formatValue = dayjs.tz(value, format, this.options.formatting.timeZone);
-      if (!formatValue.isValid()) return null;
-      const formatValueISOString = formatValue.toISOString();
-      // ISOString start with '-' means the date is invalid
-      if (formatValueISOString.startsWith('-')) {
-        return null;
-      }
-      return formatValue.toISOString();
-    } catch (e) {
-      return this.defaultTzFormat(value);
+    const dayjsObj = dayjs(value);
+    if (dayjsObj.isValid() && dayjsObj.toISOString() === value) {
+      return value;
     }
+
+    const formatted = this.parseUsingFieldFormatting(value);
+    if (formatted) return formatted;
+
+    return this.defaultTzFormat(value);
   }
 
   item2String(item?: unknown) {
@@ -127,5 +129,9 @@ export class DateFieldCore extends FieldCore {
       return z.array(z.string()).nonempty().nullable().safeParse(cellValue);
     }
     return z.string().nullable().safeParse(cellValue);
+  }
+
+  accept<T>(visitor: IFieldVisitor<T>): T {
+    return visitor.visitDateField(this);
   }
 }

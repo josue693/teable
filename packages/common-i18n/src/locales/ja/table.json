@@ -148,6 +148,9 @@
       "lookup": {
         "title": "{{linkFieldName}} から {{lookupFieldName}} を見つける"
       },
+      "conditionalLookup": {
+        "title": "{{tableName}} から {{lookupFieldName}} をフィルター表示"
+      },
       "rollup": {
         "title": "{{linkFieldName}} の {{lookupFieldName}} の要約",
         "rollup": "ロールアップ",
@@ -237,7 +240,8 @@
       "calculating": "計算中...",
       "doSaveChanges": "変更内容を保存しますか？",
       "linkFieldToLookup": "参照用リンクレコードフィールド",
-      "lookupToTable": "参照したい {{tableName}} フィールド",
+      "lookupToTable": "参照したい <bold>{{tableName}}</bold> フィールド",
+      "rollupToTable": "<bold>{{tableName}}</bold> からロールアップしたいフィールド",
       "selectField": "フィールドを選択...",
       "linkTable": "リンクテーブル",
       "noLinkTip": "参照するリンクされたレコードがありません。別のレコードへのリンクフィールドを追加して、参照を再度構成してください。",
@@ -251,7 +255,18 @@
       "filter": "レコードをフィルターする",
       "hideFields": "フィールドを非表示にする",
       "moreOptions": "オプションを表示",
-      "allowNewOptionsWhenEditing": "編集時に新しいオプションを許可"
+      "allowNewOptionsWhenEditing": "編集時に新しいオプションを許可",
+      "conditionalLookup": {
+        "sortLimitToggleLabel": "Sort linked records and limit the number of matches",
+        "sortLabel": "Sort results",
+        "orderPlaceholder": "Select an order",
+        "clearSort": "Clear sort",
+        "limitLabel": "Maximum records to include",
+        "limitPlaceholder": "Leave blank to include all matches",
+        "limitHint": "We only keep up to {{limit}} matching records.",
+        "sortMissingWarningTitle": "Sorting field unavailable",
+        "sortMissingWarningDescription": "The field that powered this sort was deleted. Results ignore the sort and only enforce the limit."
+      }
     },
     "subTitle": {
       "link": "選択したテーブル内のレコードへのリンク",
@@ -268,6 +283,7 @@
       "rating": "事前に定義された尺度で評価を追加します。",
       "formula": "フィールドに基づいて値を計算します。",
       "rollup": "リンクされたレコードからデータを要約します。",
+      "conditionalLookup": "設定したフィルターに一致する関連値を表示します。",
       "count": "リンクされたレコードの数をカウントします。",
       "createdTime": "各レコードが作成された日時を確認します。",
       "lastModifiedTime": "レコード内の一部またはすべてのフィールドに対する最新の編集の日時を表示します。",

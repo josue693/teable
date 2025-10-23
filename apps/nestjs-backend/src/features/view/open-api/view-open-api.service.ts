@@ -44,7 +44,7 @@ import type {
   IViewShareMetaRo,
 } from '@teable/openapi';
 import { Knex } from 'knex';
-import { keyBy } from 'lodash';
+import { keyBy, pick } from 'lodash';
 import { InjectModel } from 'nest-knexjs';
 import { ClsService } from 'nestjs-cls';
 import { IThresholdConfig, ThresholdConfig } from '../../../configs/threshold.config';
@@ -85,6 +85,9 @@ export class ViewOpenApiService {
       const res = await this.pluginInstall(tableId, {
         name: viewRo.name,
         pluginId: (viewRo.options as IPluginViewOptions).pluginId,
+        shareId: viewRo.shareId,
+        shareMeta: viewRo.shareMeta,
+        enableShare: viewRo.enableShare,
       });
       return this.viewService.getViewById(res.viewId);
     }
@@ -155,7 +158,7 @@ export class ViewOpenApiService {
     );
 
     const orderRawSql = this.dbProvider
-      .sortQuery(queryBuilder, fieldInsMap, sortObjs)
+      .sortQuery(queryBuilder, fieldInsMap, sortObjs, undefined, undefined)
       .getRawSortSQLText();
 
     // build ops
@@ -809,14 +812,18 @@ export class ViewOpenApiService {
 
     const lookupFieldIds = linkFieldInstances.reduce((arr, field) => {
       const { lookupFieldId } = field.options as ILinkFieldOptions;
-      arr.push(lookupFieldId);
+      if (lookupFieldId) {
+        arr.push(lookupFieldId);
+      }
       return arr;
     }, [] as string[]);
 
     const linkFieldTableMap = linkFields.reduce(
       (map, field) => {
         const { foreignTableId } = JSON.parse(field.options as string) as ILinkFieldOptions;
-        map[field.id] = foreignTableId;
+        if (foreignTableId) {
+          map[field.id] = foreignTableId;
+        }
         return map;
       },
       {} as Record<string, string>
@@ -866,9 +873,16 @@ export class ViewOpenApiService {
     return res;
   }
 
-  async pluginInstall(tableId: string, ro: IViewInstallPluginRo) {
+  async pluginInstall(
+    tableId: string,
+    ro: IViewInstallPluginRo & {
+      shareId?: string;
+      shareMeta?: IViewShareMetaRo;
+      enableShare?: boolean;
+    }
+  ) {
     const userId = this.cls.get('user.id');
-    const { name, pluginId } = ro;
+    const { name, pluginId, shareId, shareMeta, enableShare } = ro;
     const plugin = await this.prismaService.txClient().plugin.findUnique({
       where: {
         id: pluginId,
@@ -896,6 +910,9 @@ export class ViewOpenApiService {
       const view = await this.createViewInner(tableId, {
         name: viewName,
         type: ViewType.Plugin,
+        enableShare,
+        shareMeta,
+        shareId,
         options: {
           pluginInstallId,
           pluginId,
@@ -968,5 +985,49 @@ export class ViewOpenApiService {
       baseId: table.baseId,
       url: pluginInstall.plugin.url || undefined,
     };
+  }
+
+  async duplicateView(tableId: string, viewId: string) {
+    const view = await this.viewService.getViewById(viewId);
+    const { options: optionsRaw } = await this.prismaService.txClient().view.findUniqueOrThrow({
+      where: { id: viewId, deletedTime: null },
+      select: { options: true },
+    });
+    const options = optionsRaw ? JSON.parse(optionsRaw) : undefined;
+    return this.prismaService.$tx(async (prisma) => {
+      const viewVo = await this.createView(tableId, {
+        ...pick(view, [
+          'name',
+          'type',
+          'description',
+          'filter',
+          'group',
+          'columnMeta',
+          'sort',
+          'enableShare',
+          'shareMeta',
+          'shareId',
+          'isLocked',
+        ]),
+        options,
+        shareId: view.shareId ? generateShareId() : undefined,
+      });
+
+      if (view.type === ViewType.Plugin) {
+        const originPluginInstallId = (view.options as IPluginViewOptions)?.pluginInstallId;
+        const newPluginInstallId = (viewVo.options as IPluginViewOptions)?.pluginInstallId;
+        const { storage: pluginStorage } = await prisma.pluginInstall.findUniqueOrThrow({
+          where: { id: originPluginInstallId },
+          select: { storage: true },
+        });
+
+        await prisma.pluginInstall.update({
+          where: { id: newPluginInstallId },
+          data: { storage: pluginStorage },
+        });
+      }
+
+      return viewVo;
+    });
   }
 }

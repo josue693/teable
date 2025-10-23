@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import type {
   IFieldVo,
   IDateFieldOptions,
@@ -14,10 +15,20 @@ import type {
   ICheckboxFieldOptions,
   ILongTextFieldOptions,
   IButtonFieldOptions,
+  IConditionalRollupFieldOptions,
 } from '@teable/core';
-import { FieldType } from '@teable/core';
+import {
+  CellValueType,
+  FieldType,
+  getRollupFunctionsByCellValueType,
+  isLinkLookupOptions,
+} from '@teable/core';
+import { getField } from '@teable/openapi';
+import { useFields } from '@teable/sdk/hooks';
+import { useMemo } from 'react';
 import { ButtonOptions } from './options/ButtonOptions';
 import { CheckboxOptions } from './options/CheckboxOptions';
+import { ConditionalRollupOptions } from './options/ConditionalRollupOptions';
 import { CreatedTimeOptions } from './options/CreatedTimeOptions';
 import { DateOptions } from './options/DateOptions';
 import { FormulaOptions } from './options/FormulaOptions';
@@ -39,6 +50,22 @@ export interface IFieldOptionsProps {
 
 export const FieldOptions: React.FC<IFieldOptionsProps> = ({ field, onChange, onSave }) => {
   const { id, type, isLookup, cellValueType, isMultipleCellValue, options } = field;
+  const lookupField = useRollupLookupField(field.lookupOptions);
+  const lookupCellValueType = useMemo(
+    () => normalizeCellValueType(lookupField?.cellValueType),
+    [lookupField?.cellValueType]
+  );
+  const normalizedFieldCellValueType = useMemo(
+    () => normalizeCellValueType(cellValueType),
+    [cellValueType]
+  );
+  const effectiveRollupCellValueType = lookupCellValueType ?? normalizedFieldCellValueType;
+  const rollupAvailableExpressions = useMemo(() => {
+    return effectiveRollupCellValueType
+      ? getRollupFunctionsByCellValueType(effectiveRollupCellValueType)
+      : undefined;
+  }, [effectiveRollupCellValueType]);
+  const effectiveIsMultiple = isMultipleCellValue ?? lookupField?.isMultipleCellValue ?? undefined;
   switch (type) {
     case FieldType.SingleLineText:
       return (
@@ -142,8 +169,17 @@ export const FieldOptions: React.FC<IFieldOptionsProps> = ({ field, onChange, on
         <RollupOptions
           options={options as IRollupFieldOptions}
           isLookup={isLookup}
-          cellValueType={cellValueType}
-          isMultipleCellValue={isMultipleCellValue}
+          cellValueType={effectiveRollupCellValueType}
+          isMultipleCellValue={effectiveIsMultiple}
+          availableExpressions={rollupAvailableExpressions}
+          onChange={onChange}
+        />
+      );
+    case FieldType.ConditionalRollup:
+      return (
+        <ConditionalRollupOptions
+          fieldId={id}
+          options={options as IConditionalRollupFieldOptions}
           onChange={onChange}
         />
       );
@@ -159,4 +195,41 @@ export const FieldOptions: React.FC<IFieldOptionsProps> = ({ field, onChange, on
     default:
       return <></>;
   }
+};
+
+const normalizeCellValueType = (value: unknown): CellValueType | undefined => {
+  if (
+    typeof value === 'string' &&
+    (Object.values(CellValueType) as string[]).includes(value as CellValueType)
+  ) {
+    return value as CellValueType;
+  }
+  return undefined;
+};
+
+const useRollupLookupField = (
+  lookupOptions: IFieldEditorRo['lookupOptions']
+): Pick<IFieldVo, 'cellValueType' | 'isMultipleCellValue'> | undefined => {
+  const linkOptions = isLinkLookupOptions(lookupOptions) ? lookupOptions : undefined;
+  const lookupFieldId = linkOptions?.lookupFieldId;
+  const foreignTableId = linkOptions?.foreignTableId;
+  const fields = useFields({ withHidden: true, withDenied: true });
+
+  const localLookupField = useMemo(() => {
+    if (!lookupFieldId) return undefined;
+    return fields.find((field) => field.id === lookupFieldId);
+  }, [fields, lookupFieldId]);
+
+  const shouldFetchLookupField = Boolean(foreignTableId && lookupFieldId) && !localLookupField;
+
+  const { data: remoteLookupField } = useQuery({
+    queryKey: ['rollup-lookup-field', foreignTableId, lookupFieldId],
+    queryFn: async () => {
+      const res = await getField(foreignTableId!, lookupFieldId!);
+      return res.data;
+    },
+    enabled: shouldFetchLookupField,
+  });
+
+  return localLookupField ?? remoteLookupField;
 };

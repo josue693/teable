@@ -6,24 +6,39 @@ import { FilterWithTable, useFieldFilterLinkContext } from '@teable/sdk/componen
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { useTableId } from '@teable/sdk/hooks';
 import type { IFieldInstance } from '@teable/sdk/model';
+import { createFieldInstance } from '@teable/sdk/model';
 import { Button, Dialog, DialogContent, DialogTrigger } from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'next-i18next';
+import { useMemo } from 'react';
+import { RequireCom } from '@/features/app/blocks/setting/components/RequireCom';
 import { tableConfig } from '@/features/i18n/table.config';
 
 interface ILookupFilterOptionsProps {
   fieldId?: string;
   filter?: IFilter | null;
   foreignTableId: string;
+  contextTableId?: string;
   onChange?: (filter: IFilter | null) => void;
+  enableFieldReference?: boolean;
+  required?: boolean;
 }
 
 export const LookupFilterOptions = (props: ILookupFilterOptionsProps) => {
-  const { fieldId, foreignTableId, filter, onChange } = props;
+  const {
+    fieldId,
+    foreignTableId,
+    filter,
+    onChange,
+    contextTableId,
+    enableFieldReference,
+    required,
+  } = props;
 
   const { t } = useTranslation(tableConfig.i18nNamespaces);
   const currentTableId = useTableId() as string;
+  const tableIdForContext = contextTableId ?? currentTableId;
 
-  const context = useFieldFilterLinkContext(currentTableId, fieldId, !fieldId);
+  const context = useFieldFilterLinkContext(tableIdForContext, fieldId, !fieldId);
 
   const { data: totalFields = [] } = useQuery({
     queryKey: ReactQueryKeys.fieldList(foreignTableId),
@@ -31,7 +46,30 @@ export const LookupFilterOptions = (props: ILookupFilterOptionsProps) => {
     enabled: !!foreignTableId,
   });
 
-  if (!foreignTableId || !totalFields.length) {
+  const { data: selfFieldVos = [] } = useQuery({
+    queryKey: ReactQueryKeys.fieldList(tableIdForContext),
+    queryFn: () => getFields(tableIdForContext!).then((res) => res.data),
+    enabled: !!tableIdForContext,
+  });
+
+  const foreignFieldInstances = useMemo(
+    () => totalFields.map((field) => createFieldInstance(field) as IFieldInstance),
+    [totalFields]
+  );
+
+  const selfFieldInstances = useMemo(
+    () => selfFieldVos.map((field) => createFieldInstance(field) as IFieldInstance),
+    [selfFieldVos]
+  );
+
+  const referenceSource = useMemo(() => {
+    if (!enableFieldReference) {
+      return undefined;
+    }
+    return { fields: selfFieldInstances, tableId: tableIdForContext };
+  }, [enableFieldReference, selfFieldInstances, tableIdForContext]);
+
+  if (!foreignTableId || !foreignFieldInstances.length) {
     return null;
   }
 
@@ -39,7 +77,10 @@ export const LookupFilterOptions = (props: ILookupFilterOptionsProps) => {
     <div className="flex flex-col gap-2 rounded-md border px-2 py-3">
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between">
-          <span>{t('table:field.editor.filter')}</span>
+          <span className="flex items-center gap-0.5">
+            {t('table:field.editor.filter')}
+            {required ? <RequireCom /> : null}
+          </span>
           <Dialog>
             <DialogTrigger asChild>
               <Button size={'xs'} variant={'ghost'}>
@@ -48,9 +89,10 @@ export const LookupFilterOptions = (props: ILookupFilterOptionsProps) => {
             </DialogTrigger>
             <DialogContent className="min-w-96 max-w-fit">
               <FilterWithTable
-                fields={totalFields as IFieldInstance[]}
+                fields={foreignFieldInstances}
                 value={filter ?? null}
                 context={context}
+                referenceSource={referenceSource}
                 onChange={(value) => onChange?.(value)}
               />
             </DialogContent>
@@ -58,9 +100,10 @@ export const LookupFilterOptions = (props: ILookupFilterOptionsProps) => {
         </div>
 
         <FilterWithTable
-          fields={totalFields as IFieldInstance[]}
+          fields={foreignFieldInstances}
           value={filter ?? null}
           context={context}
+          referenceSource={referenceSource}
           onChange={(value) => onChange?.(value)}
         />
       </div>

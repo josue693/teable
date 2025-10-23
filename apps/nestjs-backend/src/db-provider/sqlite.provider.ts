@@ -1,16 +1,41 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 import { Logger } from '@nestjs/common';
-import type { FieldType, IFilter, ILookupOptionsVo, ISortItem } from '@teable/core';
-import { DriverClient } from '@teable/core';
+import type {
+  IFilter,
+  ILookupLinkOptionsVo,
+  ILookupOptionsVo,
+  ISortItem,
+  FieldCore,
+  TableDomain,
+} from '@teable/core';
+import { DriverClient, parseFormulaToSQL, FieldType } from '@teable/core';
 import type { PrismaClient } from '@teable/db-main-prisma';
 import type { IAggregationField, ISearchIndexByQueryRo, TableIndex } from '@teable/openapi';
 import type { Knex } from 'knex';
 import type { IFieldInstance } from '../features/field/model/factory';
-import type { SchemaType } from '../features/field/util';
+import type {
+  IRecordQueryFilterContext,
+  IRecordQuerySortContext,
+  IRecordQueryGroupContext,
+  IRecordQueryAggregateContext,
+} from '../features/record/query-builder/record-query-builder.interface';
+import type {
+  IGeneratedColumnQueryInterface,
+  IFormulaConversionContext,
+  IFormulaConversionResult,
+  ISelectQueryInterface,
+  ISelectFormulaConversionContext,
+} from '../features/record/query-builder/sql-conversion.visitor';
+import {
+  GeneratedColumnSqlConversionVisitor,
+  SelectColumnSqlConversionVisitor,
+} from '../features/record/query-builder/sql-conversion.visitor';
 import type { IAggregationQueryInterface } from './aggregation-query/aggregation-query.interface';
 import { AggregationQuerySqlite } from './aggregation-query/sqlite/aggregation-query.sqlite';
 import type { BaseQueryAbstract } from './base-query/abstract';
 import { BaseQuerySqlite } from './base-query/base-query.sqlite';
+import type { ICreateDatabaseColumnContext } from './create-database-column-query/create-database-column-field-visitor.interface';
+import { CreateSqliteDatabaseColumnFieldVisitor } from './create-database-column-query/create-database-column-field-visitor.sqlite';
 import type {
   IAggregationQueryExtra,
   ICalendarDailyCollectionQueryProps,
@@ -18,10 +43,16 @@ import type {
   IFilterQueryExtra,
   ISortQueryExtra,
 } from './db.provider.interface';
+import type {
+  IDropDatabaseColumnContext,
+  DropColumnOperationType,
+} from './drop-database-column-query/drop-database-column-field-visitor.interface';
+import { DropSqliteDatabaseColumnFieldVisitor } from './drop-database-column-query/drop-database-column-field-visitor.sqlite';
 import { DuplicateAttachmentTableQuerySqlite } from './duplicate-table/duplicate-attachment-table-query.sqlite';
 import { DuplicateTableQuerySqlite } from './duplicate-table/duplicate-query.sqlite';
 import type { IFilterQueryInterface } from './filter-query/filter-query.interface';
 import { FilterQuerySqlite } from './filter-query/sqlite/filter-query.sqlite';
+import { GeneratedColumnQuerySqlite } from './generated-column-query/sqlite/generated-column-query.sqlite';
 import type { IGroupQueryExtra, IGroupQueryInterface } from './group-query/group-query.interface';
 import { GroupQuerySqlite } from './group-query/group-query.sqlite';
 import type { IntegrityQueryAbstract } from './integrity-query/abstract';
@@ -30,6 +61,7 @@ import { SearchQueryAbstract } from './search-query/abstract';
 import { getOffset } from './search-query/get-offset';
 import { IndexBuilderSqlite } from './search-query/search-index-builder.sqlite';
 import { SearchQuerySqliteBuilder, SearchQuerySqlite } from './search-query/search-query.sqlite';
+import { SelectQuerySqlite } from './select-query/sqlite/select-query.sqlite';
 import type { ISortQueryInterface } from './sort-query/sort-query.interface';
 import { SortQuerySqlite } from './sort-query/sqlite/sort-query.sqlite';
 
@@ -99,13 +131,88 @@ export class SqliteProvider implements IDbProvider {
     ];
   }
 
-  modifyColumnSchema(tableName: string, columnName: string, schemaType: SchemaType): string[] {
-    return [
-      this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [tableName, columnName]).toQuery(),
-      this.knex
-        .raw(`ALTER TABLE ?? ADD COLUMN ?? ??`, [tableName, columnName, schemaType])
-        .toQuery(),
-    ];
+  modifyColumnSchema(
+    tableName: string,
+    oldFieldInstance: IFieldInstance,
+    fieldInstance: IFieldInstance,
+    tableDomain: TableDomain,
+    linkContext?: { tableId: string; tableNameMap: Map<string, string> }
+  ): string[] {
+    const queries: string[] = [];
+
+    // First, drop ALL columns associated with the field (including generated columns)
+    queries.push(...this.dropColumn(tableName, oldFieldInstance, linkContext));
+
+    // For Link fields, delegate creation to link service to avoid double creation
+    if (fieldInstance.type === FieldType.Link && !fieldInstance.isLookup) {
+      return queries;
+    }
+
+    const alterTableBuilder = this.knex.schema.alterTable(tableName, (table) => {
+      const createContext: ICreateDatabaseColumnContext = {
+        table,
+        field: fieldInstance,
+        fieldId: fieldInstance.id,
+        dbFieldName: fieldInstance.dbFieldName,
+        unique: fieldInstance.unique,
+        notNull: fieldInstance.notNull,
+        dbProvider: this,
+        tableDomain,
+        tableId: linkContext?.tableId || '',
+        tableName,
+        knex: this.knex,
+        tableNameMap: linkContext?.tableNameMap || new Map(),
+      };
+
+      // Use visitor pattern to recreate columns
+      const visitor = new CreateSqliteDatabaseColumnFieldVisitor(createContext);
+      fieldInstance.accept(visitor);
+    });
+
+    const alterTableQueries = alterTableBuilder.toSQL().map((item) => item.sql);
+    queries.push(...alterTableQueries);
+
+    return queries;
+  }
+
+  createColumnSchema(
+    tableName: string,
+    fieldInstance: IFieldInstance,
+    tableDomain: TableDomain,
+    isNewTable: boolean,
+    tableId: string,
+    tableNameMap: Map<string, string>,
+    isSymmetricField?: boolean,
+    skipBaseColumnCreation?: boolean
+  ): string[] {
+    let visitor: CreateSqliteDatabaseColumnFieldVisitor | undefined = undefined;
+    const alterTableBuilder = this.knex.schema.alterTable(tableName, (table) => {
+      const context: ICreateDatabaseColumnContext = {
+        table,
+        field: fieldInstance,
+        fieldId: fieldInstance.id,
+        dbFieldName: fieldInstance.dbFieldName,
+        unique: fieldInstance.unique,
+        notNull: fieldInstance.notNull,
+        dbProvider: this,
+        tableDomain,
+        isNewTable,
+        tableId,
+        tableName,
+        knex: this.knex,
+        tableNameMap,
+        isSymmetricField,
+        skipBaseColumnCreation,
+      };
+      visitor = new CreateSqliteDatabaseColumnFieldVisitor(context);
+      fieldInstance.accept(visitor);
+    });
+
+    const mainSqls = alterTableBuilder.toSQL().map((item) => item.sql);
+    const additionalSqls =
+      (visitor as CreateSqliteDatabaseColumnFieldVisitor | undefined)?.getSql() ?? [];
+
+    return [...mainSqls, ...additionalSqls];
   }
 
   splitTableName(tableName: string): string[] {
@@ -116,8 +223,22 @@ export class SqliteProvider implements IDbProvider {
     return `${schemaName}_${dbTableName}`;
   }
 
-  dropColumn(tableName: string, columnName: string): string[] {
-    return [this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [tableName, columnName]).toQuery()];
+  dropColumn(
+    tableName: string,
+    fieldInstance: IFieldInstance,
+    linkContext?: { tableId: string; tableNameMap: Map<string, string> },
+    operationType?: DropColumnOperationType
+  ): string[] {
+    const context: IDropDatabaseColumnContext = {
+      tableName,
+      knex: this.knex,
+      linkContext,
+      operationType,
+    };
+
+    // Use visitor pattern to drop columns
+    const visitor = new DropSqliteDatabaseColumnFieldVisitor(context);
+    return fieldInstance.accept(visitor);
   }
 
   dropColumnAndIndex(tableName: string, columnName: string, indexName: string): string[] {
@@ -248,81 +369,117 @@ export class SqliteProvider implements IDbProvider {
     return { insertTempTableSql, updateRecordSql };
   }
 
+  updateFromSelectSql(params: {
+    dbTableName: string;
+    idFieldName: string;
+    subQuery: Knex.QueryBuilder;
+    dbFieldNames: string[];
+    returningDbFieldNames?: string[];
+  }): string {
+    const { dbTableName, idFieldName, subQuery, dbFieldNames, returningDbFieldNames } = params;
+    const subQuerySql = subQuery.toQuery();
+    const wrap = (id: string) => this.knex.client.wrapIdentifier(id);
+    const setClause = dbFieldNames
+      .map(
+        (c) =>
+          `${wrap(c)} = (SELECT s.${wrap(c)} FROM (${subQuerySql}) AS s WHERE s.${wrap(
+            idFieldName
+          )} = ${dbTableName}.${wrap(idFieldName)})`
+      )
+      .join(', ');
+    const returning = [idFieldName, '__version', ...(returningDbFieldNames || dbFieldNames)]
+      .map((c) => wrap(c))
+      .join(', ');
+    return `UPDATE ${dbTableName} SET ${setClause} WHERE EXISTS (SELECT 1 FROM (${subQuerySql}) AS s WHERE s.${wrap(
+      idFieldName
+    )} = ${dbTableName}.${wrap(idFieldName)}) RETURNING ${returning}`;
+  }
+
   aggregationQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
-    fields?: { [fieldId: string]: IFieldInstance },
+    fields?: { [fieldId: string]: FieldCore },
     aggregationFields?: IAggregationField[],
-    extra?: IAggregationQueryExtra
+    extra?: IAggregationQueryExtra,
+    context?: IRecordQueryAggregateContext
   ): IAggregationQueryInterface {
     return new AggregationQuerySqlite(
       this.knex,
       originQueryBuilder,
-      dbTableName,
       fields,
       aggregationFields,
-      extra
+      extra,
+      context
     );
   }
 
   filterQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    fields?: { [p: string]: IFieldInstance },
+    fields?: { [p: string]: FieldCore },
     filter?: IFilter,
-    extra?: IFilterQueryExtra
+    extra?: IFilterQueryExtra,
+    context?: IRecordQueryFilterContext
   ): IFilterQueryInterface {
-    return new FilterQuerySqlite(originQueryBuilder, fields, filter, extra);
+    return new FilterQuerySqlite(originQueryBuilder, fields, filter, extra, this, context);
   }
 
   sortQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    fields?: { [fieldId: string]: IFieldInstance },
+    fields?: { [fieldId: string]: FieldCore },
     sortObjs?: ISortItem[],
-    extra?: ISortQueryExtra
+    extra?: ISortQueryExtra,
+    context?: IRecordQuerySortContext
   ): ISortQueryInterface {
-    return new SortQuerySqlite(this.knex, originQueryBuilder, fields, sortObjs, extra);
+    return new SortQuerySqlite(this.knex, originQueryBuilder, fields, sortObjs, extra, context);
   }
 
   groupQuery(
     originQueryBuilder: Knex.QueryBuilder,
     fieldMap?: { [fieldId: string]: IFieldInstance },
     groupFieldIds?: string[],
-    extra?: IGroupQueryExtra
+    extra?: IGroupQueryExtra,
+    context?: IRecordQueryGroupContext
   ): IGroupQueryInterface {
-    return new GroupQuerySqlite(this.knex, originQueryBuilder, fieldMap, groupFieldIds, extra);
+    return new GroupQuerySqlite(
+      this.knex,
+      originQueryBuilder,
+      fieldMap,
+      groupFieldIds,
+      extra,
+      context
+    );
   }
 
   searchQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
     searchFields: IFieldInstance[],
     tableIndex: TableIndex[],
-    search: [string, string?, boolean?]
+    search: [string, string?, boolean?],
+    context?: IRecordQueryFilterContext
   ) {
     return SearchQueryAbstract.appendQueryBuilder(
       SearchQuerySqlite,
       originQueryBuilder,
-      dbTableName,
       searchFields,
       tableIndex,
-      search
+      search,
+      context
     );
   }
 
   searchCountQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
     searchField: IFieldInstance[],
     search: [string, string?, boolean?],
-    tableIndex: TableIndex[]
+    tableIndex: TableIndex[],
+    context?: IRecordQueryFilterContext
   ) {
     return SearchQueryAbstract.buildSearchCountQuery(
       SearchQuerySqlite,
       originQueryBuilder,
-      dbTableName,
       searchField,
       search,
-      tableIndex
+      tableIndex,
+      context
     );
   }
 
@@ -332,6 +489,7 @@ export class SqliteProvider implements IDbProvider {
     searchField: IFieldInstance[],
     searchIndexRo: ISearchIndexByQueryRo,
     tableIndex: TableIndex[],
+    context?: IRecordQueryFilterContext,
     baseSortIndex?: string,
     setFilterQuery?: (qb: Knex.QueryBuilder) => void,
     setSortQuery?: (qb: Knex.QueryBuilder) => void
@@ -342,6 +500,7 @@ export class SqliteProvider implements IDbProvider {
       searchField,
       searchIndexRo,
       tableIndex,
+      context,
       baseSortIndex,
       setFilterQuery,
       setSortQuery
@@ -440,9 +599,10 @@ export class SqliteProvider implements IDbProvider {
 
   // select id and lookup_options for "field" table options is a json saved in string format, match optionsKey and value
   // please use json method in sqlite
-  lookupOptionsQuery(optionsKey: keyof ILookupOptionsVo, value: string): string {
+  lookupOptionsQuery(optionsKey: keyof ILookupLinkOptionsVo, value: string): string {
     return this.knex('field')
       .select({
+        tableId: 'table_id',
         id: 'id',
         type: 'type',
         name: 'name',
@@ -507,5 +667,95 @@ ORDER BY
         [dbTableName]
       )
       .toQuery();
+  }
+
+  generatedColumnQuery(): IGeneratedColumnQueryInterface {
+    return new GeneratedColumnQuerySqlite();
+  }
+  convertFormulaToGeneratedColumn(
+    expression: string,
+    context: IFormulaConversionContext
+  ): IFormulaConversionResult {
+    try {
+      const generatedColumnQuery = this.generatedColumnQuery();
+      // Set the context with driver client information
+      const contextWithDriver = { ...context, driverClient: this.driver };
+      generatedColumnQuery.setContext(contextWithDriver);
+
+      const visitor = new GeneratedColumnSqlConversionVisitor(
+        this.knex,
+        generatedColumnQuery,
+        contextWithDriver
+      );
+
+      const sql = parseFormulaToSQL(expression, visitor);
+
+      return visitor.getResult(sql);
+    } catch (error) {
+      throw new Error(`Failed to convert formula: ${(error as Error).message}`);
+    }
+  }
+
+  selectQuery(): ISelectQueryInterface {
+    return new SelectQuerySqlite();
+  }
+
+  convertFormulaToSelectQuery(
+    expression: string,
+    context: ISelectFormulaConversionContext
+  ): string {
+    try {
+      const selectQuery = this.selectQuery();
+      // Set the context with driver client information
+      const contextWithDriver = { ...context, driverClient: this.driver };
+      selectQuery.setContext(contextWithDriver);
+
+      const visitor = new SelectColumnSqlConversionVisitor(
+        this.knex,
+        selectQuery,
+        contextWithDriver
+      );
+
+      return parseFormulaToSQL(expression, visitor);
+    } catch (error) {
+      throw new Error(`Failed to convert formula: ${(error as Error).message}`);
+    }
+  }
+
+  generateDatabaseViewName(tableId: string): string {
+    return tableId + '_view';
+  }
+
+  createDatabaseView(table: TableDomain, qb: Knex.QueryBuilder): string[] {
+    const viewName = this.generateDatabaseViewName(table.id);
+    return [this.knex.raw(`CREATE VIEW ?? AS ${qb.toQuery()}`, [viewName]).toQuery()];
+  }
+
+  recreateDatabaseView(table: TableDomain, qb: Knex.QueryBuilder): string[] {
+    const viewName = this.generateDatabaseViewName(table.id);
+    return [
+      this.knex.raw(`DROP VIEW IF EXISTS ??`, [viewName]).toQuery(),
+      this.knex.raw(`CREATE VIEW ?? AS ${qb.toQuery()}`, [viewName]).toQuery(),
+    ];
+  }
+
+  dropDatabaseView(tableId: string): string[] {
+    const viewName = this.generateDatabaseViewName(tableId);
+    return [this.knex.raw(`DROP VIEW IF EXISTS ??`, [viewName]).toQuery()];
+  }
+
+  // SQLite views are not materialized; nothing to refresh
+  refreshDatabaseView(_tableId: string): string | undefined {
+    return undefined;
+  }
+
+  createMaterializedView(table: TableDomain, qb: Knex.QueryBuilder): string {
+    const viewName = this.generateDatabaseViewName(table.id);
+    return this.knex.raw(`CREATE VIEW ?? AS ${qb.toQuery()}`, [viewName]).toQuery();
+  }
+
+  dropMaterializedView(tableId: string): string {
+    const viewName = this.generateDatabaseViewName(tableId);
+    return this.knex.raw(`DROP VIEW IF EXISTS ??`, [viewName]).toQuery();
   }
 }

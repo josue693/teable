@@ -5,7 +5,7 @@ import { FieldType, DbFieldType, CellValueType } from '../constant';
 import { FieldCore } from '../field';
 import type { ITimeZoneString } from '../formatting';
 import { DateFormattingPreset, defaultDatetimeFormatting, TimeFormatting } from '../formatting';
-import type { IDateFieldOptions } from './date.field';
+import type { IDateFieldOptions } from './date-option.schema';
 import { DateFieldCore } from './date.field';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -97,6 +97,57 @@ describe('DateFieldCore', () => {
       },
     });
     expect(usField.convertStringToCellValue('5/1/2024 06:50')).toBe('2024-05-01T06:50:00.000Z');
+  });
+
+  it('should parse text to date with Chinese date format', () => {
+    const fieldWithAsian = plainToInstance(DateFieldCore, {
+      ...json,
+      options: {
+        formatting: {
+          date: 'YYYY 年 M 月 D 日',
+          time: TimeFormatting.None,
+          timeZone: 'Asia/Shanghai',
+        },
+      },
+    });
+    expect(fieldWithAsian.convertStringToCellValue('2025-10-12 11:17')).toBe(
+      '2025-10-12T03:17:00.000Z'
+    );
+    expect(fieldWithAsian.convertStringToCellValue('2025 年 10 月 12 日')).toBe(
+      '2025-10-11T16:00:00.000Z'
+    );
+  });
+
+  it('should parse single-digit month/day with seconds', () => {
+    const fieldWithAsian = plainToInstance(DateFieldCore, {
+      ...json,
+      options: {
+        formatting: {
+          date: DateFormattingPreset.Asian,
+          time: TimeFormatting.Hour24,
+          timeZone: 'Asia/Shanghai',
+        },
+      },
+    });
+    expect(fieldWithAsian.convertStringToCellValue('2025/7/31 14:15:32')).toBe(
+      '2025-07-31T06:15:32.000Z'
+    );
+  });
+
+  it('should parse single-digit month/day with seconds', () => {
+    const fieldWithAsian = plainToInstance(DateFieldCore, {
+      ...json,
+      options: {
+        formatting: {
+          date: DateFormattingPreset.Asian,
+          time: TimeFormatting.None,
+          timeZone: 'Asia/Shanghai',
+        },
+      },
+    });
+    expect(fieldWithAsian.convertStringToCellValue('2025/7/31 14:15:32')).toBe(
+      '2025-07-31T06:15:32.000Z'
+    );
   });
 
   it('should repair invalid value', () => {

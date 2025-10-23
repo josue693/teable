@@ -1,30 +1,15 @@
 import { z } from 'zod';
 import type { FieldType, CellValueType } from '../constant';
 import { FieldCore } from '../field';
+import type { IFieldVisitor } from '../field-visitor.interface';
 import {
   defaultNumberFormatting,
   formatNumberToString,
   numberFormattingSchema,
   parseStringToNumber,
 } from '../formatting';
-import { getShowAsSchema, numberShowAsSchema } from '../show-as';
-
-export const numberFieldOptionsSchema = z.object({
-  formatting: numberFormattingSchema,
-  showAs: numberShowAsSchema.optional(),
-  defaultValue: z.number().optional(),
-});
-
-export const numberFieldOptionsRoSchema = numberFieldOptionsSchema
-  .partial({
-    formatting: true,
-    showAs: true,
-  })
-  .describe('options for number fields');
-
-export type INumberFieldOptionsRo = z.infer<typeof numberFieldOptionsRoSchema>;
-
-export type INumberFieldOptions = z.infer<typeof numberFieldOptionsSchema>;
+import { getShowAsSchema } from '../show-as';
+import { type INumberFieldOptions } from './number-option.schema';
 
 export const numberCellValueSchema = z.number();
 
@@ -34,6 +19,8 @@ export class NumberFieldCore extends FieldCore {
   type!: FieldType.Number;
 
   options!: INumberFieldOptions;
+
+  meta?: undefined;
 
   cellValueType!: CellValueType.Number;
 
@@ -95,5 +82,9 @@ export class NumberFieldCore extends FieldCore {
       return z.array(numberCellValueSchema).nonempty().nullable().safeParse(value);
     }
     return numberCellValueSchema.nullable().safeParse(value);
+  }
+
+  accept<T>(visitor: IFieldVisitor<T>): T {
+    return visitor.visitNumberField(this);
   }
 }

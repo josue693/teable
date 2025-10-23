@@ -108,6 +108,8 @@ describe('FieldConvertingService', () => {
       filter: null,
       filterByViewId: null,
       visibleFieldIds: null,
+      sort: null,
+      limit: null,
     });
 
     expect(

@@ -9,7 +9,7 @@ import type {
   IFieldRo,
   IFieldVo,
   ILinkFieldOptions,
-  ILookupOptionsVo,
+  ILookupLinkOptionsVo,
   LinkFieldCore,
 } from '@teable/core';
 import {
@@ -19,9 +19,11 @@ import {
   FieldType,
   getRandomString,
   NumberFormattingType,
+  RatingIcon,
   Relationship,
+  isLinkLookupOptions,
 } from '@teable/core';
-import type { ITableFullVo } from '@teable/openapi';
+import type { ITableFullVo, IRecordsVo } from '@teable/openapi';
 import {
   axios,
   convertField,
@@ -80,10 +82,125 @@ describe('OpenAPI link (e2e)', () => {
   describe('create table with link field', () => {
     let table1: ITableFullVo;
     let table2: ITableFullVo;
+    let table3: ITableFullVo;
 
     afterEach(async () => {
       table1 && (await permanentDeleteTable(baseId, table1.id));
       table2 && (await permanentDeleteTable(baseId, table2.id));
+      table3 && (await permanentDeleteTable(baseId, table3.id));
+    });
+
+    it('should format lookup-of-link titles inside formulas when aggregating link records', async () => {
+      table1 = await createTable(baseId, {
+        name: 'tblA-link-api',
+        fields: [
+          { name: 'Name', type: FieldType.SingleLineText },
+          { name: 'Label', type: FieldType.SingleLineText },
+        ],
+        records: [
+          { fields: { Name: 'Alpha', Label: 'Alpha Label' } },
+          { fields: { Name: 'Beta', Label: 'Beta Label' } },
+        ],
+      });
+      // eslint-disable-next-line no-console
+
+      table2 = await createTable(baseId, {
+        name: 'tblB-link-api',
+        fields: [
+          { name: 'Capture', type: FieldType.SingleLineText },
+          { name: 'Shot Time', type: FieldType.SingleLineText },
+        ],
+        records: [
+          { fields: { Capture: 'Screen 1', 'Shot Time': '2024-01-01' } },
+          { fields: { Capture: 'Screen 2', 'Shot Time': '2024-02-02' } },
+          { fields: { Capture: 'Screen 3', 'Shot Time': '2024-03-03' } },
+        ],
+      });
+
+      const linkToAField = await createField(table2.id, {
+        name: 'LinkToA',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: table1.id,
+        },
+      });
+      // eslint-disable-next-line no-console
+
+      await updateRecordByApi(table2.id, table2.records[0].id, linkToAField.id, {
+        id: table1.records[0].id,
+      });
+      await updateRecordByApi(table2.id, table2.records[1].id, linkToAField.id, {
+        id: table1.records[0].id,
+      });
+      await updateRecordByApi(table2.id, table2.records[2].id, linkToAField.id, {
+        id: table1.records[1].id,
+      });
+
+      table3 = await createTable(baseId, {
+        name: 'tblC-link-api',
+        fields: [{ name: 'Entry', type: FieldType.SingleLineText }],
+        records: [{ fields: { Entry: 'Group A' } }, { fields: { Entry: 'Group B' } }],
+      });
+
+      const linkToBField = await createField(table3.id, {
+        name: 'LinkToB',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyMany,
+          foreignTableId: table2.id,
+        },
+      });
+
+      await updateRecordByApi(table3.id, table3.records[0].id, linkToBField.id, [
+        { id: table2.records[0].id },
+        { id: table2.records[1].id },
+      ]);
+      await updateRecordByApi(table3.id, table3.records[1].id, linkToBField.id, [
+        { id: table2.records[2].id },
+      ]);
+
+      const lookupLinkToAField = await createField(table3.id, {
+        name: 'LookupLinkToA',
+        type: FieldType.Link,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: table2.id,
+          linkFieldId: linkToBField.id,
+          lookupFieldId: linkToAField.id,
+        },
+      });
+
+      const shotTimeFieldId = table2.fields.find((f) => f.name === 'Shot Time')!.id;
+      const lookupShotTimeField = await createField(table3.id, {
+        name: 'LookupShotTime',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: table2.id,
+          linkFieldId: linkToBField.id,
+          lookupFieldId: shotTimeFieldId,
+        },
+      });
+
+      await createField(table3.id, {
+        name: 'Summary',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${lookupLinkToAField.id}} & ' - ' & ARRAYJOIN({${lookupShotTimeField.id}}, ', ')`,
+        },
+      });
+
+      const recordsVo: IRecordsVo = await getRecords(table3.id, {
+        fieldKeyType: FieldKeyType.Name,
+      });
+
+      expect(recordsVo.records).toHaveLength(2);
+      const summaryA = recordsVo.records.find((r) => r.fields.Entry === 'Group A')!;
+      const summaryB = recordsVo.records.find((r) => r.fields.Entry === 'Group B')!;
+
+      expect(typeof summaryA.fields.Summary).toBe('string');
+      expect(typeof summaryB.fields.Summary).toBe('string');
     });
 
     it('should create foreign link field when create a new table with many-one link field', async () => {
@@ -1037,6 +1154,170 @@ describe('OpenAPI link (e2e)', () => {
       ]);
     });
 
+    it('should update self foreign link with correct currency formatted title', async () => {
+      // use number field with currency formatting as primary field
+      await convertField(table2.id, table2.fields[0].id, {
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Currency, symbol: '$', precision: 2 },
+        },
+      });
+
+      // table2 link field first record link to table1 first record
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[2].id, {
+        id: table1.records[0].id,
+      });
+      // set values for lookup field
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[0].id, 100.5);
+      await updateRecordByApi(table2.id, table2.records[1].id, table2.fields[0].id, 250.75);
+      await updateRecordByApi(table2.id, table2.records[2].id, table2.fields[0].id, null);
+
+      await updateRecordByApi(table1.id, table1.records[0].id, table1.fields[2].id, [
+        { id: table2.records[0].id },
+        { id: table2.records[1].id },
+        { id: table2.records[2].id },
+      ]);
+
+      const table1RecordResult2 = await getRecords(table1.id);
+
+      expect(table1RecordResult2.records[0].fields[table1.fields[2].name]).toEqual([
+        {
+          title: '$100.50',
+          id: table2.records[0].id,
+        },
+        {
+          title: '$250.75',
+          id: table2.records[1].id,
+        },
+        {
+          title: undefined,
+          id: table2.records[2].id,
+        },
+      ]);
+    });
+
+    it('should update self foreign link with correct percentage formatted title', async () => {
+      // use number field with percentage formatting as primary field
+      await convertField(table2.id, table2.fields[0].id, {
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Percent, precision: 1 },
+        },
+      });
+
+      // table2 link field first record link to table1 first record
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[2].id, {
+        id: table1.records[0].id,
+      });
+      // set values for lookup field (stored as decimal, displayed as percentage)
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[0].id, 0.25);
+      await updateRecordByApi(table2.id, table2.records[1].id, table2.fields[0].id, 0.8);
+      await updateRecordByApi(table2.id, table2.records[2].id, table2.fields[0].id, null);
+
+      await updateRecordByApi(table1.id, table1.records[0].id, table1.fields[2].id, [
+        { id: table2.records[0].id },
+        { id: table2.records[1].id },
+        { id: table2.records[2].id },
+      ]);
+
+      const table1RecordResult2 = await getRecords(table1.id);
+
+      expect(table1RecordResult2.records[0].fields[table1.fields[2].name]).toEqual([
+        {
+          title: '25.0%',
+          id: table2.records[0].id,
+        },
+        {
+          title: '80.0%',
+          id: table2.records[1].id,
+        },
+        {
+          title: undefined,
+          id: table2.records[2].id,
+        },
+      ]);
+    });
+
+    it('should update self foreign link with correct rating field formatted title', async () => {
+      // use rating field as primary field
+      await convertField(table2.id, table2.fields[0].id, {
+        type: FieldType.Rating,
+        options: {
+          icon: RatingIcon.Star,
+          color: Colors.YellowBright,
+          max: 5,
+        },
+      });
+
+      // table2 link field first record link to table1 first record
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[2].id, {
+        id: table1.records[0].id,
+      });
+      // set values for rating field
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[0].id, 3);
+      await updateRecordByApi(table2.id, table2.records[1].id, table2.fields[0].id, 5);
+      await updateRecordByApi(table2.id, table2.records[2].id, table2.fields[0].id, null);
+
+      await updateRecordByApi(table1.id, table1.records[0].id, table1.fields[2].id, [
+        { id: table2.records[0].id },
+        { id: table2.records[1].id },
+        { id: table2.records[2].id },
+      ]);
+
+      const table1RecordResult2 = await getRecords(table1.id);
+
+      expect(table1RecordResult2.records[0].fields[table1.fields[2].name]).toEqual([
+        {
+          title: '3',
+          id: table2.records[0].id,
+        },
+        {
+          title: '5',
+          id: table2.records[1].id,
+        },
+        {
+          title: undefined,
+          id: table2.records[2].id,
+        },
+      ]);
+    });
+
+    it('should update self foreign link with correct auto number field formatted title', async () => {
+      // use auto number field as primary field
+      await convertField(table2.id, table2.fields[0].id, {
+        type: FieldType.AutoNumber,
+      });
+
+      // table2 link field first record link to table1 first record
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[2].id, {
+        id: table1.records[0].id,
+      });
+
+      await updateRecordByApi(table1.id, table1.records[0].id, table1.fields[2].id, [
+        { id: table2.records[0].id },
+        { id: table2.records[1].id },
+        { id: table2.records[2].id },
+      ]);
+
+      const table1RecordResult2 = await getRecords(table1.id);
+
+      // Auto number fields should be formatted as text
+      expect(table1RecordResult2.records[0].fields[table1.fields[2].name]).toEqual([
+        {
+          title: '1',
+          id: table2.records[0].id,
+        },
+        {
+          title: '2',
+          id: table2.records[1].id,
+        },
+        {
+          title: '3',
+          id: table2.records[2].id,
+        },
+      ]);
+    });
+
     it('should update formula field when change manyOne link cell', async () => {
       // table2 link field first record link to table1 first record
       await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[2].id, {
@@ -1163,6 +1444,64 @@ describe('OpenAPI link (e2e)', () => {
         },
         400
       );
+    });
+
+    it('should preserve multiple linkages created by concurrent requests', async () => {
+      const [createResp1, createResp2] = await Promise.all([
+        createRecords(table2.id, {
+          records: [
+            {
+              fields: {
+                [table2.fields[0].id]: 'table2_4',
+                [table2.fields[2].id]: { id: table1.records[0].id },
+              },
+            },
+          ],
+        }),
+        createRecords(table2.id, {
+          records: [
+            {
+              fields: {
+                [table2.fields[0].id]: 'table2_5',
+                [table2.fields[2].id]: { id: table1.records[0].id },
+              },
+            },
+          ],
+        }),
+      ]);
+
+      const createdRecords = [createResp1.records[0], createResp2.records[0]];
+
+      expect(createdRecords).toHaveLength(2);
+      expect(createdRecords[0].id).not.toEqual(createdRecords[1].id);
+      for (const createdRecord of createdRecords) {
+        expect(createdRecord.fields[table2.fields[2].id] as { id: string }).toMatchObject({
+          id: table1.records[0].id,
+        });
+      }
+
+      const table1Record = await getRecord(table1.id, table1.records[0].id);
+      const linkedRecords = table1Record.fields[table1.fields[2].id] as Array<{
+        id: string;
+        title?: string;
+      }>;
+
+      expect(linkedRecords).toHaveLength(2);
+      expect(linkedRecords).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: createdRecords[0].id, title: 'table2_4' }),
+          expect.objectContaining({ id: createdRecords[1].id, title: 'table2_5' }),
+        ])
+      );
+
+      const refreshedFirst = await getRecord(table2.id, createdRecords[0].id);
+      const refreshedSecond = await getRecord(table2.id, createdRecords[1].id);
+
+      for (const refreshed of [refreshedFirst, refreshedSecond]) {
+        expect(refreshed.fields[table2.fields[2].id] as { id: string }).toMatchObject({
+          id: table1.records[0].id,
+        });
+      }
     });
 
     it('should set a text value in a link record with typecast', async () => {
@@ -2837,6 +3176,217 @@ describe('OpenAPI link (e2e)', () => {
     });
   });
 
+  describe('formula primary referencing link-derived fields', () => {
+    let table1: ITableFullVo;
+    let table2: ITableFullVo;
+
+    beforeEach(async () => {
+      const textFieldRo: IFieldRo = {
+        name: 'Title',
+        type: FieldType.SingleLineText,
+      };
+
+      const numberFieldRo: IFieldRo = {
+        name: 'Amount',
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Decimal, precision: 2 },
+        },
+      };
+
+      // Table2: Title + Amount
+      table2 = await createTable(baseId, {
+        name: 'table2',
+        fields: [textFieldRo, numberFieldRo],
+        records: [
+          { fields: { Title: '21', Amount: 444 } },
+          { fields: { Title: '22', Amount: 555 } },
+          { fields: { Title: '23', Amount: 666 } },
+        ],
+      });
+
+      // Table1: Title
+      table1 = await createTable(baseId, {
+        name: 'table1',
+        fields: [textFieldRo],
+        records: [{ fields: { Title: 'A1' } }],
+      });
+
+      // Link: table1 (OneMany) -> table2
+      const linkField = await createField(table1.id, {
+        name: 't1->t2',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: table2.id,
+        },
+      });
+
+      // Lookup: table1.lookup Amount via link (array of numbers)
+      const lookupAmount = await createField(table1.id, {
+        name: 'Amounts (lookup)',
+        type: FieldType.Number,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields[1].id, // Amount
+          linkFieldId: linkField.id,
+        },
+      });
+      // eslint-disable-next-line no-console
+
+      // Formula: conditional rollup to produce number[]; its formatting should be applied when used as Link title
+      const formula = await createField(table1.id, {
+        name: 'Amounts Formula',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${lookupAmount.id}}`,
+        },
+      });
+      // eslint-disable-next-line no-console
+
+      // Attach two t2 records to t1 record
+      await updateRecord(table1.id, table1.records[0].id, {
+        fieldKeyType: FieldKeyType.Id,
+        record: {
+          fields: {
+            [linkField.id]: [{ id: table2.records[0].id }, { id: table2.records[1].id }],
+          },
+        },
+      });
+
+      // Point symmetric link (on table2) title to table1 formula
+      const t2Fields = await getFields(table2.id);
+      const t2Link = t2Fields.find((f) => f.type === FieldType.Link && !f.isLookup)!;
+      await convertField(table2.id, t2Link.id, {
+        type: FieldType.Link,
+        options: {
+          relationship: (t2Link.options as ILinkFieldOptions).relationship!,
+          foreignTableId: table1.id,
+          lookupFieldId: formula.id,
+        },
+      });
+    });
+
+    afterEach(async () => {
+      await permanentDeleteTable(baseId, table1.id);
+      await permanentDeleteTable(baseId, table2.id);
+    });
+
+    it('reads table1 with formula referencing lookup (number array)', async () => {
+      const { records } = await getRecords(table1.id, { fieldKeyType: FieldKeyType.Name });
+      const rec = records[0];
+      expect(rec.fields['Amounts (lookup)']).toEqual([444, 555]);
+      expect(rec.fields['Amounts Formula']).toEqual([444, 555]);
+    });
+
+    it('reads table2 link with title formatted as decimals from formula', async () => {
+      const t2Fields = await getFields(table2.id);
+      const t2LinkName = t2Fields.find((f) => f.type === FieldType.Link && !f.isLookup)!.name;
+      const { records } = await getRecords(table2.id, { fieldKeyType: FieldKeyType.Name });
+      const rec1 = records.find((r) => r.fields['Title'] === '21')!;
+      const rec2 = records.find((r) => r.fields['Title'] === '22')!;
+      // Both should link back to table1 A1 with title using formatted decimals
+      expect(rec1.fields[t2LinkName]).toEqual([
+        { id: table1.records[0].id, title: '444.00, 555.00' },
+      ]);
+      expect(rec2.fields[t2LinkName]).toEqual([
+        { id: table1.records[0].id, title: '444.00, 555.00' },
+      ]);
+    });
+
+    it('formula referencing rollup is formatted and usable as link title', async () => {
+      // Create rollup on table1: sum of Amount via link
+      const t1Fields = await getFields(table1.id);
+      const linkField = t1Fields.find((f) => f.type === FieldType.Link && !f.isLookup)!;
+      const rollup = await createField(table1.id, {
+        name: 'Sum Amounts',
+        type: FieldType.Rollup,
+        options: { expression: 'sum({values})' },
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields[1].id, // Amount
+          linkFieldId: linkField.id,
+        },
+      });
+
+      // Formula references rollup
+      const formulaRollup = await createField(table1.id, {
+        name: 'Sum Formula',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${rollup.id}}`,
+          formatting: { type: NumberFormattingType.Decimal, precision: 2 },
+        },
+      });
+
+      // Point table2 symmetric link title to this formula
+      const t2Fields = await getFields(table2.id);
+      const t2Link = t2Fields.find((f) => f.type === FieldType.Link && !f.isLookup)!;
+      await convertField(table2.id, t2Link.id, {
+        type: FieldType.Link,
+        options: {
+          relationship: (t2Link.options as ILinkFieldOptions).relationship!,
+          foreignTableId: table1.id,
+          lookupFieldId: formulaRollup.id,
+        },
+      });
+
+      const t2LinkName = (await getFields(table2.id)).find(
+        (f) => f.type === FieldType.Link && !f.isLookup
+      )!.name;
+      const { records } = await getRecords(table2.id, { fieldKeyType: FieldKeyType.Name });
+      // For 21 and 22 both linked to table1.A1, sum is 444+555=999 => '999.00'
+      const rec1 = records.find((r) => r.fields['Title'] === '21')!;
+      const rec2 = records.find((r) => r.fields['Title'] === '22')!;
+      expect(rec1.fields[t2LinkName]).toEqual([{ id: table1.records[0].id, title: '999.00' }]);
+      expect(rec2.fields[t2LinkName]).toEqual([{ id: table1.records[0].id, title: '999.00' }]);
+    });
+
+    it('formula referencing text lookup renders comma-joined titles', async () => {
+      // Create text lookup on table1: Title via link
+      const t1Fields = await getFields(table1.id);
+      const linkField = t1Fields.find((f) => f.type === FieldType.Link && !f.isLookup)!;
+      const lookupTitle = await createField(table1.id, {
+        name: 'Titles (lookup)',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields[0].id, // Title
+          linkFieldId: linkField.id,
+        },
+      });
+
+      const formulaText = await createField(table1.id, {
+        name: 'Titles Formula',
+        type: FieldType.Formula,
+        options: { expression: `{${lookupTitle.id}}` },
+      });
+
+      // Point table2 symmetric link title to this formula
+      const t2Fields = await getFields(table2.id);
+      const t2Link = t2Fields.find((f) => f.type === FieldType.Link && !f.isLookup)!;
+      await convertField(table2.id, t2Link.id, {
+        type: FieldType.Link,
+        options: {
+          relationship: (t2Link.options as ILinkFieldOptions).relationship!,
+          foreignTableId: table1.id,
+          lookupFieldId: formulaText.id,
+        },
+      });
+
+      const t2LinkName = (await getFields(table2.id)).find(
+        (f) => f.type === FieldType.Link && !f.isLookup
+      )!.name;
+      const { records } = await getRecords(table2.id, { fieldKeyType: FieldKeyType.Name });
+      const rec1 = records.find((r) => r.fields['Title'] === '21')!;
+      const rec2 = records.find((r) => r.fields['Title'] === '22')!;
+      expect(rec1.fields[t2LinkName]).toEqual([{ id: table1.records[0].id, title: '21, 22' }]);
+      expect(rec2.fields[t2LinkName]).toEqual([{ id: table1.records[0].id, title: '21, 22' }]);
+    });
+  });
+
   describe('Create two bi-link for two tables', () => {
     let table1: ITableFullVo;
     let table2: ITableFullVo;
@@ -3254,8 +3804,9 @@ describe('OpenAPI link (e2e)', () => {
         'bseTestBaseId',
         'newAwesomeName',
       ]);
+      expect(isLinkLookupOptions(updatedLookupField.lookupOptions)).toBe(true);
       expect(
-        (updatedLookupField.lookupOptions as ILookupOptionsVo).fkHostTableName.split(/[._]/)
+        (updatedLookupField.lookupOptions as ILookupLinkOptionsVo).fkHostTableName.split(/[._]/)
       ).toEqual(['bseTestBaseId', 'newAwesomeName']);
     });
   });
@@ -3366,8 +3917,9 @@ describe('OpenAPI link (e2e)', () => {
         'bseTestBaseId',
         'newAwesomeName',
       ]);
+      expect(isLinkLookupOptions(updatedLookupField.lookupOptions)).toBe(true);
       expect(
-        (updatedLookupField.lookupOptions as ILookupOptionsVo).fkHostTableName.split(/[._]/)
+        (updatedLookupField.lookupOptions as ILookupLinkOptionsVo).fkHostTableName.split(/[._]/)
       ).toEqual(['bseTestBaseId', 'newAwesomeName']);
     });
   });
@@ -4203,6 +4755,299 @@ describe('OpenAPI link (e2e)', () => {
       expect(table2Record2ResUpdated.fields[symmetricLinkFieldId]).toEqual([
         { id: table1RecordId1, title: 'table1:A1' },
       ]);
+    });
+  });
+
+  describe('rollup -> formula -> rollup chain', () => {
+    it('should aggregate correctly through formula referencing a rollup across links', async () => {
+      // Table2: text + number with records
+      const t2Text: IFieldRo = { name: 't2 text', type: FieldType.SingleLineText };
+      const t2Number: IFieldRo = {
+        name: 't2 number',
+        type: FieldType.Number,
+        options: { formatting: { type: NumberFormattingType.Decimal, precision: 0 } },
+      };
+
+      const table2 = await createTable(baseId, {
+        name: 'table2_rfr',
+        fields: [t2Text, t2Number],
+        records: [
+          { fields: { 't2 text': 'r1', 't2 number': 5 } },
+          { fields: { 't2 text': 'r2', 't2 number': 7 } },
+        ],
+      });
+
+      // Table3: text + link(to t2) + rollup(sum t2.number) + formula(rollup*2)
+      const t3Text: IFieldRo = { name: 't3 text', type: FieldType.SingleLineText };
+      const table3 = await createTable(baseId, {
+        name: 'table3_rfr',
+        fields: [t3Text],
+        records: [{ fields: { 't3 text': 'a' } }],
+      });
+
+      const linkT3ToT2 = await createField(table3.id, {
+        name: 't3->t2',
+        type: FieldType.Link,
+        options: { relationship: Relationship.OneMany, foreignTableId: table2.id },
+      });
+
+      const rollupT3 = await createField(table3.id, {
+        name: 't3 rollup',
+        type: FieldType.Rollup,
+        options: { expression: 'sum({values})' },
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields.find((f) => f.name === 't2 number')!.id,
+          linkFieldId: linkT3ToT2.id,
+        },
+      });
+
+      const formulaT3 = await createField(table3.id, {
+        name: 't3 formula x2',
+        type: FieldType.Formula,
+        options: { expression: `{${rollupT3.id}} * 2` },
+      });
+
+      // Link table3.r1 -> table2.r1 + table2.r2, so rollup=5+7=12, formula=24
+      await updateRecordByApi(table3.id, table3.records[0].id, linkT3ToT2.id, [
+        { id: table2.records[0].id },
+        { id: table2.records[1].id },
+      ]);
+
+      // Table4: text + link(to t3) + rollup(sum t3 formula)
+      const t4Text: IFieldRo = { name: 't4 text', type: FieldType.SingleLineText };
+      const table4 = await createTable(baseId, {
+        name: 'table4_rfr',
+        fields: [t4Text],
+        records: [{ fields: { 't4 text': 'x' } }],
+      });
+
+      const linkT4ToT3 = await createField(table4.id, {
+        name: 't4->t3',
+        type: FieldType.Link,
+        options: { relationship: Relationship.OneMany, foreignTableId: table3.id },
+      });
+
+      const rollupT4 = await createField(table4.id, {
+        name: 't4 rollup of t3 formula',
+        type: FieldType.Rollup,
+        options: { expression: 'sum({values})' },
+        lookupOptions: {
+          foreignTableId: table3.id,
+          lookupFieldId: formulaT3.id,
+          linkFieldId: linkT4ToT3.id,
+        },
+      });
+
+      // Link table4.r1 -> table3.r1, so t4 rollup should be 24
+      await updateRecordByApi(table4.id, table4.records[0].id, linkT4ToT3.id, [
+        { id: table3.records[0].id },
+      ]);
+
+      const t4Fields = await getFields(table4.id);
+      const t4RollupField = t4Fields.find((f) => f.id === rollupT4.id)!;
+      const t4Res = await getRecords(table4.id);
+      expect(t4Res.records[0].fields[t4RollupField.name]).toEqual(24);
+    });
+
+    it('should sum formulas across multiple t3 records (OneMany)', async () => {
+      // Table2
+      const t2Text: IFieldRo = { name: 't2 text v2', type: FieldType.SingleLineText };
+      const t2Number: IFieldRo = {
+        name: 't2 number v2',
+        type: FieldType.Number,
+        options: { formatting: { type: NumberFormattingType.Decimal, precision: 0 } },
+      };
+      const table2 = await createTable(baseId, {
+        name: 'table2_rfrm_v2',
+        fields: [t2Text, t2Number],
+        records: [
+          { fields: { 't2 text v2': 'r1', 't2 number v2': 5 } },
+          { fields: { 't2 text v2': 'r2', 't2 number v2': 7 } },
+          { fields: { 't2 text v2': 'r3', 't2 number v2': 11 } },
+        ],
+      });
+
+      // Table3
+      const t3Text: IFieldRo = { name: 't3 text v2', type: FieldType.SingleLineText };
+      const table3 = await createTable(baseId, {
+        name: 'table3_rfrm_v2',
+        fields: [t3Text],
+        records: [{ fields: { 't3 text v2': 'a' } }, { fields: { 't3 text v2': 'b' } }],
+      });
+
+      const linkT3ToT2 = await createField(table3.id, {
+        name: 't3->t2 v2',
+        type: FieldType.Link,
+        options: { relationship: Relationship.OneMany, foreignTableId: table2.id },
+      });
+
+      const rollupT3 = await createField(table3.id, {
+        name: 't3 rollup v2',
+        type: FieldType.Rollup,
+        options: { expression: 'sum({values})' },
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields.find((f) => f.name === 't2 number v2')!.id,
+          linkFieldId: linkT3ToT2.id,
+        },
+      });
+
+      const formulaT3 = await createField(table3.id, {
+        name: 't3 formula x2 v2',
+        type: FieldType.Formula,
+        options: { expression: `{${rollupT3.id}} * 2` },
+      });
+
+      // r1 -> t2(r1,r2) => 5+7=12 => 24; r2 -> t2(r3) => 11 => 22
+      await updateRecordByApi(table3.id, table3.records[0].id, linkT3ToT2.id, [
+        { id: table2.records[0].id },
+        { id: table2.records[1].id },
+      ]);
+      await updateRecordByApi(table3.id, table3.records[1].id, linkT3ToT2.id, [
+        { id: table2.records[2].id },
+      ]);
+
+      // Table4: rollup of t3 formula across two t3 records => 24 + 22 = 46
+      const t4Text: IFieldRo = { name: 't4 text v2', type: FieldType.SingleLineText };
+      const table4 = await createTable(baseId, {
+        name: 'table4_rfrm_v2',
+        fields: [t4Text],
+        records: [{ fields: { 't4 text v2': 'x' } }],
+      });
+
+      const linkT4ToT3 = await createField(table4.id, {
+        name: 't4->t3 v2',
+        type: FieldType.Link,
+        options: { relationship: Relationship.OneMany, foreignTableId: table3.id },
+      });
+
+      const rollupT4 = await createField(table4.id, {
+        name: 't4 rollup of t3 formula v2',
+        type: FieldType.Rollup,
+        options: { expression: 'sum({values})' },
+        lookupOptions: {
+          foreignTableId: table3.id,
+          lookupFieldId: formulaT3.id,
+          linkFieldId: linkT4ToT3.id,
+        },
+      });
+
+      // Also create lookup of t3 formula to test lookup->formula->rollup chain resolution
+      const lookupT4 = await createField(table4.id, {
+        name: 't4 lookup t3 formula v2',
+        type: FieldType.Formula,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: table3.id,
+          lookupFieldId: formulaT3.id,
+          linkFieldId: linkT4ToT3.id,
+        },
+      });
+
+      await updateRecordByApi(table4.id, table4.records[0].id, linkT4ToT3.id, [
+        { id: table3.records[0].id },
+        { id: table3.records[1].id },
+      ]);
+
+      const t4Fields = await getFields(table4.id);
+      const t4RollupField = t4Fields.find((f) => f.id === rollupT4.id)!;
+      const t4LookupField = t4Fields.find((f) => f.id === lookupT4.id)!;
+      const t4Res = await getRecords(table4.id);
+      expect(t4Res.records[0].fields[t4RollupField.name]).toEqual(46);
+      expect(t4Res.records[0].fields[t4LookupField.name]).toEqual([24, 22]);
+    });
+
+    it('should work when t3->t2 is ManyOne (single-value rollup)', async () => {
+      // Table2
+      const t2Text: IFieldRo = { name: 't2 text v3', type: FieldType.SingleLineText };
+      const t2Number: IFieldRo = {
+        name: 't2 number v3',
+        type: FieldType.Number,
+        options: { formatting: { type: NumberFormattingType.Decimal, precision: 0 } },
+      };
+      const table2 = await createTable(baseId, {
+        name: 'table2_rfrm_v3',
+        fields: [t2Text, t2Number],
+        records: [
+          { fields: { 't2 text v3': 'r1', 't2 number v3': 3 } },
+          { fields: { 't2 text v3': 'r2', 't2 number v3': 9 } },
+        ],
+      });
+
+      // Table3 with ManyOne link to t2
+      const t3Text: IFieldRo = { name: 't3 text v3', type: FieldType.SingleLineText };
+      const table3 = await createTable(baseId, {
+        name: 'table3_rfrm_v3',
+        fields: [t3Text],
+        records: [{ fields: { 't3 text v3': 'a' } }, { fields: { 't3 text v3': 'b' } }],
+      });
+
+      const linkT3ToT2 = await createField(table3.id, {
+        name: 't3->t2 v3',
+        type: FieldType.Link,
+        options: { relationship: Relationship.ManyOne, foreignTableId: table2.id },
+      });
+
+      const rollupT3 = await createField(table3.id, {
+        name: 't3 rollup v3',
+        type: FieldType.Rollup,
+        options: { expression: 'sum({values})' },
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields.find((f) => f.name === 't2 number v3')!.id,
+          linkFieldId: linkT3ToT2.id,
+        },
+      });
+
+      const formulaT3 = await createField(table3.id, {
+        name: 't3 formula x2 v3',
+        type: FieldType.Formula,
+        options: { expression: `{${rollupT3.id}} * 2` },
+      });
+
+      // Link: r1 -> t2.r1 (3) => rollup 3 => formula 6; r2 -> t2.r2 (9) => formula 18
+      await updateRecordByApi(table3.id, table3.records[0].id, linkT3ToT2.id, {
+        id: table2.records[0].id,
+      });
+      await updateRecordByApi(table3.id, table3.records[1].id, linkT3ToT2.id, {
+        id: table2.records[1].id,
+      });
+
+      // Table4: OneMany to t3, rollup sum of t3 formula => 6 + 18 = 24
+      const t4Text: IFieldRo = { name: 't4 text v3', type: FieldType.SingleLineText };
+      const table4 = await createTable(baseId, {
+        name: 'table4_rfrm_v3',
+        fields: [t4Text],
+        records: [{ fields: { 't4 text v3': 'x' } }],
+      });
+
+      const linkT4ToT3 = await createField(table4.id, {
+        name: 't4->t3 v3',
+        type: FieldType.Link,
+        options: { relationship: Relationship.OneMany, foreignTableId: table3.id },
+      });
+
+      const rollupT4 = await createField(table4.id, {
+        name: 't4 rollup of t3 formula v3',
+        type: FieldType.Rollup,
+        options: { expression: 'sum({values})' },
+        lookupOptions: {
+          foreignTableId: table3.id,
+          lookupFieldId: formulaT3.id,
+          linkFieldId: linkT4ToT3.id,
+        },
+      });
+
+      await updateRecordByApi(table4.id, table4.records[0].id, linkT4ToT3.id, [
+        { id: table3.records[0].id },
+        { id: table3.records[1].id },
+      ]);
+
+      const t4Fields = await getFields(table4.id);
+      const t4RollupField = t4Fields.find((f) => f.id === rollupT4.id)!;
+      const t4Res = await getRecords(table4.id);
+      expect(t4Res.records[0].fields[t4RollupField.name]).toEqual(24);
     });
   });
 });

@@ -2,8 +2,8 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable sonarjs/cognitive-complexity */
 import type { INestApplication } from '@nestjs/common';
-import type { IAttachmentItem } from '@teable/core';
-import { ViewType } from '@teable/core';
+import type { IAttachmentItem, IConditionalRollupFieldOptions, IFilter } from '@teable/core';
+import { FieldKeyType, FieldType, SortFunc, ViewType } from '@teable/core';
 import type { INotifyVo, ITableFullVo } from '@teable/openapi';
 import {
   createField,
@@ -35,7 +35,57 @@ import { x_20 } from './data-helpers/20x';
 import { x_20_link, x_20_link_from_lookups } from './data-helpers/20x-link';
 import { createAwaitWithEventWithResult } from './utils/event-promise';
 
-import { createTable, permanentDeleteTable, initApp, getViews, getTable } from './utils/init-app';
+import {
+  createTable,
+  permanentDeleteTable,
+  initApp,
+  getViews,
+  getTable,
+  permanentDeleteBase,
+  getRecords,
+  getRecord,
+} from './utils/init-app';
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitForComputedRecord(
+  tableId: string,
+  recordId: string,
+  fieldIds: string[],
+  timeoutMs = 8000
+) {
+  const start = Date.now();
+  let latestRecord = await getRecord(tableId, recordId);
+  while (Date.now() - start < timeoutMs) {
+    const hasAllValues = fieldIds.every((fieldId) => latestRecord.fields?.[fieldId] !== undefined);
+    if (hasAllValues) {
+      return latestRecord;
+    }
+    await sleep(200);
+    latestRecord = await getRecord(tableId, recordId);
+  }
+  return latestRecord;
+}
+
+async function waitForRecordWithFieldValue(
+  tableId: string,
+  fieldId: string,
+  expectedValue: unknown,
+  timeoutMs = 8000
+) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const records = await getRecords(tableId, {
+      fieldKeyType: FieldKeyType.Id,
+    });
+    const matched = records.records.find((record) => record.fields?.[fieldId] === expectedValue);
+    if (matched) {
+      return matched;
+    }
+    await sleep(200);
+  }
+  return undefined;
+}
 
 function getAttachmentService(app: INestApplication) {
   return app.get<AttachmentsService>(AttachmentsService);
@@ -322,6 +372,191 @@ describe('OpenAPI BaseController for base import (e2e)', () => {
       for (const tableId of Object.values(tableIdMap)) {
         await permanentDeleteTable(base.id, tableId);
       }
+    });
+  });
+
+  describe('conditional rollup import', () => {
+    let conditionalBaseId: string;
+    let importedBaseId: string | undefined;
+    let foreignTable: ITableFullVo;
+    let hostTable: ITableFullVo;
+    let awaitConditionalExport: <T>(fn: () => Promise<T>) => Promise<{ previewUrl: string }>;
+
+    beforeAll(async () => {
+      const base = (
+        await createBase({
+          name: 'conditional_rollup_source',
+          spaceId,
+          icon: '🧮',
+        })
+      ).data;
+      conditionalBaseId = base.id;
+
+      foreignTable = await createTable(conditionalBaseId, {
+        name: 'CR_Foreign',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText },
+          { name: 'Status', type: FieldType.SingleLineText },
+        ],
+        records: [
+          { fields: { Title: 'Alpha', Status: 'Active' } },
+          { fields: { Title: 'Beta', Status: 'Inactive' } },
+        ],
+      });
+
+      hostTable = await createTable(conditionalBaseId, {
+        name: 'CR_Host',
+        fields: [{ name: 'StatusFilter', type: FieldType.SingleLineText }],
+        records: [{ fields: { StatusFilter: 'Active' } }, { fields: { StatusFilter: 'Inactive' } }],
+      });
+
+      const titleFieldId = foreignTable.fields.find((field) => field.name === 'Title')!.id;
+      const statusFieldId = foreignTable.fields.find((field) => field.name === 'Status')!.id;
+      const statusFilterFieldId = hostTable.fields.find(
+        (field) => field.name === 'StatusFilter'
+      )!.id;
+
+      const statusMatchFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: statusFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: statusFilterFieldId },
+          },
+        ],
+      };
+
+      await createField(hostTable.id, {
+        name: 'Status Rollup',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: foreignTable.id,
+          lookupFieldId: titleFieldId,
+          expression: 'array_join({values})',
+          filter: statusMatchFilter,
+        } as IConditionalRollupFieldOptions,
+      });
+
+      await createField(hostTable.id, {
+        name: 'Status Lookup',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: foreignTable.id,
+          lookupFieldId: titleFieldId,
+          filter: statusMatchFilter,
+          sort: { fieldId: titleFieldId, order: SortFunc.Asc },
+          limit: 1,
+        },
+      });
+
+      awaitConditionalExport = createAwaitWithEventWithResult<{ previewUrl: string }>(
+        app.get(EventEmitterService),
+        Events.BASE_EXPORT_COMPLETE
+      );
+    });
+
+    afterAll(async () => {
+      if (importedBaseId) {
+        await permanentDeleteBase(importedBaseId);
+      }
+      if (conditionalBaseId) {
+        await permanentDeleteBase(conditionalBaseId);
+      }
+    });
+
+    it('imports base with conditional rollup without circular dependency', async () => {
+      const { previewUrl } = await awaitConditionalExport(async () => {
+        await exportBase(conditionalBaseId);
+      });
+
+      const attachmentService = getAttachmentService(app);
+      const clsService = app.get(ClsService);
+
+      const notify = await clsService.runWith<Promise<IAttachmentItem>>(
+        {
+          user: {
+            id: userId,
+            name: 'Test User',
+            email: 'test@example.com',
+            isAdmin: null,
+          },
+        } as unknown as ClsStore,
+        async () => {
+          return await attachmentService.uploadFromUrl(appUrl + previewUrl);
+        }
+      );
+
+      const { base: importedBase } = (
+        await importBase({
+          notify: notify as unknown as INotifyVo,
+          spaceId,
+        })
+      ).data;
+
+      importedBaseId = importedBase.id;
+
+      const tableList = (await getTableList(importedBase.id)).data;
+      expect(tableList.map(({ name }) => name).sort()).toEqual(
+        [hostTable.name, foreignTable.name].sort()
+      );
+
+      const importedHostMeta = tableList.find((tableMeta) => tableMeta.name === hostTable.name)!;
+      const importedHost = await getTable(importedBase.id, importedHostMeta.id, {
+        includeContent: true,
+      });
+
+      const importedFields = importedHost.fields ?? [];
+      const importedRollupField = importedFields.find((field) => field.name === 'Status Rollup')!;
+      expect(importedRollupField.type).toBe(FieldType.ConditionalRollup);
+      expect(importedRollupField.hasError).toBeFalsy();
+
+      const importedLookupField = importedFields.find((field) => field.name === 'Status Lookup')!;
+      expect(importedLookupField.isLookup).toBeTruthy();
+      expect(importedLookupField.isConditionalLookup).toBeTruthy();
+      expect(importedLookupField.hasError).toBeFalsy();
+      const lookupOptions =
+        typeof importedLookupField.lookupOptions === 'string'
+          ? (JSON.parse(importedLookupField.lookupOptions) as {
+              sort?: { fieldId: string; order?: SortFunc };
+            })
+          : (importedLookupField.lookupOptions as
+              | { sort?: { fieldId: string; order?: SortFunc } }
+              | undefined);
+      expect(lookupOptions?.sort?.order).toBe(SortFunc.Asc);
+
+      const importedStatusFilter = importedFields.find((field) => field.name === 'StatusFilter')!;
+
+      const activeRecordMeta = await waitForRecordWithFieldValue(
+        importedHostMeta.id,
+        importedStatusFilter.id,
+        'Active'
+      );
+      const inactiveRecordMeta = await waitForRecordWithFieldValue(
+        importedHostMeta.id,
+        importedStatusFilter.id,
+        'Inactive'
+      );
+
+      expect(activeRecordMeta).toBeDefined();
+      expect(inactiveRecordMeta).toBeDefined();
+
+      const activeRecord = await waitForComputedRecord(importedHostMeta.id, activeRecordMeta!.id, [
+        importedRollupField.id,
+        importedLookupField.id,
+      ]);
+      const inactiveRecord = await waitForComputedRecord(
+        importedHostMeta.id,
+        inactiveRecordMeta!.id,
+        [importedRollupField.id, importedLookupField.id]
+      );
+
+      expect(activeRecord.fields?.[importedRollupField.id]).toBe('Alpha');
+      expect(inactiveRecord.fields?.[importedRollupField.id]).toBe('Beta');
+      expect(activeRecord.fields?.[importedLookupField.id]).toEqual(['Alpha']);
+      expect(inactiveRecord.fields?.[importedLookupField.id]).toEqual(['Beta']);
     });
   });
 });

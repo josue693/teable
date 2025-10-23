@@ -150,6 +150,9 @@
       "lookup": {
         "title": "{{lookupFieldName}} (з {{linkFieldName}})"
       },
+      "conditionalLookup": {
+        "title": "{{lookupFieldName}} (відфільтровано з {{tableName}})"
+      },
       "rollup": {
         "title": "{{lookupFieldName}} Зведення (з {{linkFieldName}})",
         "rollup": "Зведення",
@@ -229,7 +232,7 @@
       "self": "Я",
       "selectTable": "Виберіть таблицю...",
       "selectBase": "Виберіть базу...",
-      "linkFromExternalBase": "Посилання із зовнішньої бази",
+      "linkFromAnotherBase": "Посилання із зовнішньої бази",
       "inSelfLink": "у власному посиланні",
       "betweenTwoTables": "між двома столами",
       "tips": "Поради",
@@ -243,7 +246,8 @@
       "calculating": "Обчислення...",
       "doSaveChanges": "Ви хочете зберегти внесені зміни?",
       "linkFieldToLookup": "Зв'язане поле запису для пошуку",
-      "lookupToTable": "Поле з {{tableName}}, яке потрібно знайти",
+      "lookupToTable": "Поле з <bold>{{tableName}}</bold>, яке потрібно знайти",
+      "rollupToTable": "Поле з <bold>{{tableName}}</bold>, яке потрібно знайти",
       "selectField": "Виберіть поле...",
       "linkTable": "Таблиця посилань",
       "linkBase": "База посилань",
@@ -260,7 +264,18 @@
       "filter": "Фільтрувати записи",
       "hideFields": "Приховати поля",
       "moreOptions": "Більше параметрів",
-      "allowNewOptionsWhenEditing": "Дозволити нові параметри під час редагування"
+      "allowNewOptionsWhenEditing": "Дозволити нові параметри під час редагування",
+      "conditionalLookup": {
+        "sortLimitToggleLabel": "Sort linked records and limit the number of matches",
+        "sortLabel": "Sort results",
+        "orderPlaceholder": "Select an order",
+        "clearSort": "Clear sort",
+        "limitLabel": "Maximum records to include",
+        "limitPlaceholder": "Leave blank to include all matches",
+        "limitHint": "We only keep up to {{limit}} matching records.",
+        "sortMissingWarningTitle": "Sorting field unavailable",
+        "sortMissingWarningDescription": "The field that powered this sort was deleted. Results ignore the sort and only enforce the limit."
+      }
     },
     "subTitle": {
       "link": "Посилання на записи у вибраній таблиці",
@@ -277,6 +292,7 @@
       "rating": "Додайте оцінку за попередньо визначеною шкалою.",
       "formula": "Обчислити значення на основі полів.",
       "rollup": "Підсумувати дані з пов'язаних записів.",
+      "conditionalLookup": "Показує пов'язані значення, що відповідають заданим фільтрам.",
       "count": "Підрахувати кількість зв'язаних записів.",
       "createdTime": "Перегляньте дату та час створення кожного запису.",
       "lastModifiedTime": "Дивіться дату й час останнього редагування деяких або всіх полів у записі.",

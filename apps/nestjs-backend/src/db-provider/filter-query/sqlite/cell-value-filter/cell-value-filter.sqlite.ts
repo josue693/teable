@@ -1,22 +1,30 @@
-import type { IFilterOperator, IFilterValue } from '@teable/core';
+import type { FieldCore, IFilterOperator, IFilterValue } from '@teable/core';
 import {
   CellValueType,
   contains,
   doesNotContain,
   FieldType,
+  isFieldReferenceValue,
+  isNoneOf,
   literalValueListSchema,
 } from '@teable/core';
 import type { Knex } from 'knex';
-import type { IFieldInstance } from '../../../../features/field/model/factory';
+import type { IDbProvider } from '../../../db.provider.interface';
 import { AbstractCellValueFilter } from '../../cell-value-filter.abstract';
 
 export class CellValueFilterSqlite extends AbstractCellValueFilter {
   isNotOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: IFilterValue
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
     const { cellValueType } = this.field;
+    if (isFieldReferenceValue(value)) {
+      const ref = this.resolveFieldReference(value);
+      builderClient.whereRaw(`ifnull(${this.tableColumnRef}, '') != ${ref}`);
+      return builderClient;
+    }
     const parseValue = cellValueType === CellValueType.Number ? Number(value) : value;
 
     builderClient.whereRaw(`ifnull(${this.tableColumnRef}, '') != ?`, [parseValue]);
@@ -26,8 +34,10 @@ export class CellValueFilterSqlite extends AbstractCellValueFilter {
   doesNotContainOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: IFilterValue
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    this.ensureLiteralValue(value, doesNotContain.value);
     builderClient.whereRaw(`ifnull(${this.tableColumnRef}, '') not like ?`, [`%${value}%`]);
     return builderClient;
   }
@@ -35,8 +45,10 @@ export class CellValueFilterSqlite extends AbstractCellValueFilter {
   isNoneOfOperatorHandler(
     builderClient: Knex.QueryBuilder,
     _operator: IFilterOperator,
-    value: IFilterValue
+    value: IFilterValue,
+    _dbProvider: IDbProvider
   ): Knex.QueryBuilder {
+    this.ensureLiteralValue(value, isNoneOf.value);
     const valueList = literalValueListSchema.parse(value);
 
     const sql = `ifnull(${this.tableColumnRef}, '') not in (${this.createSqlPlaceholders(valueList)})`;
@@ -44,7 +56,7 @@ export class CellValueFilterSqlite extends AbstractCellValueFilter {
     return builderClient;
   }
 
-  protected getJsonQueryColumn(field: IFieldInstance, operator: IFilterOperator): string {
+  protected getJsonQueryColumn(field: FieldCore, operator: IFilterOperator): string {
     const defaultJsonColumn = 'json_each.value';
     if (field.type === FieldType.Link) {
       const object = field.isMultipleCellValue ? defaultJsonColumn : field.dbFieldName;

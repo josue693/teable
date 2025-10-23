@@ -1,8 +1,16 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { INestApplication } from '@nestjs/common';
-import type { IFieldRo, IFieldVo, ILookupOptionsRo, IRecord, LinkFieldCore } from '@teable/core';
+import type {
+  IFieldRo,
+  IFieldVo,
+  IFilter,
+  ILookupOptionsRo,
+  IRecord,
+  LinkFieldCore,
+} from '@teable/core';
 import {
   Colors,
   FieldKeyType,
@@ -14,8 +22,10 @@ import {
 import type { ITableFullVo } from '@teable/openapi';
 import {
   createField,
+  convertField,
   createTable,
   permanentDeleteTable,
+  getField,
   getFields,
   initApp,
   updateRecord,
@@ -206,13 +216,12 @@ describe('OpenAPI Rollup field (e2e)', () => {
       type: FieldType.Rollup,
       options: {
         expression,
-        formatting:
-          expression.startsWith('count') || expression.startsWith('sum')
-            ? {
-                type: NumberFormattingType.Decimal,
-                precision: 0,
-              }
-            : undefined,
+        formatting: ['count', 'sum', 'average'].some((prefix) => expression.startsWith(prefix))
+          ? {
+              type: NumberFormattingType.Decimal,
+              precision: 0,
+            }
+          : undefined,
       },
       lookupOptions: {
         foreignTableId: foreignTable.id,
@@ -337,6 +346,30 @@ describe('OpenAPI Rollup field (e2e)', () => {
     expect(record6.fields[rollupFieldVo.id]).toEqual(123);
   });
 
+  it('should calculate average in one - many rollup field', async () => {
+    const lookedUpToField = getFieldByType(table2.fields, FieldType.Number);
+    const linkFieldId = getFieldByType(table1.fields, FieldType.Link).id;
+    const rollupFieldVo = await rollupFrom(table1, lookedUpToField.id, 'average({values})');
+
+    await updateRecordField(table2.id, table2.records[1].id, lookedUpToField.id, 20);
+    await updateRecordField(table2.id, table2.records[2].id, lookedUpToField.id, 40);
+
+    await updateRecordField(table1.id, table1.records[1].id, linkFieldId, [
+      { id: table2.records[1].id },
+      { id: table2.records[2].id },
+    ]);
+
+    const record = await getRecord(table1.id, table1.records[1].id);
+    expect(record.fields[rollupFieldVo.id]).toEqual(30);
+
+    await updateRecordField(table1.id, table1.records[1].id, linkFieldId, [
+      { id: table2.records[2].id },
+    ]);
+
+    const recordAfter = await getRecord(table1.id, table1.records[1].id);
+    expect(recordAfter.fields[rollupFieldVo.id]).toEqual(40);
+  });
+
   it('should update many - one rollupField by replace a linkRecord from cell', async () => {
     const lookedUpToField = getFieldByType(table2.fields, FieldType.Number);
     const rollupFieldVo = await rollupFrom(table1, lookedUpToField.id);
@@ -411,6 +444,166 @@ describe('OpenAPI Rollup field (e2e)', () => {
 
     const recordAfter1 = await getRecord(table1.id, table1.records[1].id);
     expect(recordAfter1.fields[rollupFieldVo.id]).toEqual('123, 456');
+  });
+
+  describe('rollup expression coverage', () => {
+    const baseId = globalThis.testConfig.baseId;
+
+    const setupRollupFixtures = async () => {
+      const foreign = await createTable(baseId, {
+        name: 'RollupExpr_Foreign',
+        fields: [
+          { name: 'Label', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Amount', type: FieldType.Number } as IFieldRo,
+          { name: 'Flag', type: FieldType.Checkbox } as IFieldRo,
+        ],
+        records: [
+          { fields: { Label: 'Alpha', Amount: 10, Flag: true } },
+          { fields: { Label: 'Beta', Amount: 20, Flag: false } },
+        ],
+      });
+
+      const host = await createTable(baseId, {
+        name: 'RollupExpr_Host',
+        fields: [{ name: 'Name', type: FieldType.SingleLineText } as IFieldRo],
+        records: [{ fields: { Name: 'Rollup Holder' } }],
+      });
+
+      const linkField = await createField(host.id, {
+        name: 'Links',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: foreign.id,
+        },
+      } as IFieldRo);
+
+      const hostRecordId = host.records[0].id;
+      await updateRecordField(
+        host.id,
+        hostRecordId,
+        linkField.id,
+        foreign.records.map((record) => ({ id: record.id }))
+      );
+
+      const amountId = foreign.fields.find((field) => field.name === 'Amount')!.id;
+      const labelId = foreign.fields.find((field) => field.name === 'Label')!.id;
+      const flagId = foreign.fields.find((field) => field.name === 'Flag')!.id;
+
+      return { foreign, host, linkField, hostRecordId, amountId, labelId, flagId };
+    };
+
+    const rollupCases: Array<{
+      expression: string;
+      lookupFieldKey: 'amountId' | 'labelId' | 'flagId';
+      expected: unknown;
+    }> = [
+      { expression: 'countall({values})', lookupFieldKey: 'amountId', expected: 2 },
+      { expression: 'counta({values})', lookupFieldKey: 'labelId', expected: 2 },
+      { expression: 'count({values})', lookupFieldKey: 'amountId', expected: 2 },
+      { expression: 'sum({values})', lookupFieldKey: 'amountId', expected: 30 },
+      { expression: 'average({values})', lookupFieldKey: 'amountId', expected: 15 },
+      { expression: 'max({values})', lookupFieldKey: 'amountId', expected: 20 },
+      { expression: 'min({values})', lookupFieldKey: 'amountId', expected: 10 },
+      { expression: 'and({values})', lookupFieldKey: 'flagId', expected: true },
+      { expression: 'or({values})', lookupFieldKey: 'flagId', expected: true },
+      { expression: 'xor({values})', lookupFieldKey: 'flagId', expected: true },
+      { expression: 'array_join({values})', lookupFieldKey: 'labelId', expected: 'Alpha, Beta' },
+      {
+        expression: 'array_unique({values})',
+        lookupFieldKey: 'labelId',
+        expected: ['Alpha', 'Beta'],
+      },
+      {
+        expression: 'array_compact({values})',
+        lookupFieldKey: 'labelId',
+        expected: ['Alpha', 'Beta'],
+      },
+      { expression: 'concatenate({values})', lookupFieldKey: 'labelId', expected: 'Alpha, Beta' },
+    ];
+
+    it.each(rollupCases)(
+      'should compute rollup using %s',
+      async ({ expression, lookupFieldKey, expected }) => {
+        let fixtures: Awaited<ReturnType<typeof setupRollupFixtures>> | undefined;
+        try {
+          fixtures = await setupRollupFixtures();
+          const { foreign, host, linkField, hostRecordId } = fixtures;
+          const lookupFieldId = fixtures[lookupFieldKey];
+
+          const field = await createField(host.id, {
+            name: `rollup ${expression}`,
+            type: FieldType.Rollup,
+            options: { expression },
+            lookupOptions: {
+              foreignTableId: foreign.id,
+              linkFieldId: linkField.id,
+              lookupFieldId,
+            } as ILookupOptionsRo,
+          } as IFieldRo);
+
+          const record = await getRecord(host.id, hostRecordId);
+          const value = record.fields[field.id];
+
+          if (Array.isArray(expected)) {
+            expect(Array.isArray(value)).toBe(true);
+            const sortedExpected = [...expected].sort();
+            const sortedValue = [...(value as unknown[])].sort();
+            expect(sortedValue).toEqual(sortedExpected);
+          } else if (typeof expected === 'string') {
+            if (expected.includes(', ')) {
+              expect((value as string).split(', ').sort()).toEqual(expected.split(', ').sort());
+            } else {
+              expect(value).toEqual(expected);
+            }
+          } else {
+            expect(value).toEqual(expected);
+          }
+        } finally {
+          if (fixtures?.host) {
+            await permanentDeleteTable(baseId, fixtures.host.id);
+          }
+          if (fixtures?.foreign) {
+            await permanentDeleteTable(baseId, fixtures.foreign.id);
+          }
+        }
+      }
+    );
+  });
+
+  it('should create rollup fields with array join, unique, and compact expressions', async () => {
+    const textField = getFieldByType(table2.fields, FieldType.SingleLineText);
+    const linkFieldId = getFieldByType(table1.fields, FieldType.Link).id;
+
+    // Link all foreign records to a host record for evaluation
+    await updateRecordField(table1.id, table1.records[1].id, linkFieldId, [
+      { id: table2.records[0].id },
+      { id: table2.records[1].id },
+      { id: table2.records[2].id },
+    ]);
+
+    // Populate duplicate values to verify join & unique behaviours
+    await updateRecordField(table2.id, table2.records[0].id, textField.id, 'Alpha');
+    await updateRecordField(table2.id, table2.records[1].id, textField.id, 'Alpha');
+    await updateRecordField(table2.id, table2.records[2].id, textField.id, 'Beta');
+
+    const arrayJoinRollup = await rollupFrom(table1, textField.id, 'array_join({values})');
+    const arrayUniqueRollup = await rollupFrom(table1, textField.id, 'array_unique({values})');
+
+    let record = await getRecord(table1.id, table1.records[1].id);
+    const joinedValues = (record.fields[arrayJoinRollup.id] as string).split(', ').sort();
+    expect(joinedValues).toEqual(['Alpha', 'Alpha', 'Beta'].sort());
+    const uniqueValues = [...(record.fields[arrayUniqueRollup.id] as string[])].sort();
+    expect(uniqueValues).toEqual(['Alpha', 'Beta']);
+
+    // Update values to include blanks and verify compact removes empty entries
+    await updateRecordField(table2.id, table2.records[0].id, textField.id, 'Gamma');
+    await updateRecordField(table2.id, table2.records[1].id, textField.id, '');
+    await updateRecordField(table2.id, table2.records[2].id, textField.id, null);
+
+    const arrayCompactRollup = await rollupFrom(table1, textField.id, 'array_compact({values})');
+    record = await getRecord(table1.id, table1.records[1].id);
+    expect(record.fields[arrayCompactRollup.id]).toEqual(['Gamma']);
   });
 
   it('should roll up a flat array  multiple select field -> one - many rollup field', async () => {
@@ -505,6 +698,311 @@ describe('OpenAPI Rollup field (e2e)', () => {
     await rollupFrom(table1, lookedUpToField2.id, 'count({values})');
   });
 
+  describe('rollup targeting conditional computed fields', () => {
+    let leaf: ITableFullVo;
+    let middle: ITableFullVo;
+    let root: ITableFullVo;
+    let activeScoreConditionalRollup: IFieldVo;
+    let activeItemConditionalLookup: IFieldVo;
+    let rootLinkFieldId: string;
+
+    beforeAll(async () => {
+      leaf = await createTable(baseId, {
+        name: 'RollupConditional_Leaf',
+        fields: [
+          { name: 'Item', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Category', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Score', type: FieldType.Number } as IFieldRo,
+          { name: 'Status', type: FieldType.SingleLineText } as IFieldRo,
+        ],
+        records: [
+          { fields: { Item: 'Alpha', Category: 'Hardware', Score: 60, Status: 'Active' } },
+          { fields: { Item: 'Beta', Category: 'Hardware', Score: 40, Status: 'Inactive' } },
+          { fields: { Item: 'Gamma', Category: 'Software', Score: 80, Status: 'Active' } },
+        ],
+      });
+
+      const leafItemId = leaf.fields.find((field) => field.name === 'Item')!.id;
+      const leafCategoryId = leaf.fields.find((field) => field.name === 'Category')!.id;
+      const leafScoreId = leaf.fields.find((field) => field.name === 'Score')!.id;
+      const leafStatusId = leaf.fields.find((field) => field.name === 'Status')!.id;
+
+      middle = await createTable(baseId, {
+        name: 'RollupConditional_Middle',
+        fields: [
+          { name: 'Summary', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Target Category', type: FieldType.SingleLineText } as IFieldRo,
+        ],
+        records: [
+          { fields: { Summary: 'Hardware Overview', 'Target Category': 'Hardware' } },
+          { fields: { Summary: 'Software Overview', 'Target Category': 'Software' } },
+        ],
+      });
+      const targetCategoryFieldId = middle.fields.find(
+        (field) => field.name === 'Target Category'
+      )!.id;
+
+      const categoryMatchFilter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: leafCategoryId,
+            operator: 'is',
+            value: { type: 'field', fieldId: targetCategoryFieldId },
+          },
+          {
+            fieldId: leafStatusId,
+            operator: 'is',
+            value: 'Active',
+          },
+        ],
+      } as any;
+
+      activeScoreConditionalRollup = await createField(middle.id, {
+        name: 'Active Category Score',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: leaf.id,
+          lookupFieldId: leafScoreId,
+          expression: 'sum({values})',
+          filter: categoryMatchFilter,
+        },
+      } as IFieldRo);
+
+      activeItemConditionalLookup = await createField(middle.id, {
+        name: 'Active Item Names',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        isConditionalLookup: true,
+        lookupOptions: {
+          foreignTableId: leaf.id,
+          lookupFieldId: leafItemId,
+          filter: categoryMatchFilter,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      await updateTableFields(middle);
+      tables.push(middle);
+
+      root = await createTable(baseId, {
+        name: 'RollupConditional_Root',
+        fields: [{ name: 'Region', type: FieldType.SingleLineText } as IFieldRo],
+        records: [
+          { fields: { Region: 'North' } },
+          { fields: { Region: 'Global' } },
+          { fields: { Region: 'Unlinked' } },
+        ],
+      });
+
+      const rootLinkField = await createField(root.id, {
+        name: 'Middle Connection',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyMany,
+          foreignTableId: middle.id,
+        },
+      });
+      rootLinkFieldId = rootLinkField.id;
+
+      await updateTableFields(root);
+      tables.push(root);
+
+      await updateRecordField(root.id, root.records[0].id, rootLinkFieldId, [
+        { id: middle.records[0].id },
+      ]);
+      await updateRecordField(root.id, root.records[1].id, rootLinkFieldId, [
+        { id: middle.records[0].id },
+        { id: middle.records[1].id },
+      ]);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, root.id);
+      await permanentDeleteTable(baseId, middle.id);
+      await permanentDeleteTable(baseId, leaf.id);
+    });
+
+    it('should roll up conditional rollup values across linked tables', async () => {
+      const hardwareSummary = await getRecord(middle.id, middle.records[0].id);
+      const softwareSummary = await getRecord(middle.id, middle.records[1].id);
+      expect(hardwareSummary.fields[activeScoreConditionalRollup.id]).toEqual(60);
+      expect(softwareSummary.fields[activeScoreConditionalRollup.id]).toEqual(80);
+
+      const rollupFieldVo = await rollupFrom(
+        root,
+        activeScoreConditionalRollup.id,
+        'sum({values})'
+      );
+
+      const north = await getRecord(root.id, root.records[0].id);
+      const global = await getRecord(root.id, root.records[1].id);
+      const unlinked = await getRecord(root.id, root.records[2].id);
+
+      expect(north.fields[rollupFieldVo.id]).toEqual(60);
+      expect(global.fields[rollupFieldVo.id]).toEqual(140);
+      expect(unlinked.fields[rollupFieldVo.id]).toEqual(0);
+    });
+
+    it('should aggregate conditional lookup chains with rollup fields', async () => {
+      const hardwareSummary = await getRecord(middle.id, middle.records[0].id);
+      const softwareSummary = await getRecord(middle.id, middle.records[1].id);
+      expect(hardwareSummary.fields[activeItemConditionalLookup.id]).toEqual(['Alpha']);
+      expect(softwareSummary.fields[activeItemConditionalLookup.id]).toEqual(['Gamma']);
+
+      const rollupFieldVo = await rollupFrom(
+        root,
+        activeItemConditionalLookup.id,
+        'countall({values})'
+      );
+
+      const north = await getRecord(root.id, root.records[0].id);
+      const global = await getRecord(root.id, root.records[1].id);
+      const unlinked = await getRecord(root.id, root.records[2].id);
+
+      expect(north.fields[rollupFieldVo.id]).toEqual(1);
+      expect(global.fields[rollupFieldVo.id]).toEqual(2);
+      expect(unlinked.fields[rollupFieldVo.id]).toEqual(0);
+    });
+
+    it('should concatenate conditional lookup values when rolled up', async () => {
+      const decodeRollupValue = (value: unknown) => {
+        if (value == null) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') {
+          if (value === '') return [];
+          const tryParse = (input: string) => {
+            try {
+              return JSON.parse(input);
+            } catch {
+              return undefined;
+            }
+          };
+
+          const direct = tryParse(value);
+          if (direct !== undefined) return direct;
+
+          const parts = value.split('],').map((part) => {
+            const normalized = part.trim();
+            const withBracket = normalized.endsWith(']') ? normalized : `${normalized}]`;
+            const parsed = tryParse(withBracket);
+            return parsed ?? [normalized.replace(/^\[|"|'|\]$/g, '')];
+          });
+          return parts.flat();
+        }
+        return value;
+      };
+
+      const rollupFieldVo = await rollupFrom(
+        root,
+        activeItemConditionalLookup.id,
+        'concatenate({values})'
+      );
+
+      const north = await getRecord(root.id, root.records[0].id);
+      const global = await getRecord(root.id, root.records[1].id);
+      const unlinked = await getRecord(root.id, root.records[2].id);
+
+      expect(decodeRollupValue(north.fields[rollupFieldVo.id])).toEqual(['Alpha']);
+      expect(decodeRollupValue(global.fields[rollupFieldVo.id])).toEqual(['Alpha', 'Gamma']);
+      expect(decodeRollupValue(unlinked.fields[rollupFieldVo.id])).toEqual([]);
+    });
+  });
+
+  describe('Rollup aggregation validation', () => {
+    it('keeps numeric aggregation valid for numeric sources', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'RollupValidationForeign',
+        fields: [{ name: 'Amount', type: FieldType.Number } as IFieldRo],
+      });
+      const host = await createTable(baseId, {
+        name: 'RollupValidationHost',
+        fields: [{ name: 'Label', type: FieldType.SingleLineText } as IFieldRo],
+      });
+      const amountFieldId = foreign.fields.find((field) => field.name === 'Amount')!.id;
+
+      try {
+        const linkField = await createField(host.id, {
+          name: 'Link to Foreign',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.OneMany,
+            foreignTableId: foreign.id,
+          },
+        } as IFieldRo);
+
+        const rollupField = await createField(host.id, {
+          name: 'Sum Amount',
+          type: FieldType.Rollup,
+          options: {
+            expression: 'sum({values})',
+          },
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            linkFieldId: linkField.id,
+            lookupFieldId: amountFieldId,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const fetched = await getField(host.id, rollupField.id);
+        expect(fetched.hasError).toBeFalsy();
+      } finally {
+        await permanentDeleteTable(baseId, host.id);
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
+    it('marks rollup as errored when numeric source becomes text', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'RollupValidationForeignConversion',
+        fields: [{ name: 'Amount', type: FieldType.Number } as IFieldRo],
+      });
+      const host = await createTable(baseId, {
+        name: 'RollupValidationHostConversion',
+        fields: [{ name: 'Label', type: FieldType.SingleLineText } as IFieldRo],
+      });
+      const amountFieldId = foreign.fields.find((field) => field.name === 'Amount')!.id;
+
+      try {
+        const linkField = await createField(host.id, {
+          name: 'Link to Foreign',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.OneMany,
+            foreignTableId: foreign.id,
+          },
+        } as IFieldRo);
+
+        const rollupField = await createField(host.id, {
+          name: 'Sum Amount',
+          type: FieldType.Rollup,
+          options: {
+            expression: 'sum({values})',
+          },
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            linkFieldId: linkField.id,
+            lookupFieldId: amountFieldId,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const initial = await getField(host.id, rollupField.id);
+        expect(initial.hasError).toBeFalsy();
+
+        await convertField(foreign.id, amountFieldId, {
+          name: 'Amount',
+          type: FieldType.SingleLineText,
+          options: {},
+        } as IFieldRo);
+
+        const afterConvert = await getField(host.id, rollupField.id);
+        expect(afterConvert.hasError).toBe(true);
+      } finally {
+        await permanentDeleteTable(baseId, host.id);
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+  });
+
   describe('Roll up corner case', () => {
     let table1: ITableFullVo;
     let table2: ITableFullVo;
@@ -514,7 +1012,7 @@ describe('OpenAPI Rollup field (e2e)', () => {
       table2 = await createTable(baseId, {});
     });
 
-    it('should update multiple field when rollup  to a same a formula field', async () => {
+    it('should update multiple field when rollup  to sum a formula field', async () => {
       const numberField = await createField(table1.id, {
         type: FieldType.Number,
       });

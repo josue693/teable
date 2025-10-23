@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { type IRecord } from '@teable/core';
+import { FieldType, type IRecord } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { uniq } from 'lodash';
@@ -7,12 +7,11 @@ import { InjectModel } from 'nest-knexjs';
 import { concatMap, lastValueFrom, map, range, toArray } from 'rxjs';
 import { ThresholdConfig, IThresholdConfig } from '../../configs/threshold.config';
 import { Timing } from '../../utils/timing';
-import { systemDbFieldNames } from '../field/constant';
 import type { IFieldInstance, IFieldMap } from '../field/model/factory';
-import { BatchService } from './batch.service';
+import { InjectRecordQueryBuilder, IRecordQueryBuilder } from '../record/query-builder';
 import type { IFkRecordMap } from './link.service';
-import type { IGraphItem, ITopoItem } from './reference.service';
 import { ReferenceService } from './reference.service';
+import type { IGraphItem, ITopoItem } from './utils/dfs';
 import { getTopoOrders, prependStartFieldIds } from './utils/dfs';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -33,9 +32,9 @@ export interface ITopoOrdersContext {
 @Injectable()
 export class FieldCalculationService {
   constructor(
-    private readonly batchService: BatchService,
     private readonly prismaService: PrismaService,
     private readonly referenceService: ReferenceService,
+    @InjectRecordQueryBuilder() private readonly recordQueryBuilder: IRecordQueryBuilder,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
     @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig
   ) {}
@@ -76,20 +75,26 @@ export class FieldCalculationService {
 
   private async getRecordsByPage(
     dbTableName: string,
-    dbFieldNames: string[],
+    fields: IFieldInstance[],
     page: number,
     chunkSize: number
   ) {
-    const query = this.knex(dbTableName)
-      .select([...dbFieldNames, ...systemDbFieldNames])
+    const { qb } = await this.recordQueryBuilder.createRecordQueryBuilder(dbTableName, {
+      tableIdOrDbTableName: dbTableName,
+      viewId: undefined,
+    });
+    const query = qb
       .where((builder) => {
-        dbFieldNames.forEach((fieldNames, index) => {
-          if (index === 0) {
-            builder.whereNotNull(fieldNames);
-          } else {
-            builder.orWhereNotNull(fieldNames);
-          }
-        });
+        fields
+          .filter((field) => !field.isComputed && field.type !== FieldType.Link)
+          .forEach((field, index) => {
+            const dbName = field.dbFieldName;
+            if (index === 0) {
+              builder.whereNotNull(dbName);
+            } else {
+              builder.orWhereNotNull(dbName);
+            }
+          });
       })
       .orderBy('__auto_number')
       .limit(chunkSize)
@@ -108,13 +113,12 @@ export class FieldCalculationService {
     for (const dbTableName in dbTableName2fields) {
       // deduplication is needed
       const rowCount = await this.getRowCount(dbTableName);
-      const dbFieldNames = dbTableName2fields[dbTableName].map((f) => f.dbFieldName);
       const totalPages = Math.ceil(rowCount / chunkSize);
       const fields = dbTableName2fields[dbTableName];
 
       const records = await lastValueFrom(
         range(0, totalPages).pipe(
-          concatMap((page) => this.getRecordsByPage(dbTableName, dbFieldNames, page, chunkSize)),
+          concatMap((page) => this.getRecordsByPage(dbTableName, fields, page, chunkSize)),
           toArray(),
           map((records) => records.flat())
         )
@@ -127,15 +131,6 @@ export class FieldCalculationService {
     return results;
   }
 
-  async calculateFields(tableId: string, fieldIds: string[], recordIds?: string[]) {
-    if (!fieldIds.length) {
-      return undefined;
-    }
-
-    const context = await this.getTopoOrdersContext(fieldIds);
-    await this.calculateChanges(tableId, context, recordIds);
-  }
-
   @Timing()
   async getRowCount(dbTableName: string) {
     const query = this.knex.count('*', { as: 'count' }).from(dbTableName).toQuery();
@@ -145,61 +140,5 @@ export class FieldCalculationService {
     return Number(count);
   }
 
-  async getRecordIds(dbTableName: string, page: number, chunkSize: number) {
-    const query = this.knex(dbTableName)
-      .select({ id: '__id' })
-      .orderBy('__auto_number')
-      .limit(chunkSize)
-      .offset(page * chunkSize)
-      .toQuery();
-    const result = await this.prismaService.txClient().$queryRawUnsafe<{ id: string }[]>(query);
-    return result.map((item) => item.id);
-  }
-
-  @Timing()
-  private async calculateChanges(
-    tableId: string,
-    context: ITopoOrdersContext,
-    recordIds?: string[]
-  ) {
-    const dbTableName = context.tableId2DbTableName[tableId];
-    const chunkSize = this.thresholdConfig.calcChunkSize;
-    const fieldIds = context.startFieldIds;
-    const taskFunction = async (ids: string[]) =>
-      this.referenceService.calculate({
-        ...context,
-        startZone: Object.fromEntries(fieldIds.map((fieldId) => [fieldId, ids])),
-      });
-
-    if (recordIds && recordIds.length > 0) {
-      await taskFunction(recordIds);
-      return;
-    }
-
-    const rowCount = await this.getRowCount(dbTableName);
-    const totalPages = Math.ceil(rowCount / chunkSize);
-
-    for (let page = 0; page < totalPages; page++) {
-      const ids = await this.getRecordIds(dbTableName, page, chunkSize);
-      await taskFunction(ids);
-    }
-  }
-
-  async calComputedFieldsByRecordIds(tableId: string, recordIds: string[]) {
-    const fieldRaws = await this.prismaService.field.findMany({
-      where: { tableId, isComputed: true, deletedTime: null, hasError: null },
-      select: { id: true },
-    });
-
-    const computedFieldIds = fieldRaws.map((fieldRaw) => fieldRaw.id);
-
-    // calculate by origin ops and link derivation
-    const result = await this.calculateFields(tableId, computedFieldIds, recordIds);
-
-    if (result) {
-      const { opsMap, fieldMap, tableId2DbTableName } = result;
-
-      await this.batchService.updateRecords(opsMap, fieldMap, tableId2DbTableName);
-    }
-  }
+  // Legacy bulk recalculation helpers removed
 }

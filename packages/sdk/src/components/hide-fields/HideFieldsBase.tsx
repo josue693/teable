@@ -124,6 +124,7 @@ export const HideFieldsBase = (props: IHideFieldsBaseProps) => {
                 const { id, name, type, isLookup, isPrimary, aiConfig, canReadFieldRecord } = field;
                 const { Icon } = fieldStaticGetter(type, {
                   isLookup,
+                  isConditionalLookup: field.isConditionalLookup,
                   hasAiConfig: Boolean(aiConfig),
                   deniedReadRecord: !canReadFieldRecord,
                 });
@@ -145,7 +146,7 @@ export const HideFieldsBase = (props: IHideFieldsBaseProps) => {
                             <TooltipProvider>
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <div className="flex flex-1 items-center p-0">
+                                  <div className="flex flex-1 items-center truncate p-0">
                                     <Label
                                       htmlFor={id}
                                       className="flex flex-1 cursor-pointer items-center truncate p-2"

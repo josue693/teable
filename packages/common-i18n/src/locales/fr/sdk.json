@@ -103,6 +103,12 @@
       "expressionRequired": "L'expression est requise",
       "unsupportedTip": "Le rollup ne prend en charge que les champs de lien et de rollup"
     },
+    "conditionalRollup": {
+      "filterRequired": "Le filtre doit contenir au moins une condition"
+    },
+    "conditionalLookup": {
+      "filterRequired": "La recherche conditionnelle nécessite au moins un filtre"
+    },
     "aiConfig": {
       "modelKeyRequired": "Le modèle est requis",
       "typeNotSupported": "Type d'AI non pris en charge",
@@ -268,13 +274,39 @@
       "attachment": "Pièce jointe",
       "checkbox": "Case à cocher",
       "rollup": "Résumé",
+      "conditionalRollup": "Résumé conditionnel",
       "user": "Utilisateur",
       "rating": "Évaluation",
       "autoNumber": "Numéro automatique",
       "lookup": "Recherche",
+      "conditionalLookup": "Recherche conditionnelle",
       "button": "Bouton",
       "createdBy": "Créé par",
       "lastModifiedBy": "Dernière modification par"
+    },
+    "description": {
+      "singleLineText": "Enregistrez de courts textes comme des noms ou titres.",
+      "longText": "Saisissez des notes et descriptions plus longues.",
+      "singleSelect": "Choisissez une option dans une liste.",
+      "number": "Suivez des valeurs numériques avec formatage.",
+      "multipleSelect": "Étiquetez les enregistrements avec plusieurs choix.",
+      "link": "Reliez cet enregistrement à une autre table.",
+      "formula": "Calculez des valeurs à partir d'autres champs.",
+      "date": "Enregistrez des dates ou des heures.",
+      "createdTime": "Affiche quand l'enregistrement a été créé.",
+      "lastModifiedTime": "Affiche la dernière mise à jour.",
+      "attachment": "Téléversez des fichiers ou des images.",
+      "checkbox": "Basculez un simple oui ou non.",
+      "rollup": "Résumez les enregistrements liés avec des formules.",
+      "conditionalRollup": "Résumez les données selon des conditions.",
+      "user": "Assignez les enregistrements aux membres de l'espace de travail.",
+      "rating": "Notez les éléments avec des icônes configurables.",
+      "autoNumber": "Attribuez une séquence unique à chaque enregistrement.",
+      "lookup": "Affichez les valeurs depuis des enregistrements liés.",
+      "conditionalLookup": "Affiche les valeurs liées qui répondent aux filtres définis.",
+      "button": "Lancez des actions via un bouton cliquable.",
+      "createdBy": "Indique qui a créé l'enregistrement.",
+      "lastModifiedBy": "Indique qui l'a modifié en dernier."
     },
     "link": {
       "oneWay": "Unidirectionnel",
@@ -771,8 +803,10 @@
     "tip": {
       "editing": "Modification en cours...",
       "edited": "(Modifié)",
-      "onNotify": "Vous ne serez notifié que des commentaires vous concernant si vous désactivez",
-      "offNotify": "Vous serez notifié de toutes les activités si vous activez",
+      "notifyAll": "Notifier tous les commentaires",
+      "notifyRelatedToMe": "Notifier les commentaires relatifs à moi",
+      "all": "Tous",
+      "relatedToMe": "Relatif à moi",
       "reactionUserSuffix": "a réagi avec l'emoji {{emoji}}",
       "me": "Vous",
       "connection": "et"
@@ -808,15 +842,31 @@
     "unknownErrorCode": "Code d'erreur inconnu",
     "viewNotFound": "Vue non trouvée",
     "requestTimeout": "Temps d'attente de la requête dépassé",
+    "failedDependency": "Échec de dépendance",
+    "automationNodeParseError": "Erreur d'analyse du nœud d'automatisation",
+    "automationNodeNeedTest": "Le nœud d'automatisation nécessite un test",
+    "automationNodeTestOutdated": "Test du nœud d'automatisation obsolète",
     "custom": {
       "fieldValueNotNull": "\"{{tableName}}\" champ \"{{fieldName}}\" ne permet pas les valeurs vides, veuillez les remplir complètement avant de soumettre.",
       "fieldValueDuplicate": "\"{{tableName}}\" champ \"{{fieldName}}\" ne permet pas les valeurs dupliquées, veuillez remplir une valeur unique avant de soumettre.",
       "linkFieldValueDuplicate": "\"{{fieldName}}\" champ ne permet pas les associations dupliquées avec le même enregistrement",
       "requestTimeout": "L'action actuelle est trop grande, veuillez réessayer avec un étendue plus petite.",
-      "searchTimeOut": "La recherche a expiré, veuillez réduire l'ambito de la recherche et réessayer."
+      "searchTimeOut": "La recherche a expiré, veuillez réduire l'ambito de la recherche et réessayer.",
+      "dependencyNodeRequire": "Nœud de dépendance non testé, veuillez vérifier si tous les nœuds précédents ont été testés"
+    },
+    "email": {
+      "testEmailError": "Erreur de configuration du courrier {{message}}"
     },
     "automation": {
-      "buttonClickTriggerDuplicated": "Ce champ de bouton est déjà lié à {{name}}[{{id}}] ce processus d'automatisation, veuillez sélectionner un autre champ de bouton"
+      "buttonClickTriggerDuplicated": "Ce champ de bouton est déjà lié à {{name}}[{{id}}] ce processus d'automatisation, veuillez sélectionner un autre champ de bouton",
+      "triggerNotFound": "Déclencheur non trouvé",
+      "nodeNotFound": "{{nodeId}} nœud non trouvé",
+      "workflowNotFound": "{{workflowId}} flux de travail non trouvé",
+      "triggerTestFailed": "Test du déclencheur échoué, veuillez vérifier la configuration du déclencheur",
+      "workflowTestFailed": "Test du flux de travail échoué, veuillez vérifier la configuration du flux de travail",
+      "nodeParseError": "{{name}} la configuration du nœud est incomplète ou contient des erreurs, veuillez vérifier la configuration du nœud",
+      "nodeNeedTest": "{{name}} le nœud doit être testé",
+      "nodeTestOutdated": "{{name}} le test du nœud est obsolète"
     },
     "permission": {
       "createRecordWithDeniedFields": "Vous n'avez pas la permission de créer des enregistrements avec les champs({{fields}})",

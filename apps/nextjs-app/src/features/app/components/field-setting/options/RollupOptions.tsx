@@ -1,4 +1,9 @@
-import type { IRollupFieldOptions, IUnionFormatting, IUnionShowAs } from '@teable/core';
+import type {
+  IRollupFieldOptions,
+  IUnionFormatting,
+  IUnionShowAs,
+  RollupFunction,
+} from '@teable/core';
 import {
   assertNever,
   ROLLUP_FUNCTIONS,
@@ -12,9 +17,8 @@ import { BaseSingleSelect } from '@teable/sdk/components/filter/view-filter/comp
 import { RollupField } from '@teable/sdk/model';
 import { isEmpty, isEqual } from 'lodash';
 import { useTranslation } from 'next-i18next';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { RequireCom } from '@/features/app/blocks/setting/components/RequireCom';
-import { TimeZoneFormatting } from '../formatting/TimeZoneFormatting';
 import { UnionFormatting } from '../formatting/UnionFormatting';
 import { UnionShowAs } from '../show-as/UnionShowAs';
 
@@ -42,6 +46,10 @@ export const RollupOptions = (props: {
   cellValueType?: CellValueType;
   isMultipleCellValue?: boolean;
   isLookup?: boolean;
+  availableExpressions?: IRollupFieldOptions['expression'][];
+  expressionLabelOverrides?: Partial<
+    Record<RollupFunction, { label?: string; description?: string }>
+  >;
   onChange?: (options: Partial<IRollupFieldOptions>) => void;
 }) => {
   const {
@@ -49,6 +57,8 @@ export const RollupOptions = (props: {
     isLookup,
     cellValueType = CellValueType.String,
     isMultipleCellValue,
+    availableExpressions,
+    expressionLabelOverrides,
     onChange,
   } = props;
   const { expression, formatting, showAs } = options;
@@ -83,6 +93,20 @@ export const RollupOptions = (props: {
     },
     [cellValueType, formatting, isMultipleCellValue, isLookup, options.timeZone, onChange]
   );
+
+  useEffect(() => {
+    if (!availableExpressions || availableExpressions.length === 0) {
+      return;
+    }
+    if (expression && availableExpressions.includes(expression)) {
+      return;
+    }
+    const fallbackExpression = availableExpressions[0];
+    if (!fallbackExpression) {
+      return;
+    }
+    onExpressionChange(fallbackExpression);
+  }, [availableExpressions, expression, onExpressionChange]);
 
   const onFormattingChange = useCallback(
     (newFormatting?: IUnionFormatting) => {
@@ -123,7 +147,8 @@ export const RollupOptions = (props: {
   );
 
   const candidates = useMemo(() => {
-    return ROLLUP_FUNCTIONS.map((f) => {
+    const expressions = availableExpressions ?? ROLLUP_FUNCTIONS;
+    return expressions.map((f) => {
       let name;
       let description;
       switch (f) {
@@ -142,6 +167,10 @@ export const RollupOptions = (props: {
         case 'sum({values})':
           name = t('field.default.rollup.func.sum');
           description = t('field.default.rollup.funcDesc.sum');
+          break;
+        case 'average({values})':
+          name = t('field.default.rollup.func.average');
+          description = t('field.default.rollup.funcDesc.average');
           break;
         case 'max({values})':
           name = t('field.default.rollup.func.max');
@@ -182,13 +211,21 @@ export const RollupOptions = (props: {
         default:
           assertNever(f);
       }
+
+      const override = expressionLabelOverrides?.[f];
+      if (override?.label) {
+        name = override.label;
+      }
+      if (override?.description) {
+        description = override.description;
+      }
       return {
         value: f,
         label: name,
         description,
       };
     });
-  }, [t]);
+  }, [availableExpressions, expressionLabelOverrides, t]);
 
   const displayRender = (option: (typeof candidates)[number]) => {
     const { label } = option;

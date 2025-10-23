@@ -316,6 +316,7 @@ export class BaseImportService {
     const nonCommonFieldTypes = [
       FieldType.Link,
       FieldType.Rollup,
+      FieldType.ConditionalRollup,
       FieldType.Formula,
       FieldType.Button,
     ];

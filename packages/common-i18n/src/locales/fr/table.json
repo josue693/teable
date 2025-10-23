@@ -148,6 +148,9 @@
       "lookup": {
         "title": "{{lookupFieldName}} (depuis {{linkFieldName}})"
       },
+      "conditionalLookup": {
+        "title": "{{lookupFieldName}} (filtré depuis {{tableName}})"
+      },
       "rollup": {
         "title": "{{lookupFieldName}} Rollup (depuis {{linkFieldName}})",
         "rollup": "Rollup",
@@ -237,7 +240,8 @@
       "calculating": "Calcul en cours...",
       "doSaveChanges": "Voulez-vous enregistrer les modifications apportées ?",
       "linkFieldToLookup": "Champ de lien à utiliser pour la recherche",
-      "lookupToTable": "Champ de {{tableName}} que vous souhaitez rechercher",
+      "lookupToTable": "Champ de <bold>{{tableName}}</bold> que vous souhaitez rechercher",
+      "rollupToTable": "Champ de <bold>{{tableName}}</bold> que vous souhaitez rechercher",
       "selectField": "Sélectionner un champ...",
       "linkTable": "Table de lien",
       "noLinkTip": "Aucun enregistrement lié à rechercher. Ajoutez un champ de lien vers un autre enregistrement, puis essayez de configurer votre recherche à nouveau.",
@@ -251,7 +255,18 @@
       "filter": "Filtrer les enregistrements",
       "hideFields": "Masquer les champs",
       "moreOptions": "Plus d'options",
-      "allowNewOptionsWhenEditing": "Autoriser de nouvelles options lors de l'édition"
+      "allowNewOptionsWhenEditing": "Autoriser de nouvelles options lors de l'édition",
+      "conditionalLookup": {
+        "sortLimitToggleLabel": "Sort linked records and limit the number of matches",
+        "sortLabel": "Sort results",
+        "orderPlaceholder": "Select an order",
+        "clearSort": "Clear sort",
+        "limitLabel": "Maximum records to include",
+        "limitPlaceholder": "Leave blank to include all matches",
+        "limitHint": "We only keep up to {{limit}} matching records.",
+        "sortMissingWarningTitle": "Sorting field unavailable",
+        "sortMissingWarningDescription": "The field that powered this sort was deleted. Results ignore the sort and only enforce the limit."
+      }
     },
     "subTitle": {
       "link": "Lien vers les enregistrements dans la table que vous choisissez",
@@ -268,6 +283,7 @@
       "rating": "Ajoutez une évaluation sur une échelle prédéfinie.",
       "formula": "Calculez des valeurs basées sur des champs.",
       "rollup": "Résumez les données des enregistrements liés.",
+      "conditionalLookup": "Affiche les valeurs liées correspondant aux filtres définis.",
       "count": "Comptez le nombre d'enregistrements liés.",
       "createdTime": "Voir la date et l'heure de création de chaque enregistrement.",
       "lastModifiedTime": "Voir la date et l'heure de la modification la plus récente de certains ou de tous les champs d'un enregistrement.",

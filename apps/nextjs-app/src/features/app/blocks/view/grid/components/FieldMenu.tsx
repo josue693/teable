@@ -51,6 +51,7 @@ import { FieldOperator } from '@/features/app/components/field-setting/type';
 import { tableConfig } from '@/features/i18n/table.config';
 import { useFieldSettingStore } from '../../field/useFieldSettingStore';
 import { useToolBarStore } from '../../tool-bar/components/useToolBarStore';
+import { useViewConfigurable } from '../../tool-bar/hook/useViewConfigurable';
 import type { IMenuItemProps } from './RecordMenu';
 
 enum MenuItemType {
@@ -69,12 +70,14 @@ enum MenuItemType {
 
 const iconClassName = 'mr-2 h-4 w-4';
 
+// eslint-disable-next-line sonarjs/cognitive-complexity
 export const FieldMenu = () => {
   const isTouchDevice = useIsTouchDevice();
   const view = useView() as GridView | undefined;
   const { filter, sort, group } = view || {};
   const tableId = useTableId();
   const { headerMenu, closeHeaderMenu } = useGridViewStore();
+  const { isViewConfigurable } = useViewConfigurable();
   const { openSetting } = useFieldSettingStore();
   const permission = useTablePermission();
   const menuFieldPermission = useFieldPermission();
@@ -227,7 +230,7 @@ export const FieldMenu = () => {
         type: MenuItemType.Filter,
         name: t('table:menu.filterField'),
         icon: <Filter className={iconClassName} />,
-        hidden: fieldIds.length !== 1 || !permission['view|update'],
+        hidden: fieldIds.length !== 1 || !permission['view|update'] || !isViewConfigurable,
         onClick: async () => {
           if (!headerMenu) {
             return;
@@ -261,7 +264,7 @@ export const FieldMenu = () => {
         type: MenuItemType.Sort,
         name: t('table:menu.sortField'),
         icon: <ArrowUpDown className={iconClassName} />,
-        hidden: fieldIds.length !== 1 || !permission['view|update'],
+        hidden: fieldIds.length !== 1 || !permission['view|update'] || !isViewConfigurable,
         onClick: async () => {
           if (!headerMenu) {
             return;
@@ -298,7 +301,7 @@ export const FieldMenu = () => {
         type: MenuItemType.Group,
         name: t('table:menu.groupField'),
         icon: <LayoutList className={iconClassName} />,
-        hidden: fieldIds.length !== 1 || !permission['view|update'],
+        hidden: fieldIds.length !== 1 || !permission['view|update'] || !isViewConfigurable,
         onClick: async () => {
           if (!headerMenu) {
             return;
@@ -332,7 +335,7 @@ export const FieldMenu = () => {
         type: MenuItemType.Freeze,
         name: t('table:menu.freezeUpField'),
         icon: <FreezeColumn className={iconClassName} />,
-        hidden: fieldIds.length !== 1 || !permission['view|update'],
+        hidden: fieldIds.length !== 1 || !permission['view|update'] || !isViewConfigurable,
         onClick: async () => await freezeField(),
       },
     ],
@@ -341,7 +344,7 @@ export const FieldMenu = () => {
         type: MenuItemType.Hidden,
         name: t('table:menu.hideField'),
         icon: <EyeOff className={iconClassName} />,
-        hidden: !permission['view|update'],
+        hidden: !permission['view|update'] || !isViewConfigurable,
         disabled: fields.some((f) => f.isPrimary),
         onClick: async () => {
           const fieldIdsSet = new Set(fieldIds);
@@ -380,6 +383,9 @@ export const FieldMenu = () => {
     .map((items) => items.filter(({ hidden }) => !hidden))
     .filter((items) => items.length);
 
+  if (menuGroups.length === 0) {
+    return;
+  }
   return (
     <>
       {isTouchDevice ? (

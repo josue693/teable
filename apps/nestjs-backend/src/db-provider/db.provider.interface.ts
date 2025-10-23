@@ -1,12 +1,35 @@
-import type { DriverClient, FieldType, IFilter, ILookupOptionsVo, ISortItem } from '@teable/core';
+import type {
+  DriverClient,
+  FieldCore,
+  FieldType,
+  IFilter,
+  ILookupLinkOptionsVo,
+  ILookupOptionsVo,
+  ISortItem,
+  TableDomain,
+} from '@teable/core';
 import type { Prisma } from '@teable/db-main-prisma';
 import type { IAggregationField, ISearchIndexByQueryRo, TableIndex } from '@teable/openapi';
 import type { Knex } from 'knex';
 import type { IFieldInstance } from '../features/field/model/factory';
 import type { DateFieldDto } from '../features/field/model/field-dto/date-field.dto';
-import type { SchemaType } from '../features/field/util';
+import type { IFieldSelectName } from '../features/record/query-builder/field-select.type';
+import type {
+  IRecordQueryFilterContext,
+  IRecordQuerySortContext,
+  IRecordQueryGroupContext,
+  IRecordQueryAggregateContext,
+} from '../features/record/query-builder/record-query-builder.interface';
+import type {
+  IFormulaConversionContext,
+  IFormulaConversionResult,
+  IGeneratedColumnQueryInterface,
+  ISelectFormulaConversionContext,
+  ISelectQueryInterface,
+} from '../features/record/query-builder/sql-conversion.visitor';
 import type { IAggregationQueryInterface } from './aggregation-query/aggregation-query.interface';
 import type { BaseQueryAbstract } from './base-query/abstract';
+import type { DropColumnOperationType } from './drop-database-column-query/drop-database-column-field-visitor.interface';
 import type { DuplicateTableQueryAbstract } from './duplicate-table/abstract';
 import type { DuplicateAttachmentTableQueryAbstract } from './duplicate-table/duplicate-attachment-table-query.abstract';
 import type { IFilterQueryInterface } from './filter-query/filter-query.interface';
@@ -52,7 +75,12 @@ export interface IDbProvider {
 
   renameColumn(tableName: string, oldName: string, newName: string): string[];
 
-  dropColumn(tableName: string, columnName: string): string[];
+  dropColumn(
+    tableName: string,
+    fieldInstance: IFieldInstance,
+    linkContext?: { tableId: string; tableNameMap: Map<string, string> },
+    operationType?: DropColumnOperationType
+  ): string[];
 
   updateJsonColumn(
     tableName: string,
@@ -83,7 +111,24 @@ export interface IDbProvider {
 
   dropColumnAndIndex(tableName: string, columnName: string, indexName: string): string[];
 
-  modifyColumnSchema(tableName: string, columnName: string, schemaType: SchemaType): string[];
+  modifyColumnSchema(
+    tableName: string,
+    oldFieldInstance: IFieldInstance,
+    fieldInstance: IFieldInstance,
+    tableDomain: TableDomain,
+    linkContext?: { tableId: string; tableNameMap: Map<string, string> }
+  ): string[];
+
+  createColumnSchema(
+    tableName: string,
+    fieldInstance: IFieldInstance,
+    tableDomain: TableDomain,
+    isNewTable: boolean,
+    tableId: string,
+    tableNameMap: Map<string, string>,
+    isSymmetricField?: boolean,
+    skipBaseColumnCreation?: boolean
+  ): string[];
 
   duplicateTable(
     fromSchema: string,
@@ -108,41 +153,52 @@ export interface IDbProvider {
     data: { id: string; values: { [key: string]: unknown } }[];
   }): { insertTempTableSql: string; updateRecordSql: string };
 
+  updateFromSelectSql(params: {
+    dbTableName: string;
+    idFieldName: string;
+    subQuery: Knex.QueryBuilder;
+    dbFieldNames: string[];
+    returningDbFieldNames?: string[];
+  }): string;
+
   aggregationQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
-    fields?: { [fieldId: string]: IFieldInstance },
+    fields?: { [fieldId: string]: FieldCore },
     aggregationFields?: IAggregationField[],
-    extra?: IAggregationQueryExtra
+    extra?: IAggregationQueryExtra,
+    context?: IRecordQueryAggregateContext
   ): IAggregationQueryInterface;
 
   filterQuery(
     originKnex: Knex.QueryBuilder,
-    fields?: { [fieldId: string]: IFieldInstance },
+    fields?: { [fieldId: string]: FieldCore },
     filter?: IFilter,
-    extra?: IFilterQueryExtra
+    extra?: IFilterQueryExtra,
+    context?: IRecordQueryFilterContext
   ): IFilterQueryInterface;
 
   sortQuery(
     originKnex: Knex.QueryBuilder,
-    fields?: { [fieldId: string]: IFieldInstance },
+    fields?: { [fieldId: string]: FieldCore },
     sortObjs?: ISortItem[],
-    extra?: ISortQueryExtra
+    extra?: ISortQueryExtra,
+    context?: IRecordQuerySortContext
   ): ISortQueryInterface;
 
   groupQuery(
     originKnex: Knex.QueryBuilder,
-    fieldMap?: { [fieldId: string]: IFieldInstance },
+    fieldMap?: { [fieldId: string]: FieldCore },
     groupFieldIds?: string[],
-    extra?: IGroupQueryExtra
+    extra?: IGroupQueryExtra,
+    context?: IRecordQueryGroupContext
   ): IGroupQueryInterface;
 
   searchQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
     searchFields: IFieldInstance[],
     tableIndex: TableIndex[],
-    search: [string, string?, boolean?]
+    search: [string, string?, boolean?],
+    context?: IRecordQueryFilterContext
   ): Knex.QueryBuilder;
 
   searchIndexQuery(
@@ -151,6 +207,7 @@ export interface IDbProvider {
     searchField: IFieldInstance[],
     searchIndexRo: Partial<ISearchIndexByQueryRo>,
     tableIndex: TableIndex[],
+    context?: IRecordQueryFilterContext,
     baseSortIndex?: string,
     setFilterQuery?: (qb: Knex.QueryBuilder) => void,
     setSortQuery?: (qb: Knex.QueryBuilder) => void
@@ -158,10 +215,10 @@ export interface IDbProvider {
 
   searchCountQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
     searchField: IFieldInstance[],
     search: [string, string?, boolean?],
-    tableIndex: TableIndex[]
+    tableIndex: TableIndex[],
+    context?: IRecordQueryFilterContext
   ): Knex.QueryBuilder;
 
   searchIndex(): IndexBuilderAbstract;
@@ -187,11 +244,38 @@ export interface IDbProvider {
     props: ICalendarDailyCollectionQueryProps
   ): Knex.QueryBuilder;
 
-  lookupOptionsQuery(optionsKey: keyof ILookupOptionsVo, value: string): string;
+  lookupOptionsQuery(optionsKey: keyof ILookupLinkOptionsVo, value: string): string;
 
   optionsQuery(type: FieldType, optionsKey: string, value: string): string;
 
   searchBuilder(qb: Knex.QueryBuilder, search: [string, string][]): Knex.QueryBuilder;
 
   getTableIndexes(dbTableName: string): string;
+
+  generatedColumnQuery(): IGeneratedColumnQueryInterface;
+
+  convertFormulaToGeneratedColumn(
+    expression: string,
+    context: IFormulaConversionContext
+  ): IFormulaConversionResult;
+
+  selectQuery(): ISelectQueryInterface;
+
+  convertFormulaToSelectQuery(
+    expression: string,
+    context: ISelectFormulaConversionContext
+  ): IFieldSelectName;
+
+  generateDatabaseViewName(tableId: string): string;
+  createDatabaseView(
+    table: TableDomain,
+    qb: Knex.QueryBuilder,
+    options?: { materialized?: boolean }
+  ): string[];
+  recreateDatabaseView(table: TableDomain, qb: Knex.QueryBuilder): string[];
+  dropDatabaseView(tableId: string): string[];
+  refreshDatabaseView(tableId: string, options?: { concurrently?: boolean }): string | undefined;
+
+  createMaterializedView(table: TableDomain, qb: Knex.QueryBuilder): string;
+  dropMaterializedView(tableId: string): string;
 }

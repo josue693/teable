@@ -115,6 +115,12 @@
       "expressionRequired": "Ausdruck ist erforderlich",
       "unsupportedTip": "Rollup unterstützt nur Verknüpfungs- und Rollup-Felder"
     },
+    "conditionalRollup": {
+      "filterRequired": "Der Filter muss mindestens eine Bedingung enthalten"
+    },
+    "conditionalLookup": {
+      "filterRequired": "Conditional Lookup requires at least one filter condition"
+    },
     "aiConfig": {
       "modelKeyRequired": "Modell ist erforderlich",
       "typeNotSupported": "Nicht unterstützter AI-Typ",
@@ -293,13 +299,39 @@
       "attachment": "Anhang",
       "checkbox": "Checkbox",
       "rollup": "Rollup",
+      "conditionalRollup": "Bedingtes Rollup",
       "user": "Benutzer",
       "rating": "Bewertung",
       "autoNumber": "Automatische Nummer",
       "lookup": "Nachschlag",
+      "conditionalLookup": "Conditional Lookup",
       "button": "Button",
       "createdBy": "Erstellt von",
       "lastModifiedBy": "Letzte Änderung von"
+    },
+    "description": {
+      "singleLineText": "Kurze Texte wie Namen oder Titel speichern.",
+      "longText": "Längere Notizen und Beschreibungen erfassen.",
+      "singleSelect": "Eine Option aus einer Liste wählen.",
+      "number": "Zahlenwerte mit Formatierung verfolgen.",
+      "multipleSelect": "Datensätze mit mehreren Optionen taggen.",
+      "link": "Diesen Datensatz mit einer anderen Tabelle verknüpfen.",
+      "formula": "Werte aus anderen Feldern berechnen.",
+      "date": "Daten oder Zeiten festhalten.",
+      "createdTime": "Anzeigen, wann ein Datensatz erstellt wurde.",
+      "lastModifiedTime": "Die zuletzt aktualisierte Zeit anzeigen.",
+      "attachment": "Dateien oder Bilder hochladen.",
+      "checkbox": "Ein einfaches Ja oder Nein umschalten.",
+      "rollup": "Verknüpfte Datensätze mit Formeln zusammenfassen.",
+      "conditionalRollup": "Daten anhand von Bedingungen zusammenfassen.",
+      "user": "Datensätze Workspace-Mitgliedern zuweisen.",
+      "rating": "Elemente mit konfigurierbaren Symbolen bewerten.",
+      "autoNumber": "Jedem Datensatz eine eindeutige Sequenz geben.",
+      "lookup": "Werte aus verknüpften Datensätzen anzeigen.",
+      "conditionalLookup": "Zeigt verknüpfte Werte an, die Ihren Filtern entsprechen.",
+      "button": "Aktionen über einen klickbaren Button ausführen.",
+      "createdBy": "Anzeigen, wer den Datensatz erstellt hat.",
+      "lastModifiedBy": "Anzeigen, wer den Datensatz zuletzt bearbeitet hat."
     },
     "link": {
       "oneWay": "Einfach",
@@ -783,12 +815,14 @@
     "deletedComment": "Kommentar gelöscht",
     "imageSizeLimit": "Die Bildgröße darf nicht größer sein als {{size}}",
     "tip": {
-      "editing": "Editiere...",
-      "edited": "(Editiert)",
-      "onNotify": "Nur bei Kommentaren benachricht werden, die sich auf meine beziehen (Funktion deaktieren)",
-      "offNotify": "Bei allen Aktivitäten benachrichtigt werden (Funktion aktieren)",
-      "reactionUserSuffix": "Reagierte mit {{emoji}} Emoji",
-      "me": "Sie",
+      "editing": "Bearbeiten...",
+      "edited": "(Bearbeitet)",
+      "notifyAll": "Alle Kommentare benachrichtigen",
+      "notifyRelatedToMe": "Kommentare, die sich auf mich beziehen, benachrichtigen",
+      "all": "Alle",
+      "relatedToMe": "Mit mir verbunden",
+      "reactionUserSuffix": "hat mit {{emoji}} emoji reagiert",
+      "me": "Du",
       "connection": "und"
     },
     "toolbar": {
@@ -832,6 +866,9 @@
     "viewNotFound": "Ansicht nicht gefunden",
     "requestTimeout": "Operationen außerhalb des Bereichs",
     "failedDependency": "Abhängigkeitsfehler",
+    "automationNodeParseError": "Automatisierungsknoten-Analysefehler",
+    "automationNodeNeedTest": "Automatisierungsknoten benötigt Test",
+    "automationNodeTestOutdated": "Automatisierungsknoten-Test veraltet",
     "custom": {
       "fieldValueNotNull": "\"{{tableName}}\" Feld \"{{fieldName}}\" darf keine leeren Werte enthalten, bitte vollständig ausfüllen bevor Sie absenden.",
       "fieldValueDuplicate": "\"{{tableName}}\" Feld \"{{fieldName}}\" darf keine doppelten Werte enthalten, bitte einen eindeutigen Wert vor dem Absenden ausfüllen.",
@@ -840,8 +877,19 @@
       "searchTimeOut": "Suche ist abgelaufen, bitte die Suchbegriffe reduzieren und erneut versuchen.",
       "dependencyNodeRequire": "Abhängiger Knoten nicht getestet, bitte überprüfen Sie, ob alle vorherigen Knoten getestet wurden"
     },
+    "email": {
+      "testEmailError": "E-Mail-Konfigurationsfehler {{message}}"
+    },
     "automation": {
-      "buttonClickTriggerDuplicated": "Dieses Button-Feld ist bereits mit {{name}}[{{id}}] Automatisierungsprozess verbunden, bitte wählen Sie ein anderes Button-Feld"
+      "buttonClickTriggerDuplicated": "Dieses Button-Feld ist bereits mit {{name}}[{{id}}] Automatisierungsprozess verbunden, bitte wählen Sie ein anderes Button-Feld",
+      "triggerNotFound": "Trigger nicht gefunden",
+      "nodeNotFound": "{{nodeId}} Knoten nicht gefunden",
+      "workflowNotFound": "{{workflowId}} Workflow nicht gefunden",
+      "triggerTestFailed": "Trigger-Test fehlgeschlagen, bitte überprüfen Sie die Trigger-Konfiguration",
+      "workflowTestFailed": "Workflow-Test fehlgeschlagen, bitte überprüfen Sie die Workflow-Konfiguration",
+      "nodeParseError": "{{name}} Knotenkonfiguration ist unvollständig oder fehlerhaft, bitte überprüfen Sie die Knotenkonfiguration",
+      "nodeNeedTest": "{{name}} Knoten muss getestet werden",
+      "nodeTestOutdated": "{{name}} Knotentest ist veraltet"
     },
     "permission": {
       "createRecordWithDeniedFields": "Sie haben keine Berechtigung, Datensätze mit Feldern({{fields}}) zu erstellen",

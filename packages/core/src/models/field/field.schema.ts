@@ -5,108 +5,36 @@ import { IdPrefix } from '../../utils';
 import { z } from '../../zod';
 import { fieldAIConfigSchema } from './ai-config';
 import { CellValueType, DbFieldType, FieldType } from './constant';
+import { selectFieldOptionsRoSchema } from './derivate/abstract/select.field.abstract';
+import { attachmentFieldOptionsSchema } from './derivate/attachment-option.schema';
+import { autoNumberFieldOptionsRoSchema } from './derivate/auto-number-option.schema';
+import { buttonFieldOptionsSchema } from './derivate/button-option.schema';
+import { checkboxFieldOptionsSchema } from './derivate/checkbox-option.schema';
+import { conditionalRollupFieldOptionsSchema } from './derivate/conditional-rollup-option.schema';
+import { createdByFieldOptionsSchema } from './derivate/created-by-option.schema';
+import { createdTimeFieldOptionsRoSchema } from './derivate/created-time-option.schema';
+import { dateFieldOptionsSchema } from './derivate/date-option.schema';
+import { formulaFieldOptionsSchema } from './derivate/formula-option.schema';
+import { lastModifiedByFieldOptionsSchema } from './derivate/last-modified-by-option.schema';
+import { lastModifiedTimeFieldOptionsRoSchema } from './derivate/last-modified-time-option.schema';
+import { linkFieldOptionsRoSchema } from './derivate/link-option.schema';
+import { longTextFieldOptionsSchema } from './derivate/long-text-option.schema';
+import { numberFieldOptionsRoSchema } from './derivate/number-option.schema';
+import { ratingFieldOptionsSchema } from './derivate/rating-option.schema';
+import { rollupFieldOptionsSchema } from './derivate/rollup-option.schema';
+import { singlelineTextFieldOptionsSchema } from './derivate/single-line-text-option.schema';
+import { userFieldOptionsSchema } from './derivate/user-option.schema';
 import {
-  checkboxFieldOptionsSchema,
-  numberFieldOptionsSchema,
-  selectFieldOptionsSchema,
-  singlelineTextFieldOptionsSchema,
-  formulaFieldOptionsSchema,
-  linkFieldOptionsSchema,
-  dateFieldOptionsSchema,
-  attachmentFieldOptionsSchema,
-  rollupFieldOptionsSchema,
-  linkFieldOptionsRoSchema,
-  numberFieldOptionsRoSchema,
-  selectFieldOptionsRoSchema,
-  ratingFieldOptionsSchema,
-  longTextFieldOptionsSchema,
-  createdTimeFieldOptionsSchema,
-  lastModifiedTimeFieldOptionsSchema,
-  autoNumberFieldOptionsSchema,
-  createdTimeFieldOptionsRoSchema,
-  lastModifiedTimeFieldOptionsRoSchema,
-  autoNumberFieldOptionsRoSchema,
-  userFieldOptionsSchema,
-  createdByFieldOptionsSchema,
-  lastModifiedByFieldOptionsSchema,
-  buttonFieldOptionsSchema,
-} from './derivate';
-
-import { unionFormattingSchema } from './formatting';
-import { unionShowAsSchema } from './show-as';
+  type IFieldOptionsRo,
+  unionFieldMetaVoSchema,
+  unionFieldOptionsRoSchema,
+  unionFieldOptionsVoSchema,
+} from './field-unions.schema';
+import type { ILookupOptionsRo } from './lookup-options-base.schema';
+import { lookupOptionsRoSchema, lookupOptionsVoSchema } from './lookup-options-base.schema';
 import { validateFieldOptions } from './zod-error';
 
-export const lookupOptionsVoSchema = linkFieldOptionsSchema
-  .pick({
-    foreignTableId: true,
-    lookupFieldId: true,
-    relationship: true,
-    fkHostTableName: true,
-    selfKeyName: true,
-    foreignKeyName: true,
-    filter: true,
-  })
-  .merge(
-    z.object({
-      linkFieldId: z.string().openapi({
-        description: 'The id of Linked record field to use for lookup',
-      }),
-    })
-  );
-
-export type ILookupOptionsVo = z.infer<typeof lookupOptionsVoSchema>;
-
-export const lookupOptionsRoSchema = lookupOptionsVoSchema.pick({
-  foreignTableId: true,
-  lookupFieldId: true,
-  linkFieldId: true,
-  filter: true,
-});
-
-export type ILookupOptionsRo = z.infer<typeof lookupOptionsRoSchema>;
-
-export const unionFieldOptions = z.union([
-  rollupFieldOptionsSchema.strict(),
-  formulaFieldOptionsSchema.strict(),
-  linkFieldOptionsSchema.strict(),
-  dateFieldOptionsSchema.strict(),
-  checkboxFieldOptionsSchema.strict(),
-  attachmentFieldOptionsSchema.strict(),
-  singlelineTextFieldOptionsSchema.strict(),
-  ratingFieldOptionsSchema.strict(),
-  userFieldOptionsSchema.strict(),
-  createdByFieldOptionsSchema.strict(),
-  lastModifiedByFieldOptionsSchema.strict(),
-  buttonFieldOptionsSchema.strict(),
-]);
-
-export const unionFieldOptionsVoSchema = z.union([
-  unionFieldOptions,
-  linkFieldOptionsSchema.strict(),
-  selectFieldOptionsSchema.strict(),
-  numberFieldOptionsSchema.strict(),
-  autoNumberFieldOptionsSchema.strict(),
-  createdTimeFieldOptionsSchema.strict(),
-  lastModifiedTimeFieldOptionsSchema.strict(),
-]);
-
-export const unionFieldOptionsRoSchema = z.union([
-  unionFieldOptions,
-  linkFieldOptionsRoSchema.strict(),
-  selectFieldOptionsRoSchema.strict(),
-  numberFieldOptionsRoSchema.strict(),
-  autoNumberFieldOptionsRoSchema.strict(),
-  createdTimeFieldOptionsRoSchema.strict(),
-  lastModifiedTimeFieldOptionsRoSchema.strict(),
-]);
-
-export const commonOptionsSchema = z.object({
-  showAs: unionShowAsSchema.optional(),
-  formatting: unionFormattingSchema.optional(),
-});
-
-export type IFieldOptionsRo = z.infer<typeof unionFieldOptionsRoSchema>;
-export type IFieldOptionsVo = z.infer<typeof unionFieldOptionsVoSchema>;
+// All union schemas and types are now imported from field-unions.schema.ts
 
 export const fieldVoSchema = z.object({
   id: z.string().startsWith(IdPrefix.Field).openapi({
@@ -133,6 +61,11 @@ export const fieldVoSchema = z.object({
       "The configuration options of the field. The structure of the field's options depend on the field's type.",
   }),
 
+  meta: unionFieldMetaVoSchema.optional().openapi({
+    description:
+      "The metadata of the field. The structure of the field's meta depend on the field's type. Currently formula and link fields have meta.",
+  }),
+
   aiConfig: fieldAIConfigSchema.nullable().optional().openapi({
     description: 'The AI configuration of the field.',
   }),
@@ -140,6 +73,11 @@ export const fieldVoSchema = z.object({
   isLookup: z.boolean().optional().openapi({
     description:
       'Whether this field is lookup field. witch means cellValue and [fieldType] is looked up from the linked table.',
+  }),
+
+  isConditionalLookup: z.boolean().optional().openapi({
+    description:
+      'Whether this lookup field applies a conditional filter when resolving linked records.',
   }),
 
   lookupOptions: lookupOptionsVoSchema.optional().openapi({
@@ -214,6 +152,7 @@ export const FIELD_RO_PROPERTIES = [
   'name',
   'dbFieldName',
   'isLookup',
+  'isConditionalLookup',
   'description',
   'lookupOptions',
   'options',
@@ -223,9 +162,11 @@ export const FIELD_VO_PROPERTIES = [
   'type',
   'description',
   'options',
+  'meta',
   'aiConfig',
   'name',
   'isLookup',
+  'isConditionalLookup',
   'lookupOptions',
   'notNull',
   'unique',
@@ -243,7 +184,7 @@ export const FIELD_VO_PROPERTIES = [
 
 /**
  * make sure FIELD_VO_PROPERTIES is exactly equals IFieldVo
- * if here shows lint error, you should update FIELD_VO_PROPERTIES
+ * if here shows lint error, you should update FIELD_VO_PROPERTI ES
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _validator2: IEnsureKeysMatchInterface<
@@ -277,6 +218,8 @@ export const getOptionsSchema = (type: FieldType) => {
       return formulaFieldOptionsSchema;
     case FieldType.Rollup:
       return rollupFieldOptionsSchema;
+    case FieldType.ConditionalRollup:
+      return conditionalRollupFieldOptionsSchema;
     case FieldType.Link:
       return linkFieldOptionsRoSchema;
     case FieldType.CreatedTime:
@@ -300,11 +243,20 @@ const refineOptions = (
   data: {
     type: FieldType;
     isLookup?: boolean;
+    isConditionalLookup?: boolean;
     lookupOptions?: ILookupOptionsRo;
     options?: IFieldOptionsRo;
   },
   ctx: RefinementCtx
 ) => {
+  if (data.isConditionalLookup && !data.isLookup) {
+    ctx.addIssue({
+      path: ['isConditionalLookup'],
+      code: z.ZodIssueCode.custom,
+      message: 'isConditionalLookup requires isLookup to be true.',
+    });
+  }
+
   const validateRes = validateFieldOptions(data);
   validateRes.forEach((item) => {
     ctx.addIssue({
@@ -324,6 +276,7 @@ const baseFieldRoSchema = fieldVoSchema
     notNull: true,
     dbFieldName: true,
     isLookup: true,
+    isConditionalLookup: true,
     description: true,
   })
   .required({

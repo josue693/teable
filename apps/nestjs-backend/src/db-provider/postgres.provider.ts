@@ -1,16 +1,42 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 import { Logger } from '@nestjs/common';
-import type { FieldType, IFilter, ILookupOptionsVo, ISortItem } from '@teable/core';
-import { DriverClient } from '@teable/core';
+import type {
+  IFilter,
+  ILookupLinkOptionsVo,
+  ILookupOptionsVo,
+  ISortItem,
+  TableDomain,
+  FieldCore,
+} from '@teable/core';
+import { DriverClient, parseFormulaToSQL, FieldType } from '@teable/core';
 import type { PrismaClient } from '@teable/db-main-prisma';
 import type { IAggregationField, ISearchIndexByQueryRo, TableIndex } from '@teable/openapi';
 import type { Knex } from 'knex';
 import type { IFieldInstance } from '../features/field/model/factory';
-import type { SchemaType } from '../features/field/util';
+import type { IFieldSelectName } from '../features/record/query-builder/field-select.type';
+import type {
+  IRecordQueryFilterContext,
+  IRecordQuerySortContext,
+  IRecordQueryGroupContext,
+  IRecordQueryAggregateContext,
+} from '../features/record/query-builder/record-query-builder.interface';
+import type {
+  IGeneratedColumnQueryInterface,
+  IFormulaConversionContext,
+  IFormulaConversionResult,
+  ISelectQueryInterface,
+  ISelectFormulaConversionContext,
+} from '../features/record/query-builder/sql-conversion.visitor';
+import {
+  GeneratedColumnSqlConversionVisitor,
+  SelectColumnSqlConversionVisitor,
+} from '../features/record/query-builder/sql-conversion.visitor';
 import type { IAggregationQueryInterface } from './aggregation-query/aggregation-query.interface';
 import { AggregationQueryPostgres } from './aggregation-query/postgres/aggregation-query.postgres';
 import type { BaseQueryAbstract } from './base-query/abstract';
 import { BaseQueryPostgres } from './base-query/base-query.postgres';
+import type { ICreateDatabaseColumnContext } from './create-database-column-query/create-database-column-field-visitor.interface';
+import { CreatePostgresDatabaseColumnFieldVisitor } from './create-database-column-query/create-database-column-field-visitor.postgres';
 import type {
   IAggregationQueryExtra,
   ICalendarDailyCollectionQueryProps,
@@ -18,10 +44,16 @@ import type {
   IFilterQueryExtra,
   ISortQueryExtra,
 } from './db.provider.interface';
+import type {
+  IDropDatabaseColumnContext,
+  DropColumnOperationType,
+} from './drop-database-column-query/drop-database-column-field-visitor.interface';
+import { DropPostgresDatabaseColumnFieldVisitor } from './drop-database-column-query/drop-database-column-field-visitor.postgres';
 import { DuplicateAttachmentTableQueryPostgres } from './duplicate-table/duplicate-attachment-table-query.postgres';
 import { DuplicateTableQueryPostgres } from './duplicate-table/duplicate-query.postgres';
 import type { IFilterQueryInterface } from './filter-query/filter-query.interface';
 import { FilterQueryPostgres } from './filter-query/postgres/filter-query.postgres';
+import { GeneratedColumnQueryPostgres } from './generated-column-query/postgres/generated-column-query.postgres';
 import type { IGroupQueryExtra, IGroupQueryInterface } from './group-query/group-query.interface';
 import { GroupQueryPostgres } from './group-query/group-query.postgres';
 import type { IntegrityQueryAbstract } from './integrity-query/abstract';
@@ -32,6 +64,7 @@ import {
   SearchQueryPostgresBuilder,
   SearchQueryPostgres,
 } from './search-query/search-query.postgres';
+import { SelectQueryPostgres } from './select-query/postgres/select-query.postgres';
 import { SortQueryPostgres } from './sort-query/postgres/sort-query.postgres';
 import type { ISortQueryInterface } from './sort-query/sort-query.interface';
 
@@ -128,18 +161,33 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
       .map((item) => item.sql);
   }
 
-  dropColumn(tableName: string, columnName: string): string[] {
-    return this.knex.schema
-      .alterTable(tableName, (table) => {
-        table.dropColumn(columnName);
-      })
-      .toSQL()
-      .map((item) => item.sql);
+  dropColumn(
+    tableName: string,
+    fieldInstance: IFieldInstance,
+    linkContext?: { tableId: string; tableNameMap: Map<string, string> },
+    operationType?: DropColumnOperationType
+  ): string[] {
+    const context: IDropDatabaseColumnContext = {
+      tableName,
+      knex: this.knex,
+      linkContext,
+      operationType,
+    };
+
+    // Use visitor pattern to drop columns
+    const visitor = new DropPostgresDatabaseColumnFieldVisitor(context);
+    return fieldInstance.accept(visitor);
   }
 
   // postgres drop index with column automatically
   dropColumnAndIndex(tableName: string, columnName: string, _indexName: string): string[] {
-    return this.dropColumn(tableName, columnName);
+    // Use CASCADE to automatically drop dependent objects (like generated columns)
+    // This is safe because we handle application-level dependencies separately
+    return [
+      this.knex
+        .raw('ALTER TABLE ?? DROP COLUMN IF EXISTS ?? CASCADE', [tableName, columnName])
+        .toQuery(),
+    ];
   }
 
   columnInfo(tableName: string): string {
@@ -208,19 +256,114 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
       .toQuery();
   }
 
-  modifyColumnSchema(tableName: string, columnName: string, schemaType: SchemaType): string[] {
-    return [
-      this.knex.schema
-        .alterTable(tableName, (table) => {
-          table.dropColumn(columnName);
-        })
-        .toQuery(),
-      this.knex.schema
-        .alterTable(tableName, (table) => {
-          table[schemaType](columnName);
-        })
-        .toQuery(),
-    ];
+  modifyColumnSchema(
+    tableName: string,
+    oldFieldInstance: IFieldInstance,
+    fieldInstance: IFieldInstance,
+    tableDomain: TableDomain,
+    linkContext?: { tableId: string; tableNameMap: Map<string, string> }
+  ): string[] {
+    const queries: string[] = [];
+
+    // First, drop ALL columns associated with the field (including generated columns)
+    queries.push(...this.dropColumn(tableName, oldFieldInstance, linkContext));
+
+    // For Link fields, ensure the host base column exists immediately during modify
+    // to guarantee subsequent update-from-select can persist values. Defer FK/junction
+    // creation to FieldConvertingLinkService (we mark as symmetric here to skip FK creation).
+    if (fieldInstance.type === FieldType.Link && !fieldInstance.isLookup) {
+      const alterTableBuilder = this.knex.schema.alterTable(tableName, (table) => {
+        const createContext: ICreateDatabaseColumnContext = {
+          table,
+          field: fieldInstance,
+          fieldId: fieldInstance.id,
+          dbFieldName: fieldInstance.dbFieldName,
+          unique: fieldInstance.unique,
+          notNull: fieldInstance.notNull,
+          dbProvider: this,
+          tableDomain,
+          tableId: linkContext?.tableId || '',
+          tableName,
+          knex: this.knex,
+          tableNameMap: linkContext?.tableNameMap || new Map(),
+          // Create base column only; skip FK/junction here
+          isSymmetricField: true,
+          skipBaseColumnCreation: false,
+        };
+        const visitor = new CreatePostgresDatabaseColumnFieldVisitor(createContext);
+        fieldInstance.accept(visitor);
+      });
+      const alterTableQueries = alterTableBuilder.toSQL().map((item) => item.sql);
+      queries.push(...alterTableQueries);
+      return queries;
+    }
+
+    const alterTableBuilder = this.knex.schema.alterTable(tableName, (table) => {
+      const createContext: ICreateDatabaseColumnContext = {
+        table,
+        field: fieldInstance,
+        fieldId: fieldInstance.id,
+        dbFieldName: fieldInstance.dbFieldName,
+        unique: fieldInstance.unique,
+        notNull: fieldInstance.notNull,
+        dbProvider: this,
+        tableDomain,
+        tableId: linkContext?.tableId || '',
+        tableName,
+        knex: this.knex,
+        tableNameMap: linkContext?.tableNameMap || new Map(),
+      };
+
+      // Use visitor pattern to recreate columns
+      const visitor = new CreatePostgresDatabaseColumnFieldVisitor(createContext);
+      fieldInstance.accept(visitor);
+    });
+
+    const alterTableQueries = alterTableBuilder.toSQL().map((item) => item.sql);
+    queries.push(...alterTableQueries);
+
+    return queries;
+  }
+
+  createColumnSchema(
+    tableName: string,
+    fieldInstance: IFieldInstance,
+    tableDomain: TableDomain,
+    isNewTable: boolean,
+    tableId: string,
+    tableNameMap: Map<string, string>,
+    isSymmetricField?: boolean,
+    skipBaseColumnCreation?: boolean
+  ): string[] {
+    let visitor: CreatePostgresDatabaseColumnFieldVisitor | undefined = undefined;
+
+    const alterTableBuilder = this.knex.schema.alterTable(tableName, (table) => {
+      const context: ICreateDatabaseColumnContext = {
+        table,
+        field: fieldInstance,
+        fieldId: fieldInstance.id,
+        dbFieldName: fieldInstance.dbFieldName,
+        unique: fieldInstance.unique,
+        notNull: fieldInstance.notNull,
+        dbProvider: this,
+        tableDomain,
+        isNewTable,
+        tableId,
+        tableName,
+        knex: this.knex,
+        tableNameMap,
+        isSymmetricField,
+        skipBaseColumnCreation,
+      };
+      visitor = new CreatePostgresDatabaseColumnFieldVisitor(context);
+      fieldInstance.accept(visitor);
+    });
+
+    const mainSqls = alterTableBuilder.toSQL().map((item) => item.sql);
+    const additionalSqls =
+      (visitor as CreatePostgresDatabaseColumnFieldVisitor | undefined)?.getSql() ?? [];
+
+    return [...mainSqls, ...additionalSqls].filter(Boolean);
   }
 
   splitTableName(tableName: string): string[] {
@@ -308,81 +451,127 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
     return { insertTempTableSql, updateRecordSql };
   }
 
+  updateFromSelectSql(params: {
+    dbTableName: string;
+    idFieldName: string;
+    subQuery: Knex.QueryBuilder;
+    dbFieldNames: string[];
+    returningDbFieldNames?: string[];
+  }): string {
+    const { dbTableName, idFieldName, subQuery, dbFieldNames, returningDbFieldNames } = params;
+    const alias = '__s';
+    const updateColumns = dbFieldNames.reduce<{ [key: string]: unknown }>((acc, name) => {
+      acc[name] = this.knex.ref(`${alias}.${name}`);
+      return acc;
+    }, {});
+    // bump version on target table; qualify to avoid ambiguity with FROM subquery columns
+    updateColumns['__version'] = this.knex.raw('?? + 1', [`${dbTableName}.__version`]);
+
+    const fromRaw = this.knex.raw('(?) as ??', [subQuery, alias]);
+    const returningCols = [idFieldName, '__version', ...(returningDbFieldNames || dbFieldNames)];
+    const qualifiedReturning = returningCols.map((c) => this.knex.ref(`${dbTableName}.${c}`));
+    // also return previous version for ShareDB op version alignment
+    const returningAll = [
+      ...qualifiedReturning,
+      // Unqualified reference to target table column to avoid FROM-clause issues
+      this.knex.raw('?? - 1 as __prev_version', [`${dbTableName}.__version`]),
+    ];
+    const query = this.knex(dbTableName)
+      .update(updateColumns)
+      .updateFrom(fromRaw)
+      .where(`${dbTableName}.${idFieldName}`, this.knex.ref(`${alias}.${idFieldName}`))
+      // Returning is supported on Postgres; qualify to avoid ambiguity with FROM subquery
+      .returning(returningAll as unknown as [])
+      .toQuery();
+    this.logger.debug('updateFromSelectSql: ' + query);
+    return query;
+  }
+
   aggregationQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
-    fields?: { [fieldId: string]: IFieldInstance },
+    fields?: { [fieldId: string]: FieldCore },
     aggregationFields?: IAggregationField[],
-    extra?: IAggregationQueryExtra
+    extra?: IAggregationQueryExtra,
+    context?: IRecordQueryAggregateContext
   ): IAggregationQueryInterface {
     return new AggregationQueryPostgres(
       this.knex,
       originQueryBuilder,
-      dbTableName,
       fields,
       aggregationFields,
-      extra
+      extra,
+      context
     );
   }
 
   filterQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    fields?: { [fieldId: string]: IFieldInstance },
+    fields?: { [fieldId: string]: FieldCore },
     filter?: IFilter,
-    extra?: IFilterQueryExtra
+    extra?: IFilterQueryExtra,
+    context?: IRecordQueryFilterContext
   ): IFilterQueryInterface {
-    return new FilterQueryPostgres(originQueryBuilder, fields, filter, extra);
+    return new FilterQueryPostgres(originQueryBuilder, fields, filter, extra, this, context);
   }
 
   sortQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    fields?: { [fieldId: string]: IFieldInstance },
+    fields?: { [fieldId: string]: FieldCore },
     sortObjs?: ISortItem[],
-    extra?: ISortQueryExtra
+    extra?: ISortQueryExtra,
+    context?: IRecordQuerySortContext
   ): ISortQueryInterface {
-    return new SortQueryPostgres(this.knex, originQueryBuilder, fields, sortObjs, extra);
+    return new SortQueryPostgres(this.knex, originQueryBuilder, fields, sortObjs, extra, context);
   }
 
   groupQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    fieldMap?: { [fieldId: string]: IFieldInstance },
+    fieldMap?: { [fieldId: string]: FieldCore },
     groupFieldIds?: string[],
-    extra?: IGroupQueryExtra
+    extra?: IGroupQueryExtra,
+    context?: IRecordQueryGroupContext
   ): IGroupQueryInterface {
-    return new GroupQueryPostgres(this.knex, originQueryBuilder, fieldMap, groupFieldIds, extra);
+    return new GroupQueryPostgres(
+      this.knex,
+      originQueryBuilder,
+      fieldMap,
+      groupFieldIds,
+      extra,
+      context
+    );
   }
 
   searchQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
     searchFields: IFieldInstance[],
     tableIndex: TableIndex[],
-    search: [string, string?, boolean?]
+    search: [string, string?, boolean?],
+    context?: IRecordQueryFilterContext
   ) {
     return SearchQueryAbstract.appendQueryBuilder(
       SearchQueryPostgres,
       originQueryBuilder,
-      dbTableName,
       searchFields,
       tableIndex,
-      search
+      search,
+      context
     );
   }
 
   searchCountQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    dbTableName: string,
     searchField: IFieldInstance[],
     search: [string, string?, boolean?],
-    tableIndex: TableIndex[]
+    tableIndex: TableIndex[],
+    context?: IRecordQueryFilterContext
   ) {
     return SearchQueryAbstract.buildSearchCountQuery(
       SearchQueryPostgres,
       originQueryBuilder,
-      dbTableName,
       searchField,
       search,
-      tableIndex
+      tableIndex,
+      context
     );
   }
 
@@ -392,6 +581,7 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
     searchField: IFieldInstance[],
     searchIndexRo: ISearchIndexByQueryRo,
     tableIndex: TableIndex[],
+    context?: IRecordQueryFilterContext,
     baseSortIndex?: string,
     setFilterQuery?: (qb: Knex.QueryBuilder) => void,
     setSortQuery?: (qb: Knex.QueryBuilder) => void
@@ -402,6 +592,7 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
       searchField,
       searchIndexRo,
       tableIndex,
+      context,
       baseSortIndex,
       setFilterQuery,
       setSortQuery
@@ -503,7 +694,7 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
 
   // select id and lookup_options for "field" table options is a json saved in string format, match optionsKey and value
   // please use json method in postgres
-  lookupOptionsQuery(optionsKey: keyof ILookupOptionsVo, value: string): string {
+  lookupOptionsQuery(optionsKey: keyof ILookupLinkOptionsVo, value: string): string {
     return this.knex('field')
       .select({
         tableId: 'table_id',
@@ -585,5 +776,136 @@ ORDER BY
         [tableName]
       )
       .toQuery();
+  }
+
+  generatedColumnQuery(): IGeneratedColumnQueryInterface {
+    return new GeneratedColumnQueryPostgres();
+  }
+
+  convertFormulaToGeneratedColumn(
+    expression: string,
+    context: IFormulaConversionContext
+  ): IFormulaConversionResult {
+    try {
+      const generatedColumnQuery = this.generatedColumnQuery();
+      // Set the context with driver client information
+      const contextWithDriver = { ...context, driverClient: this.driver };
+      generatedColumnQuery.setContext(contextWithDriver);
+
+      const visitor = new GeneratedColumnSqlConversionVisitor(
+        this.knex,
+        generatedColumnQuery,
+        contextWithDriver
+      );
+
+      const sql = parseFormulaToSQL(expression, visitor);
+
+      return visitor.getResult(sql);
+    } catch (error) {
+      throw new Error(`Failed to convert formula: ${(error as Error).message}`);
+    }
+  }
+
+  selectQuery(): ISelectQueryInterface {
+    return new SelectQueryPostgres();
+  }
+
+  convertFormulaToSelectQuery(
+    expression: string,
+    context: ISelectFormulaConversionContext
+  ): IFieldSelectName {
+    try {
+      const selectQuery = this.selectQuery();
+
+      // Set the context with driver client information
+      const contextWithDriver = { ...context, driverClient: this.driver };
+      selectQuery.setContext(contextWithDriver);
+
+      const visitor = new SelectColumnSqlConversionVisitor(
+        this.knex,
+        selectQuery,
+        contextWithDriver
+      );
+
+      return parseFormulaToSQL(expression, visitor);
+    } catch (error) {
+      throw new Error(`Failed to convert formula: ${(error as Error).message}`);
+    }
+  }
+
+  generateDatabaseViewName(tableId: string): string {
+    return tableId + '_view';
+  }
+
+  createDatabaseView(
+    table: TableDomain,
+    qb: Knex.QueryBuilder,
+    options?: { materialized?: boolean }
+  ): string[] {
+    const viewName = this.generateDatabaseViewName(table.id);
+    if (options?.materialized) {
+      // Create MV and add unique index on __id to support concurrent refresh
+      const createMv = this.knex
+        .raw(`CREATE MATERIALIZED VIEW ?? AS ${qb.toQuery()}`, [viewName])
+        .toQuery();
+      const createIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ${viewName}__id_uidx ON "${viewName}" ("__id")`;
+      return [createMv, createIndex];
+    }
+    return [this.knex.raw(`CREATE VIEW ?? AS ${qb.toQuery()}`, [viewName]).toQuery()];
+  }
+
+  recreateDatabaseView(table: TableDomain, qb: Knex.QueryBuilder): string[] {
+    const oldName = this.generateDatabaseViewName(table.id);
+    const newName = `${oldName}_new`;
+    const stmts: string[] = [];
+    // Clean temp and conflicting indexes
+    stmts.push(`DROP INDEX IF EXISTS "${newName}__id_uidx"`);
+    stmts.push(`DROP INDEX IF EXISTS "${oldName}__id_uidx"`);
+    stmts.push(`DROP MATERIALIZED VIEW IF EXISTS "${newName}"`);
+    // Create empty MV and index, then initial non-concurrent populate
+    stmts.push(`CREATE MATERIALIZED VIEW "${newName}" AS ${qb.toQuery()} WITH NO DATA`);
+    stmts.push(`CREATE UNIQUE INDEX "${newName}__id_uidx" ON "${newName}" ("__id")`);
+    stmts.push(`REFRESH MATERIALIZED VIEW "${newName}"`);
+    // Swap
+    stmts.push(`DROP MATERIALIZED VIEW IF EXISTS "${oldName}"`);
+    stmts.push(`ALTER MATERIALIZED VIEW "${newName}" RENAME TO "${oldName}"`);
+    // Keep index name stable after swap
+    stmts.push(`ALTER INDEX "${newName}__id_uidx" RENAME TO "${oldName}__id_uidx"`);
+    // Ensure final MV has data (defensive refresh)
+    stmts.push(`REFRESH MATERIALIZED VIEW "${oldName}"`);
+    return stmts;
+  }
+
+  dropDatabaseView(tableId: string): string[] {
+    const viewName = this.generateDatabaseViewName(tableId);
+    // Try dropping both MV and normal VIEW to be safe
+    return [
+      this.knex.raw(`DROP MATERIALIZED VIEW IF EXISTS ??`, [viewName]).toQuery(),
+      this.knex.raw(`DROP VIEW IF EXISTS ??`, [viewName]).toQuery(),
+    ];
+  }
+
+  refreshDatabaseView(tableId: string, options?: { concurrently?: boolean }): string {
+    const viewName = this.generateDatabaseViewName(tableId);
+    this.logger.debug(
+      'refreshDatabaseView %s with concurrently %s',
+      viewName,
+      options?.concurrently
+    );
+    const concurrently = options?.concurrently ?? true;
+    if (concurrently) {
+      return `REFRESH MATERIALIZED VIEW CONCURRENTLY "${viewName}"`;
+    }
+    return `REFRESH MATERIALIZED VIEW "${viewName}"`;
+  }
+
+  createMaterializedView(table: TableDomain, qb: Knex.QueryBuilder): string {
+    const viewName = this.generateDatabaseViewName(table.id);
+    return this.knex.raw(`CREATE MATERIALIZED VIEW ?? AS ${qb.toQuery()}`, [viewName]).toQuery();
+  }
+
+  dropMaterializedView(tableId: string): string {
+    const viewName = this.generateDatabaseViewName(tableId);
+    return this.knex.raw(`DROP MATERIALIZED VIEW IF EXISTS ??`, [viewName]).toQuery();
   }
 }
