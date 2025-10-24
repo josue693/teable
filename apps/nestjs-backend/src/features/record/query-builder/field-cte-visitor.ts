@@ -110,6 +110,33 @@ const SUPPORTED_EQUALITY_RESIDUAL_OPERATORS = new Set<string>([
   FilterOperatorIsOnOrAfter.value,
 ]);
 
+const JSON_AGG_FUNCTIONS = new Set(['array_compact', 'array_unique']);
+
+function parseRollupFunctionName(expression: string): string {
+  const match = expression.match(/^(\w+)\(\{values\}\)$/);
+  if (!match) {
+    throw new Error(`Invalid rollup expression: ${expression}`);
+  }
+  return match[1].toLowerCase();
+}
+
+function unwrapJsonAggregateForScalar(
+  driver: DriverClient,
+  expression: string,
+  field: FieldCore,
+  isJsonAggregate: boolean
+): string {
+  if (
+    !isJsonAggregate ||
+    field.isMultipleCellValue ||
+    field.dbFieldType === DbFieldType.Json ||
+    driver !== DriverClient.Pg
+  ) {
+    return expression;
+  }
+  return `(${expression}) ->> 0`;
+}
+
 class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
   constructor(
     private readonly qb: Knex.QueryBuilder,
@@ -171,12 +198,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     orderByField?: string,
     rowPresenceExpr?: string
   ): string {
-    // Parse the rollup function from expression like 'sum({values})'
-    const functionMatch = expression.match(/^(\w+)\(\{values\}\)$/);
-    if (!functionMatch) {
-      throw new Error(`Invalid rollup expression: ${expression}`);
-    }
-    const functionName = functionMatch[1].toLowerCase();
+    const functionName = parseRollupFunctionName(expression);
     return this.dialect.rollupAggregate(functionName, fieldExpression, {
       targetField,
       orderByField,
@@ -194,13 +216,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     expression: string,
     fieldExpression: string
   ): string {
-    const functionMatch = expression.match(/^(\w+)\(\{values\}\)$/);
-    if (!functionMatch) {
-      throw new Error(`Invalid rollup expression: ${expression}`);
-    }
-
-    const functionName = functionMatch[1].toLowerCase();
-
+    const functionName = parseRollupFunctionName(expression);
     return this.dialect.singleValueRollupAggregate(functionName, fieldExpression, {
       rollupField,
       targetField,
@@ -260,26 +276,32 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
 
     const rowPresenceField = `"${this.getForeignAlias()}"."__id"`;
 
-    const rollupFilter = (rollupField as FieldCore).getFilter?.();
-    if (rollupFilter && this.dbProvider.driver === DriverClient.Pg) {
-      const sub = this.buildForeignFilterSubquery(rollupFilter);
-      const filteredExpr = `CASE WHEN EXISTS ${sub} THEN ${expression} ELSE NULL END`;
-      return this.generateRollupAggregation(
+    const rollupFunctionName = parseRollupFunctionName(rollupOptions.expression);
+    const aggregatesToJson = JSON_AGG_FUNCTIONS.has(rollupFunctionName);
+    const buildAggregate = (expr: string) => {
+      const aggregate = this.generateRollupAggregation(
         rollupOptions.expression,
-        filteredExpr,
+        expr,
         targetField,
         orderByField,
         rowPresenceField
       );
+      return unwrapJsonAggregateForScalar(
+        this.dbProvider.driver,
+        aggregate,
+        rollupField,
+        aggregatesToJson
+      );
+    };
+
+    const rollupFilter = (rollupField as FieldCore).getFilter?.();
+    if (rollupFilter && this.dbProvider.driver === DriverClient.Pg) {
+      const sub = this.buildForeignFilterSubquery(rollupFilter);
+      const filteredExpr = `CASE WHEN EXISTS ${sub} THEN ${expression} ELSE NULL END`;
+      return buildAggregate(filteredExpr);
     }
 
-    return this.generateRollupAggregation(
-      rollupOptions.expression,
-      expression,
-      targetField,
-      orderByField,
-      rowPresenceField
-    );
+    return buildAggregate(expression);
   }
   private visitLookupField(field: FieldCore): IFieldSelectName {
     if (!field.isLookup) {
@@ -1121,14 +1143,6 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     return `(${expression})${castSuffix}`;
   }
 
-  private parseRollupFunction(expression: string): string {
-    const match = expression.match(/^(\w+)\(\{values\}\)$/);
-    if (!match) {
-      throw new Error(`Invalid rollup expression: ${expression}`);
-    }
-    return match[1].toLowerCase();
-  }
-
   private shouldUseFormattedExpressionForAggregation(fn: string): boolean {
     switch (fn) {
       case 'array_join':
@@ -1140,7 +1154,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
   }
 
   private rollupFunctionSupportsOrdering(expression: string): boolean {
-    const fn = this.parseRollupFunction(expression);
+    const fn = parseRollupFunctionName(expression);
     switch (fn) {
       case 'array_join':
       case 'array_compact':
@@ -1158,7 +1172,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     foreignAlias: string,
     orderByClause?: string
   ): string {
-    const fn = this.parseRollupFunction(rollupExpression);
+    const fn = parseRollupFunctionName(rollupExpression);
     return this.dialect.rollupAggregate(fn, fieldExpression, {
       targetField,
       rowPresenceExpr: `"${foreignAlias}"."${ID_FIELD_NAME}"`,
@@ -1385,7 +1399,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
       const formattingVisitor = new FieldFormattingVisitor(rawExpression, this.dialect);
       const formattedExpression = targetField.accept(formattingVisitor);
 
-      const aggregationFn = this.parseRollupFunction(expression);
+      const aggregationFn = parseRollupFunctionName(expression);
       const aggregationInputExpression = this.shouldUseFormattedExpressionForAggregation(
         aggregationFn
       )
@@ -1425,7 +1439,17 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         foreignAliasUsed,
         supportsOrdering ? orderByClause : undefined
       );
-      const castedAggregateExpression = this.castExpressionForDbType(aggregateExpression, field);
+      const aggregatesToJson = JSON_AGG_FUNCTIONS.has(aggregationFn);
+      const normalizedAggregateExpression = unwrapJsonAggregateForScalar(
+        this.dbProvider.driver,
+        aggregateExpression,
+        field,
+        aggregatesToJson
+      );
+      const castedAggregateExpression = this.castExpressionForDbType(
+        normalizedAggregateExpression,
+        field
+      );
 
       const equalityEnabledFns = new Set(['countall', 'count', 'sum', 'average', 'max', 'min']);
       const canUseEqualityPlan =
@@ -1667,17 +1691,35 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         }
       }
 
-      const aggregateExpression =
+      const aggregateExpressionInfo =
         field.type === FieldType.ConditionalRollup
-          ? this.dialect.jsonAggregateNonNull(rawExpression, orderByClause)
-          : this.buildConditionalRollupAggregation(
-              'array_compact({values})',
-              rawExpression,
-              targetField,
-              foreignAliasUsed,
-              orderByClause
-            );
-      const castedAggregateExpression = this.castExpressionForDbType(aggregateExpression, field);
+          ? {
+              expression: this.dialect.jsonAggregateNonNull(rawExpression, orderByClause),
+              isJsonAggregate: true,
+            }
+          : (() => {
+              const expression = this.buildConditionalRollupAggregation(
+                'array_compact({values})',
+                rawExpression,
+                targetField,
+                foreignAliasUsed,
+                orderByClause
+              );
+              return {
+                expression,
+                isJsonAggregate: JSON_AGG_FUNCTIONS.has('array_compact'),
+              };
+            })();
+      const normalizedAggregateExpression = unwrapJsonAggregateForScalar(
+        this.dbProvider.driver,
+        aggregateExpressionInfo.expression,
+        field,
+        aggregateExpressionInfo.isJsonAggregate
+      );
+      const castedAggregateExpression = this.castExpressionForDbType(
+        normalizedAggregateExpression,
+        field
+      );
 
       const applyConditionalFilter = (targetQb: Knex.QueryBuilder) => {
         if (!filter) return;
