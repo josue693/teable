@@ -403,6 +403,7 @@ export class LastVisitService {
       resourceId,
       parentResourceId,
       maxRecords: 1,
+      maxKeys: ['parentResourceId'],
     });
 
     if (childResourceId) {
@@ -412,6 +413,7 @@ export class LastVisitService {
         resourceId: childResourceId,
         parentResourceId: resourceId,
         maxRecords: 1,
+        maxKeys: ['parentResourceId'],
       });
     }
   }
@@ -422,12 +424,14 @@ export class LastVisitService {
     resourceId,
     maxRecords = 10,
     parentResourceId,
+    maxKeys,
   }: {
     userId: string;
     resourceType: string;
     resourceId: string;
     parentResourceId: string;
     maxRecords?: number;
+    maxKeys?: 'parentResourceId'[];
   }) {
     await this.prismaService.$transaction(async (prisma) => {
       await prisma.userLastVisit.upsert({
@@ -453,6 +457,7 @@ export class LastVisitService {
         where: {
           userId,
           resourceType,
+          ...(maxKeys?.includes('parentResourceId') ? { parentResourceId } : {}),
         },
         orderBy: {
           lastVisitTime: 'desc',
