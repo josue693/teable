@@ -226,13 +226,13 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     const tz = this.context?.timeZone as string | undefined;
     if (!tz) {
       // Default behavior: interpret as timestamp without timezone
-      return `${date}::timestamp`;
+      return `(${date})::timestamp`;
     }
     // Sanitize single quotes to prevent SQL issues
     const safeTz = tz.replace(/'/g, "''");
     // Interpret input as timestamptz if it has offset and convert to target timezone
     // AT TIME ZONE returns timestamp without time zone in that zone
-    return `${date}::timestamptz AT TIME ZONE '${safeTz}'`;
+    return `(${date})::timestamptz AT TIME ZONE '${safeTz}'`;
   }
   // Numeric Functions
   sum(params: string[]): string {
@@ -437,7 +437,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   datestr(date: string): string {
-    return `${this.tzWrap(date)}::date::text`;
+    return `(${this.tzWrap(date)})::date::text`;
   }
 
   datetimeDiff(startDate: string, endDate: string, unit: string): string {
@@ -531,7 +531,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   timestr(date: string): string {
-    return `${this.tzWrap(date)}::time::text`;
+    return `(${this.tzWrap(date)})::time::text`;
   }
 
   toNow(date: string): string {
@@ -552,7 +552,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
   workday(startDate: string, days: string): string {
     // Simplified implementation in the target timezone
-    return `${this.tzWrap(startDate)}::date + INTERVAL '${days} days'`;
+    return `(${this.tzWrap(startDate)})::date + INTERVAL '${days} days'`;
   }
 
   workdayDiff(startDate: string, endDate: string): string {
@@ -737,11 +737,13 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   divide(left: string, right: string): string {
     const l = this.toNumericSafe(left);
     const r = this.toNumericSafe(right);
-    return `(${l} / ${r})`;
+    return `(CASE WHEN (${r}) IS NULL OR (${r}) = 0 THEN NULL ELSE (${l} / ${r}) END)`;
   }
 
   modulo(left: string, right: string): string {
-    return `(${left} % ${right})`;
+    const l = this.toNumericSafe(left);
+    const r = this.toNumericSafe(right);
+    return `(CASE WHEN (${r}) IS NULL OR (${r}) = 0 THEN NULL ELSE MOD((${l})::numeric, (${r})::numeric)::double precision END)`;
   }
 
   // Comparison Operations

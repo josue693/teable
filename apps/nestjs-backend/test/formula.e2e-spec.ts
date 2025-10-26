@@ -3,11 +3,14 @@
 import type { INestApplication } from '@nestjs/common';
 import type { IFieldRo, IFilter, ILinkFieldOptionsRo, ILookupOptionsRo } from '@teable/core';
 import {
+  DateFormattingPreset,
   FieldKeyType,
   FieldType,
+  FunctionName,
   generateFieldId,
   NumberFormattingType,
   Relationship,
+  TimeFormatting,
 } from '@teable/core';
 import { getRecord, updateRecords, type ITableFullVo } from '@teable/openapi';
 import {
@@ -813,6 +816,135 @@ describe('OpenAPI formula (e2e)', () => {
         }
       }
     );
+
+    it('should concatenate date and text fields with ampersand', async () => {
+      const followDateField = await createField(table1Id, {
+        name: 'follow date',
+        type: FieldType.Date,
+      } as IFieldRo);
+
+      const followDateValue = '2025-10-24T00:00:00.000Z';
+      const followContentValue = 'hello';
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: numericInput,
+              [textFieldRo.name]: followContentValue,
+              [followDateField.name]: followDateValue,
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+
+      const formulaField = await createField(table1Id, {
+        name: 'follow summary',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${followDateField.id}} & "-" & {${textFieldRo.id}}`,
+        },
+      });
+
+      const recordAfterFormula = await getRecord(table1Id, recordId);
+      const formulaValue = recordAfterFormula.data.fields[formulaField.name];
+      expect(formulaValue).toBe('2025-10-24-hello');
+    });
+
+    it('should keep concatenated formula after updating referenced text field', async () => {
+      const followDateField = await createField(table1Id, {
+        name: 'follow date',
+        type: FieldType.Date,
+      } as IFieldRo);
+
+      const followDateValue = '2025-10-24T00:00:00.000Z';
+      const followContentValue = 'hello';
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: numericInput,
+              [textFieldRo.name]: followContentValue,
+              [followDateField.name]: followDateValue,
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+
+      const formulaField = await createField(table1Id, {
+        name: 'follow summary',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${followDateField.id}} & "-" & {${textFieldRo.id}}`,
+        },
+      });
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [textFieldRo.name]: 'world',
+          },
+        },
+      });
+
+      const recordAfterFormula = await getRecord(table1Id, recordId);
+      const formulaValue = recordAfterFormula.data.fields[formulaField.name];
+      expect(formulaValue).toBe('2025-10-24-world');
+    });
+
+    it('should keep concatenated formula after updating referenced date field', async () => {
+      const followDateField = await createField(table1Id, {
+        name: 'follow date',
+        type: FieldType.Date,
+      } as IFieldRo);
+
+      const followDateValue = '2025-10-24T00:00:00.000Z';
+      const followContentValue = 'hello';
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: numericInput,
+              [textFieldRo.name]: followContentValue,
+              [followDateField.name]: followDateValue,
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+
+      const formulaField = await createField(table1Id, {
+        name: 'follow summary',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${followDateField.id}} & "-" & {${textFieldRo.id}}`,
+        },
+      });
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [followDateField.name]: '2025-10-26T00:00:00.000Z',
+          },
+        },
+      });
+
+      const recordAfterFormula = await getRecord(table1Id, recordId);
+      const formulaValue = recordAfterFormula.data.fields[formulaField.name];
+      expect(formulaValue).toBe('2025-10-26-hello');
+    });
   });
 
   describe('logical and system formula functions', () => {
@@ -1590,6 +1722,86 @@ describe('OpenAPI formula (e2e)', () => {
       }
     );
 
+    const dateAddArgumentMatrix: Array<{
+      label: string;
+      requiresFormulaField: boolean;
+      buildExpression: (ids: { numberFieldId: string; numberFormulaFieldId?: string }) => string;
+      expectedShift: (baseNumberValue: number) => number;
+    }> = [
+      {
+        label: `DATE_ADD(DATETIME_PARSE("2025-01-03"), 1, 'day')`,
+        requiresFormulaField: false,
+        buildExpression: () => `DATE_ADD(DATETIME_PARSE("2025-01-03"), 1, 'day')`,
+        expectedShift: () => 1,
+      },
+      {
+        label: `DATE_ADD(DATETIME_PARSE("2025-01-03"), {NumberField}, 'day')`,
+        requiresFormulaField: false,
+        buildExpression: ({ numberFieldId }) =>
+          `DATE_ADD(DATETIME_PARSE("2025-01-03"), {${numberFieldId}}, 'day')`,
+        expectedShift: (baseNumberValue) => baseNumberValue,
+      },
+      {
+        label: `DATE_ADD(DATETIME_PARSE("2025-01-03"), {NumberFormulaField}, 'day')`,
+        requiresFormulaField: true,
+        buildExpression: ({ numberFormulaFieldId }) =>
+          `DATE_ADD(DATETIME_PARSE("2025-01-03"), {${numberFormulaFieldId}}, 'day')`,
+        expectedShift: (baseNumberValue) => baseNumberValue * 2,
+      },
+    ];
+
+    it.each(dateAddArgumentMatrix)(
+      'should evaluate DATE_ADD when count argument comes from %s',
+      async ({ label, requiresFormulaField, buildExpression, expectedShift }) => {
+        const baseNumberValue = 3;
+        const { records } = await createRecords(table1Id, {
+          fieldKeyType: FieldKeyType.Name,
+          records: [
+            {
+              fields: {
+                [numberFieldRo.name]: baseNumberValue,
+              },
+            },
+          ],
+        });
+        const recordId = records[0].id;
+
+        let numberFormulaFieldId: string | undefined;
+        if (requiresFormulaField) {
+          const numberFormulaField = await createField(table1Id, {
+            name: `date-add-count-formula-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
+            type: FieldType.Formula,
+            options: {
+              expression: `{${numberFieldRo.id}} * 2`,
+            },
+          });
+          numberFormulaFieldId = numberFormulaField.id;
+        }
+
+        const dateAddField = await createField(table1Id, {
+          name: `date-add-permutation-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
+          type: FieldType.Formula,
+          options: {
+            expression: buildExpression({
+              numberFieldId: numberFieldRo.id,
+              numberFormulaFieldId,
+            }),
+          },
+        });
+
+        const recordAfterFormula = await getRecord(table1Id, recordId);
+        const rawValue = recordAfterFormula.data.fields[dateAddField.name];
+        expect(typeof rawValue).toBe('string');
+
+        const expectedDate = addToDate(
+          new Date('2025-01-03T00:00:00.000Z'),
+          expectedShift(baseNumberValue),
+          'day'
+        );
+        expect(rawValue).toBe(expectedDate.toISOString());
+      }
+    );
+
     it.each(datetimeDiffCases)(
       'should evaluate DATETIME_DIFF for unit "%s"',
       async ({ literal, expected }) => {
@@ -1793,6 +2005,205 @@ describe('OpenAPI formula (e2e)', () => {
     );
   });
 
+  describe('formula argument permutations', () => {
+    const literalNumberValue = 4;
+    const literalTextValue = 'literal-matrix';
+    const fallbackTextValue = 'fallback-matrix';
+
+    type SumArgSource = 'literal' | 'field' | 'formula';
+    const sumArgumentSources: Record<
+      SumArgSource,
+      {
+        toExpression: (ids: { numberFieldId: string; numberFormulaFieldId?: string }) => string;
+        toValue: (ctx: { numberValue: number; numberFormulaValue?: number }) => number;
+        requiresFormulaField?: boolean;
+      }
+    > = {
+      literal: {
+        toExpression: () => `${literalNumberValue}`,
+        toValue: () => literalNumberValue,
+      },
+      field: {
+        toExpression: ({ numberFieldId }) => `{${numberFieldId}}`,
+        toValue: ({ numberValue }) => numberValue,
+      },
+      formula: {
+        requiresFormulaField: true,
+        toExpression: ({ numberFormulaFieldId }) => `{${numberFormulaFieldId}}`,
+        toValue: ({ numberFormulaValue }) => numberFormulaValue ?? 0,
+      },
+    };
+
+    const sumArgumentCombinations = (['literal', 'field', 'formula'] as SumArgSource[]).flatMap(
+      (first) =>
+        (['literal', 'field', 'formula'] as SumArgSource[]).map((second) => ({
+          label: `${first} + ${second}`,
+          args: [first, second] as [SumArgSource, SumArgSource],
+        }))
+    );
+
+    it.each(sumArgumentCombinations)(
+      'should evaluate SUM when arguments come from %s',
+      async ({ args, label }) => {
+        const baseNumberValue = 3;
+        const baseTextValue = 'matrix-text';
+
+        const { records } = await createRecords(table1Id, {
+          fieldKeyType: FieldKeyType.Name,
+          records: [
+            {
+              fields: {
+                [numberFieldRo.name]: baseNumberValue,
+                [textFieldRo.name]: baseTextValue,
+              },
+            },
+          ],
+        });
+        const recordId = records[0].id;
+
+        let numberFormulaFieldId: string | undefined;
+        if (args.some((source) => sumArgumentSources[source].requiresFormulaField)) {
+          const numberFormulaField = await createField(table1Id, {
+            name: `sum-argument-source-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
+            type: FieldType.Formula,
+            options: {
+              expression: `{${numberFieldRo.id}} * 2`,
+            },
+          });
+          numberFormulaFieldId = numberFormulaField.id;
+        }
+
+        const argExpressions = args.map((source) =>
+          sumArgumentSources[source].toExpression({
+            numberFieldId: numberFieldRo.id,
+            numberFormulaFieldId,
+          })
+        );
+
+        const formulaField = await createField(table1Id, {
+          name: `sum-argument-matrix-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
+          type: FieldType.Formula,
+          options: {
+            expression: `SUM(${argExpressions.join(', ')})`,
+          },
+        });
+
+        const recordAfterFormula = await getRecord(table1Id, recordId);
+        const value = recordAfterFormula.data.fields[formulaField.name];
+        expect(typeof value).toBe('number');
+
+        const numberFormulaValue = numberFormulaFieldId ? baseNumberValue * 2 : undefined;
+        const expectedSum = args.reduce(
+          (acc, source) =>
+            acc +
+            sumArgumentSources[source].toValue({
+              numberValue: baseNumberValue,
+              numberFormulaValue,
+            }),
+          0
+        );
+        expect(value).toBeCloseTo(expectedSum, 6);
+      }
+    );
+
+    const mixedFunctionCases: Array<{
+      label: FunctionName;
+      expressionFactory: (ids: {
+        numberFieldId: string;
+        numberFormulaFieldId: string;
+        textFieldId: string;
+        textFormulaFieldId: string;
+      }) => string;
+      assert: (
+        value: unknown,
+        ctx: { numberValue: number; numberFormulaValue: number; textValue: string }
+      ) => void;
+    }> = [
+      {
+        label: FunctionName.Round,
+        expressionFactory: ({ numberFieldId, numberFormulaFieldId }) =>
+          `ROUND({${numberFormulaFieldId}} / {${numberFieldId}}, 0)`,
+        assert: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBe(2);
+        },
+      },
+      {
+        label: FunctionName.Concatenate,
+        expressionFactory: ({ numberFormulaFieldId, textFieldId, textFormulaFieldId }) =>
+          `CONCATENATE("${literalTextValue}", "-", {${textFieldId}}, "-", {${numberFormulaFieldId}}, "-", {${textFormulaFieldId}})`,
+        assert: (value, ctx) => {
+          expect(typeof value).toBe('string');
+          const textFormulaValue = `${ctx.numberValue}${ctx.textValue}`;
+          expect(value).toBe(
+            `${literalTextValue}-${ctx.textValue}-${ctx.numberFormulaValue}-${textFormulaValue}`
+          );
+        },
+      },
+      {
+        label: FunctionName.If,
+        expressionFactory: ({ numberFieldId, numberFormulaFieldId, textFieldId }) =>
+          `IF({${numberFormulaFieldId}} > {${numberFieldId}}, {${textFieldId}}, "${fallbackTextValue}")`,
+        assert: (value, ctx) => {
+          expect(typeof value).toBe('string');
+          expect(value).toBe(
+            ctx.numberFormulaValue > ctx.numberValue ? ctx.textValue : fallbackTextValue
+          );
+        },
+      },
+    ];
+
+    it.each(mixedFunctionCases)(
+      'should evaluate %s with mixed literal and field arguments',
+      async ({ label, expressionFactory, assert }) => {
+        const baseNumberValue = 3;
+        const baseTextValue = 'matrix-text';
+
+        const { records } = await createRecords(table1Id, {
+          fieldKeyType: FieldKeyType.Name,
+          records: [
+            {
+              fields: {
+                [numberFieldRo.name]: baseNumberValue,
+                [textFieldRo.name]: baseTextValue,
+              },
+            },
+          ],
+        });
+        const recordId = records[0].id;
+
+        const numberFormulaField = await createField(table1Id, {
+          name: `mixed-function-source-${label.toLowerCase()}`,
+          type: FieldType.Formula,
+          options: {
+            expression: `{${numberFieldRo.id}} * 2`,
+          },
+        });
+
+        const formulaField = await createField(table1Id, {
+          name: `mixed-function-matrix-${label.toLowerCase()}`,
+          type: FieldType.Formula,
+          options: {
+            expression: expressionFactory({
+              numberFieldId: numberFieldRo.id,
+              numberFormulaFieldId: numberFormulaField.id,
+              textFieldId: textFieldRo.id,
+              textFormulaFieldId: formulaFieldRo.id,
+            }),
+          },
+        });
+
+        const recordAfterFormula = await getRecord(table1Id, recordId);
+        const value = recordAfterFormula.data.fields[formulaField.name];
+        assert(value, {
+          numberValue: baseNumberValue,
+          numberFormulaValue: baseNumberValue * 2,
+          textValue: baseTextValue,
+        });
+      }
+    );
+  });
+
   it('should calculate primary field when have link relationship', async () => {
     const table2: ITableFullVo = await createTable(baseId, { name: 'table2' });
     const linkFieldRo: IFieldRo = {
@@ -1868,6 +2279,83 @@ describe('OpenAPI formula (e2e)', () => {
 
       const record2 = await getRecord(table.id, table.records[0].id);
       expect(record2.data.fields[field2.name]).toEqual(27);
+    });
+
+    it('should evaluate timezone-aware formatting formulas referencing fields', async () => {
+      const dateField = await createField(table.id, {
+        name: 'tz source',
+        type: FieldType.Date,
+        options: {
+          formatting: {
+            date: DateFormattingPreset.ISO,
+            time: TimeFormatting.Hour24,
+            timeZone: 'Asia/Tokyo',
+          },
+        },
+      });
+
+      const recordId = table.records[0].id;
+      const inputValue = '2024-03-01T00:30:00+09:00';
+      const updatedRecord = await updateRecord(table.id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [dateField.name]: inputValue,
+          },
+        },
+      });
+      const sourceValue = updatedRecord.fields?.[dateField.name] as string;
+      expect(typeof sourceValue).toBe('string');
+
+      const expectedDate = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date(sourceValue));
+
+      const expectedTime = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Shanghai',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      })
+        .format(new Date(sourceValue))
+        .replace(/\./g, ':'); // ensure consistent separators on all locales
+
+      const dateStrField = await createField(table.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `DATESTR({${dateField.id}})`,
+          timeZone: 'Asia/Shanghai',
+        },
+      });
+
+      let record = await getRecord(table.id, recordId);
+      expect(record.data.fields[dateStrField.name]).toEqual(expectedDate);
+
+      const timeStrField = await createField(table.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `TIMESTR({${dateField.id}})`,
+          timeZone: 'Asia/Shanghai',
+        },
+      });
+
+      record = await getRecord(table.id, recordId);
+      expect(record.data.fields[timeStrField.name]).toEqual(expectedTime);
+
+      const workdayField = await createField(table.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `DATESTR(WORKDAY({${dateField.id}}, 1))`,
+          timeZone: 'Asia/Shanghai',
+        },
+      });
+
+      record = await getRecord(table.id, recordId);
+      expect(record.data.fields[workdayField.name]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
 
     it.skip('should evaluate boolean formulas with timezone aware date arguments', async () => {
