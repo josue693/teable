@@ -124,7 +124,7 @@ export class SelectionService {
         ...query,
         skip: 0,
         take: -1,
-      });
+      }, true);
       return result.ids;
     }
 
@@ -139,7 +139,7 @@ export class SelectionService {
           ...query,
           skip: start,
           take: end + 1 - start,
-        });
+        }, true);
         recordIds = recordIds.concat(result.ids);
       }
 
@@ -157,7 +157,7 @@ export class SelectionService {
       ...query,
       skip: start[1],
       take: end[1] + 1 - start[1],
-    });
+    }, true);
 
     return result.ids;
   }
@@ -181,7 +181,7 @@ export class SelectionService {
       take: -1,
       fieldKeyType: FieldKeyType.Id,
       projection: this.fieldsToProjection(fields, FieldKeyType.Id),
-    });
+    }, true);
 
     return {
       records,
@@ -206,7 +206,7 @@ export class SelectionService {
         take: end + 1 - start,
         fieldKeyType: FieldKeyType.Id,
         projection: this.fieldsToProjection(fields, FieldKeyType.Id),
-      });
+      }, true);
       records = records.concat(recordsFields);
     }
 
@@ -231,7 +231,7 @@ export class SelectionService {
       take: end[1] + 1 - start[1],
       fieldKeyType: FieldKeyType.Id,
       projection: this.fieldsToProjection(selectedFields, FieldKeyType.Id),
-    });
+    }, true);
     return { records, fields: selectedFields };
   }
 
@@ -744,7 +744,7 @@ export class SelectionService {
       skip: row,
       take: tableData.length,
       fieldKeyType: FieldKeyType.Id,
-    });
+    }, true);
     const [numColsToExpand, numRowsToExpand] = this.calculateExpansion(tableSize, cell, [
       tableColCount,
       tableRowCount,

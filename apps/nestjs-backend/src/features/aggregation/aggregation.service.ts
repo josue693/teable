@@ -930,7 +930,7 @@ export class AggregationService implements IAggregationService {
         }
 
         const { queryBuilder: viewRecordsQB, alias } =
-          await this.recordService.buildFilterSortQuery(tableId, queryRo);
+          await this.recordService.buildFilterSortQuery(tableId, queryRo, true);
         // step 2. find the index in current view
         const indexQueryBuilder = this.knex
           .with('t', viewRecordsQB.from({ [alias]: viewCte || dbTableName }))

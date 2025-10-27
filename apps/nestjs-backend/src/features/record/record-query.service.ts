@@ -56,7 +56,7 @@ export class RecordQueryService {
         {
           tableIdOrDbTableName: tableId,
           viewId: undefined,
-          useQueryModel: false,
+          useQueryModel: true,
           restrictRecordIds: recordIds,
         }
       );

@@ -213,6 +213,7 @@ export class RecordService {
         tableIdOrDbTableName: tableId,
         viewId: undefined,
         restrictRecordIds: [recordId],
+        useQueryModel: true,
       }
     );
     const sql = queryBuilder.where('__id', recordId).toQuery();
@@ -1769,7 +1770,8 @@ export class RecordService {
 
   async getRecordsFields(
     tableId: string,
-    query: IGetRecordsRo
+    query: IGetRecordsRo,
+    useQueryModel = true
   ): Promise<Pick<IRecord, 'id' | 'fields'>[]> {
     if (identify(tableId) !== IdPrefix.Table) {
       throw new InternalServerErrorException('query collection must be table id');
@@ -1799,19 +1801,23 @@ export class RecordService {
 
     const { filter: filterWithGroup } = await this.getGroupRelatedData(tableId, query);
 
-    const { queryBuilder } = await this.buildFilterSortQuery(tableId, {
-      viewId,
-      ignoreViewQuery,
-      filter: filterWithGroup,
-      orderBy,
-      search,
-      groupBy,
-      collapsedGroupIds,
-      filterLinkCellCandidate,
-      filterLinkCellSelected,
-      skip,
-      take,
-    });
+    const { queryBuilder } = await this.buildFilterSortQuery(
+      tableId,
+      {
+        viewId,
+        ignoreViewQuery,
+        filter: filterWithGroup,
+        orderBy,
+        search,
+        groupBy,
+        collapsedGroupIds,
+        filterLinkCellCandidate,
+        filterLinkCellSelected,
+        skip,
+        take,
+      },
+      useQueryModel
+    );
     skip && queryBuilder.offset(skip);
     take !== -1 && take && queryBuilder.limit(take);
     const sql = queryBuilder.toQuery();
@@ -1883,9 +1889,13 @@ export class RecordService {
     recordIds: string[],
     filter?: IFilter | null
   ): Promise<string[]> {
-    const { queryBuilder, alias } = await this.buildFilterSortQuery(tableId, {
-      filter,
-    });
+    const { queryBuilder, alias } = await this.buildFilterSortQuery(
+      tableId,
+      {
+        filter,
+      },
+      true
+    );
     queryBuilder.whereIn(`${alias}.__id`, recordIds);
     const result = await this.prismaService
       .txClient()
@@ -2385,19 +2395,23 @@ export class RecordService {
       return { isDeleted, isVisible: false };
     }
 
-    const queryResult = await this.getDocIdsByQuery(tableId, {
-      ignoreViewQuery: query.ignoreViewQuery ?? false,
-      viewId: query.viewId,
-      skip: query.skip,
-      take: query.take,
-      filter: query.filter,
-      orderBy: query.orderBy,
-      search: query.search,
-      groupBy: query.groupBy,
-      filterLinkCellCandidate: query.filterLinkCellCandidate,
-      filterLinkCellSelected: query.filterLinkCellSelected,
-      selectedRecordIds: query.selectedRecordIds,
-    });
+    const queryResult = await this.getDocIdsByQuery(
+      tableId,
+      {
+        ignoreViewQuery: query.ignoreViewQuery ?? false,
+        viewId: query.viewId,
+        skip: query.skip,
+        take: query.take,
+        filter: query.filter,
+        orderBy: query.orderBy,
+        search: query.search,
+        groupBy: query.groupBy,
+        filterLinkCellCandidate: query.filterLinkCellCandidate,
+        filterLinkCellSelected: query.filterLinkCellSelected,
+        selectedRecordIds: query.selectedRecordIds,
+      },
+      true
+    );
     const isVisible = queryResult.ids.includes(recordId);
     return { isDeleted, isVisible };
   }

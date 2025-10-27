@@ -788,11 +788,15 @@ export class FieldOpenApiService {
     }
 
     const nonComputedFields = fields.filter((field) => !field.isComputed);
-    const records = await this.recordService.getRecordsFields(tableId, {
-      projection: nonComputedFields.map((field) => field.id),
-      fieldKeyType: FieldKeyType.Id,
-      take: -1,
-    });
+    const records = await this.recordService.getRecordsFields(
+      tableId,
+      {
+        projection: nonComputedFields.map((field) => field.id),
+        fieldKeyType: FieldKeyType.Id,
+        take: -1,
+      },
+      true
+    );
 
     const columnsMeta = await this.viewService.getColumnsMetaMap(tableId, fieldIds);
     const referenceMap = await this.getFieldReferenceMap(fieldIds);
@@ -1427,6 +1431,7 @@ export class FieldOpenApiService {
           alias: 'count',
         },
       ],
+      useQueryModel: true,
     });
 
     const query = qb.toQuery();
@@ -1460,6 +1465,7 @@ export class FieldOpenApiService {
       tableIdOrDbTableName: dbTableName,
       viewId: undefined,
       filter,
+      useQueryModel: true,
     });
     const query = qb
       // TODO: handle where now link or lookup cannot use alias
