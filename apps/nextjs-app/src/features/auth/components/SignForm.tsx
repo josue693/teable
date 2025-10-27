@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { HttpErrorCode, type HttpError } from '@teable/core';
 import type { ISignin, ISignup } from '@teable/openapi';
 import {
@@ -8,9 +8,7 @@ import {
   signupSchema,
   sendSignupVerificationCode,
   sendSignupVerificationCodeRoSchema,
-  getPublicSetting,
 } from '@teable/openapi';
-import { ReactQueryKeys } from '@teable/sdk/config';
 import { Spin, Error as ErrorCom } from '@teable/ui-lib/base';
 import { Button, Input, Label, cn } from '@teable/ui-lib/shadcn';
 import Link from 'next/link';
@@ -21,7 +19,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ZodIssue } from 'zod';
 import { fromZodError } from 'zod-validation-error';
 import { trackSignUpConversion } from '@/components/google-ads';
+import { useCutDown } from '@/features/app/hooks/useCutDown';
 import { useEnv } from '@/features/app/hooks/useEnv';
+import { usePublicSettingQuery } from '@/features/app/hooks/useSetting';
 import { authConfig } from '../../i18n/auth.config';
 import { SendVerificationButton } from './SendVerificationButton';
 import TurnstileWidget from './TurnstileWidget';
@@ -41,20 +41,17 @@ export const SignForm: FC<ISignForm> = (props) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>();
   const [turnstileToken, setTurnstileToken] = useState<string>();
-  const [countdown, setCountdown] = useState<number>(0);
+  const { countdown, setCountdown } = useCutDown();
   const [turnstileKey, setTurnstileKey] = useState<number>(0);
   const env = useEnv();
   const emailRef = useRef<HTMLInputElement>(null);
 
-  const { data: setting } = useQuery({
-    queryKey: ReactQueryKeys.getPublicSetting(),
-    queryFn: () => getPublicSetting().then(({ data }) => data),
-  });
+  const { data: setting } = usePublicSettingQuery();
   const {
     enableWaitlist = false,
     disallowSignUp = false,
     turnstileSiteKey,
-    signupVerificationCodeRateLimitSeconds,
+    signupVerificationSendCodeMailRate = 0,
   } = setting ?? {};
 
   const joinWaitlist = useCallback(() => {
@@ -71,16 +68,10 @@ export const SignForm: FC<ISignForm> = (props) => {
     setError(undefined);
     setTurnstileToken(undefined);
     setCountdown(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type]);
 
   // Countdown timer for send verification code button
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const timer = setTimeout(() => {
-      setCountdown((prev) => prev - 1);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [countdown]);
 
   const { mutate: submitMutation } = useMutation({
     mutationFn: ({ type, form }: { type: 'signin' | 'signup'; form: ISignin }) => {
@@ -108,10 +99,10 @@ export const SignForm: FC<ISignForm> = (props) => {
             setError(undefined);
             // Start countdown based on configured rate limit (only if configured)
             if (
-              typeof signupVerificationCodeRateLimitSeconds === 'number' &&
-              signupVerificationCodeRateLimitSeconds > 0
+              typeof signupVerificationSendCodeMailRate === 'number' &&
+              signupVerificationSendCodeMailRate > 0
             ) {
-              setCountdown(signupVerificationCodeRateLimitSeconds);
+              setCountdown(signupVerificationSendCodeMailRate);
             }
           } else {
             setError(error.message);
@@ -173,10 +164,10 @@ export const SignForm: FC<ISignForm> = (props) => {
       setSignupVerificationToken(data.data.token);
       // Start countdown based on configured rate limit (only if configured)
       if (
-        typeof signupVerificationCodeRateLimitSeconds === 'number' &&
-        signupVerificationCodeRateLimitSeconds > 0
+        typeof signupVerificationSendCodeMailRate === 'number' &&
+        signupVerificationSendCodeMailRate > 0
       ) {
-        setCountdown(signupVerificationCodeRateLimitSeconds);
+        setCountdown(signupVerificationSendCodeMailRate);
       }
       // Reset turnstile token and force widget refresh
       setTurnstileToken(undefined);
@@ -186,6 +177,15 @@ export const SignForm: FC<ISignForm> = (props) => {
       // Reset turnstile on error
       setTurnstileToken(undefined);
       setTurnstileKey((prev) => prev + 1);
+      if (
+        error.code === HttpErrorCode.TOO_MANY_REQUESTS &&
+        error.data &&
+        typeof error.data === 'object' &&
+        'seconds' in error.data
+      ) {
+        setError(t('auth:signupError.sendMailRateLimit', { seconds: error.data.seconds }));
+        return;
+      }
       setError(error.message);
     },
     meta: {

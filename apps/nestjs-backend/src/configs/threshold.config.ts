@@ -30,6 +30,13 @@ export const thresholdConfig = registerAs('threshold', () => ({
     initialBackoff: Number(process.env.BACKEND_DB_DEADLOCK_INITIAL_BACKOFF ?? 100),
     jitter: Number(process.env.BACKEND_DB_DEADLOCK_JITTER ?? 1.0),
   },
+  changeEmailSendCodeMailRate: Number(process.env.BACKEND_CHANGE_EMAIL_SEND_CODE_MAIL_RATE ?? 30),
+  resetPasswordSendMailRate: Number(process.env.BACKEND_RESET_PASSWORD_SEND_MAIL_RATE ?? 30),
+  signupVerificationSendCodeMailRate: Number(
+    process.env.BACKEND_SIGNUP_VERIFICATION_CODE_RATE_LIMIT_SECONDS ??
+      process.env.BACKEND_SIGNUP_VERIFICATION_SEND_CODE_MAIL_RATE ??
+      30
+  ),
 }));
 
 export const ThresholdConfig = () => Inject(thresholdConfig.KEY);
