@@ -628,7 +628,10 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
       return `((${params[0]}) AND NOT (${params[1]})) OR (NOT (${params[0]}) AND (${params[1]}))`;
     }
     // For multiple values, we need a more complex implementation
-    return `(${this.joinParams(params, ' + ')}) % 2 = 1`;
+    return `(${this.joinParams(
+      params.map((p) => `CASE WHEN ${p} THEN 1 ELSE 0 END`),
+      ' + '
+    )}) % 2 = 1`;
   }
 
   blank(): string {

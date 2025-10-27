@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/no-duplicated-branches */
 /* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-collapsible-if */
 /* eslint-disable sonarjs/no-identical-functions */
@@ -488,11 +489,55 @@ abstract class BaseSqlConversionVisitor<
         .with(FunctionName.CreatedTime, () => this.formulaQuery.createdTime())
 
         // Logical Functions
-        .with(FunctionName.If, () => this.formulaQuery.if(params[0], params[1], params[2]))
-        .with(FunctionName.And, () => this.formulaQuery.and(params))
-        .with(FunctionName.Or, () => this.formulaQuery.or(params))
-        .with(FunctionName.Not, () => this.formulaQuery.not(params[0]))
-        .with(FunctionName.Xor, () => this.formulaQuery.xor(params))
+        .with(FunctionName.If, () => {
+          const [conditionSql, trueSql, falseSql] = params;
+          let coercedTrue = trueSql;
+          let coercedFalse = falseSql;
+
+          const trueExprCtx = exprContexts[1];
+          const falseExprCtx = exprContexts[2];
+          const trueType = this.inferExpressionType(trueExprCtx);
+          const falseType = this.inferExpressionType(falseExprCtx);
+          const trueIsBlank = this.isBlankLikeExpression(trueExprCtx) || trueSql.trim() === "''";
+          const falseIsBlank = this.isBlankLikeExpression(falseExprCtx) || falseSql.trim() === "''";
+
+          const shouldNullOutTrueBranch =
+            trueIsBlank && !['string', 'datetime'].includes(falseType);
+          const shouldNullOutFalseBranch =
+            falseIsBlank && !['string', 'datetime'].includes(trueType);
+
+          if (shouldNullOutTrueBranch) {
+            coercedTrue = 'NULL';
+          }
+
+          if (shouldNullOutFalseBranch) {
+            coercedFalse = 'NULL';
+          }
+
+          return this.formulaQuery.if(conditionSql, coercedTrue, coercedFalse);
+        })
+        .with(FunctionName.And, () => {
+          const booleanParams = params.map((param, index) =>
+            this.normalizeBooleanExpression(param, exprContexts[index])
+          );
+          return this.formulaQuery.and(booleanParams);
+        })
+        .with(FunctionName.Or, () => {
+          const booleanParams = params.map((param, index) =>
+            this.normalizeBooleanExpression(param, exprContexts[index])
+          );
+          return this.formulaQuery.or(booleanParams);
+        })
+        .with(FunctionName.Not, () => {
+          const booleanParam = this.normalizeBooleanExpression(params[0], exprContexts[0]);
+          return this.formulaQuery.not(booleanParam);
+        })
+        .with(FunctionName.Xor, () => {
+          const booleanParams = params.map((param, index) =>
+            this.normalizeBooleanExpression(param, exprContexts[index])
+          );
+          return this.formulaQuery.xor(booleanParams);
+        })
         .with(FunctionName.Blank, () => this.formulaQuery.blank())
         .with(FunctionName.IsError, () => this.formulaQuery.isError(params[0]))
         .with(FunctionName.Switch, () => {
@@ -501,14 +546,92 @@ abstract class BaseSqlConversionVisitor<
           const cases: Array<{ case: string; result: string }> = [];
           let defaultResult: string | undefined;
 
-          // Process pairs of case-result, with optional default at the end
+          type SwitchResultEntry = {
+            sql: string;
+            ctx: ExprContext;
+            type: 'string' | 'number' | 'boolean' | 'datetime' | 'unknown';
+          };
+
+          const resultEntries: SwitchResultEntry[] = [];
+
+          // Helper to normalize blank-like results when other branches require stricter typing
+          const normalizeBlankResults = () => {
+            const hasNumber = resultEntries.some((entry) => entry.type === 'number');
+            const hasBoolean = resultEntries.some((entry) => entry.type === 'boolean');
+            const hasDatetime = resultEntries.some((entry) => entry.type === 'datetime');
+
+            const requiresNumeric = hasNumber;
+            const requiresBoolean = hasBoolean;
+            const requiresDatetime = hasDatetime;
+
+            const shouldNullifyEntry = (entry: SwitchResultEntry): boolean => {
+              const isBlank = this.isBlankLikeExpression(entry.ctx) || entry.sql.trim() === "''";
+
+              if (!isBlank) {
+                return false;
+              }
+
+              if (requiresNumeric && entry.type !== 'number') {
+                return true;
+              }
+
+              if (requiresBoolean && entry.type !== 'boolean') {
+                return true;
+              }
+
+              if (requiresDatetime && entry.type !== 'datetime') {
+                return true;
+              }
+
+              return false;
+            };
+
+            for (const entry of resultEntries) {
+              if (shouldNullifyEntry(entry)) {
+                entry.sql = 'NULL';
+              }
+            }
+          };
+
+          // Collect case/result pairs and default (if any)
           for (let i = 1; i < params.length; i += 2) {
             if (i + 1 < params.length) {
-              cases.push({ case: params[i], result: params[i + 1] });
+              const resultCtx = exprContexts[i + 1];
+              resultEntries.push({
+                sql: params[i + 1],
+                ctx: resultCtx,
+                type: this.inferExpressionType(resultCtx),
+              });
+
+              cases.push({
+                case: params[i],
+                result: params[i + 1],
+              });
             } else {
-              // Odd number of remaining params means we have a default value
+              const resultCtx = exprContexts[i];
+              resultEntries.push({
+                sql: params[i],
+                ctx: resultCtx,
+                type: this.inferExpressionType(resultCtx),
+              });
               defaultResult = params[i];
             }
+          }
+
+          // Normalize blank results only after we have collected all branch types
+          normalizeBlankResults();
+
+          // Apply normalized SQL back to cases/default
+          let resultIndex = 0;
+          for (let i = 0; i < cases.length; i++) {
+            cases[i] = {
+              case: cases[i].case,
+              result: resultEntries[resultIndex++].sql,
+            };
+          }
+
+          if (defaultResult !== undefined) {
+            defaultResult = resultEntries[resultIndex]?.sql;
           }
 
           return this.formulaQuery.switch(expression, cases, defaultResult);
@@ -596,8 +719,16 @@ abstract class BaseSqlConversionVisitor<
       .with('<=', () => this.formulaQuery.lessThanOrEqual(left, right))
       .with('=', () => this.formulaQuery.equal(left, right))
       .with('!=', '<>', () => this.formulaQuery.notEqual(left, right))
-      .with('&&', () => this.formulaQuery.logicalAnd(left, right))
-      .with('||', () => this.formulaQuery.logicalOr(left, right))
+      .with('&&', () => {
+        const normalizedLeft = this.normalizeBooleanExpression(left, ctx.expr(0));
+        const normalizedRight = this.normalizeBooleanExpression(right, ctx.expr(1));
+        return this.formulaQuery.logicalAnd(normalizedLeft, normalizedRight);
+      })
+      .with('||', () => {
+        const normalizedLeft = this.normalizeBooleanExpression(left, ctx.expr(0));
+        const normalizedRight = this.normalizeBooleanExpression(right, ctx.expr(1));
+        return this.formulaQuery.logicalOr(normalizedLeft, normalizedRight);
+      })
       .with('&', () => {
         // Always treat & as string concatenation to avoid type issues
         const leftType = this.inferExpressionType(ctx.expr(0));
@@ -635,6 +766,63 @@ abstract class BaseSqlConversionVisitor<
       return this.formulaQuery.datetimeFormat(value, "'YYYY-MM-DD'");
     }
     return value;
+  }
+  private normalizeBooleanExpression(valueSql: string, exprCtx: ExprContext): string {
+    const type = this.inferExpressionType(exprCtx);
+    const driver = this.context.driverClient ?? DriverClient.Pg;
+
+    switch (type) {
+      case 'boolean':
+        if (driver === DriverClient.Sqlite) {
+          return `(COALESCE((${valueSql}), 0) != 0)`;
+        }
+        return `(COALESCE((${valueSql}), FALSE))`;
+      case 'number': {
+        if (driver === DriverClient.Sqlite) {
+          const numericExpr = this.safeCastToNumeric(valueSql);
+          return `(COALESCE(${numericExpr}, 0) <> 0)`;
+        }
+        const sanitized = `REGEXP_REPLACE((${valueSql})::text, '[^0-9.+-]', '', 'g')`;
+        const numericCandidate = `(CASE
+          WHEN ${sanitized} ~ '^[-+]{0,1}(\\d+\\.\\d+|\\d+|\\.\\d+)$' THEN ${sanitized}::double precision
+          ELSE NULL
+        END)`;
+        return `(COALESCE(${numericCandidate}, 0) <> 0)`;
+      }
+      case 'string': {
+        if (driver === DriverClient.Sqlite) {
+          const textExpr = `CAST(${valueSql} AS TEXT)`;
+          const trimmedExpr = `TRIM(${textExpr})`;
+          return `((${valueSql}) IS NOT NULL AND ${trimmedExpr} <> '' AND LOWER(${trimmedExpr}) <> 'null')`;
+        }
+        const textExpr = `(${valueSql})::text`;
+        const trimmedExpr = `TRIM(${textExpr})`;
+        return `((${valueSql}) IS NOT NULL AND ${trimmedExpr} <> '' AND LOWER(${trimmedExpr}) <> 'null')`;
+      }
+      case 'datetime':
+        return `((${valueSql}) IS NOT NULL)`;
+      default:
+        return `((${valueSql}) IS NOT NULL)`;
+    }
+  }
+
+  private isBlankLikeExpression(ctx: ExprContext): boolean {
+    if (ctx instanceof StringLiteralContext) {
+      const raw = ctx.text;
+      if (raw.startsWith("'") && raw.endsWith("'")) {
+        const unescaped = unescapeString(raw.slice(1, -1));
+        return unescaped === '';
+      }
+      return false;
+    }
+
+    if (ctx instanceof FunctionCallContext) {
+      const rawName = ctx.func_name().text.toUpperCase();
+      const fnName = normalizeFunctionNameAlias(rawName) as FunctionName;
+      return fnName === FunctionName.Blank;
+    }
+
+    return false;
   }
   /**
    * Infer the type of an expression for type-aware operations
@@ -783,6 +971,7 @@ abstract class BaseSqlConversionVisitor<
   /**
    * Infer return type from function calls
    */
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   private inferFunctionReturnType(
     ctx: FunctionCallContext
   ): 'string' | 'number' | 'boolean' | 'datetime' | 'unknown' {
@@ -799,6 +988,98 @@ abstract class BaseSqlConversionVisitor<
 
     if (BOOLEAN_FUNCTIONS.has(fnName)) {
       return 'boolean';
+    }
+
+    if (fnName === FunctionName.If) {
+      const [, trueExpr, falseExpr] = ctx.expr();
+      const trueType = this.inferExpressionType(trueExpr);
+      const falseType = this.inferExpressionType(falseExpr);
+
+      if (trueType === falseType) {
+        return trueType;
+      }
+
+      if (trueType === 'number' || falseType === 'number') {
+        const trueIsBlank = this.isBlankLikeExpression(trueExpr);
+        const falseIsBlank = this.isBlankLikeExpression(falseExpr);
+        if (trueType === 'number' && (falseIsBlank || falseType === 'number')) {
+          return 'number';
+        }
+        if (falseType === 'number' && (trueIsBlank || trueType === 'number')) {
+          return 'number';
+        }
+      }
+
+      if (trueType === 'datetime' && falseType === 'datetime') {
+        return 'datetime';
+      }
+
+      return 'unknown';
+    }
+
+    if (fnName === FunctionName.Switch) {
+      const exprContexts = ctx.expr();
+      const resultExprs: ExprContext[] = [];
+
+      for (let i = 2; i < exprContexts.length; i += 2) {
+        resultExprs.push(exprContexts[i]);
+      }
+
+      if (exprContexts.length % 2 === 0 && exprContexts.length > 1) {
+        resultExprs.push(exprContexts[exprContexts.length - 1]);
+      }
+
+      if (resultExprs.length === 0) {
+        return 'unknown';
+      }
+
+      const resultTypes = resultExprs.map((expr) => this.inferExpressionType(expr));
+      const nonUnknownTypes = resultTypes.filter((type) => type !== 'unknown');
+
+      if (nonUnknownTypes.length === 0) {
+        return 'unknown';
+      }
+
+      const firstType = nonUnknownTypes[0];
+      if (nonUnknownTypes.every((type) => type === firstType)) {
+        return firstType;
+      }
+
+      const hasNumber = nonUnknownTypes.includes('number');
+      const hasDatetime = nonUnknownTypes.includes('datetime');
+      const hasBoolean = nonUnknownTypes.includes('boolean');
+
+      if (hasNumber) {
+        const convertibleToNumber = resultExprs.every((expr, index) => {
+          const type = resultTypes[index];
+          return type === 'number' || this.isBlankLikeExpression(expr);
+        });
+        if (convertibleToNumber) {
+          return 'number';
+        }
+      }
+
+      if (hasDatetime) {
+        const convertibleToDatetime = resultExprs.every((expr, index) => {
+          const type = resultTypes[index];
+          return type === 'datetime' || this.isBlankLikeExpression(expr);
+        });
+        if (convertibleToDatetime) {
+          return 'datetime';
+        }
+      }
+
+      if (hasBoolean) {
+        const convertibleToBoolean = resultExprs.every((expr, index) => {
+          const type = resultTypes[index];
+          return type === 'boolean' || this.isBlankLikeExpression(expr);
+        });
+        if (convertibleToBoolean) {
+          return 'boolean';
+        }
+      }
+
+      return 'unknown';
     }
 
     // Basic detection for functions that yield datetime

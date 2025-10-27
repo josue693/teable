@@ -570,8 +570,8 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   // Logical Functions
-  if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
-    const wrapped = `(${condition})`;
+  private truthinessScore(value: string): string {
+    const wrapped = `(${value})`;
     const conditionType = `pg_typeof${wrapped}::text`;
     const numericTypes = "('smallint','integer','bigint','numeric','double precision','real')";
     const wrappedText = `(${wrapped})::text`;
@@ -582,12 +582,16 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
       WHEN LOWER(${wrappedText}) = 'null' THEN 0
       ELSE 1
     END`;
-    const truthinessScore = `CASE
+    return `CASE
       WHEN ${wrapped} IS NULL THEN 0
       WHEN ${conditionType} = 'boolean' THEN ${booleanTruthyScore}
       WHEN ${conditionType} IN ${numericTypes} THEN ${numericTruthyScore}
       ELSE ${fallbackTruthyScore}
     END`;
+  }
+
+  if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
+    const truthinessScore = this.truthinessScore(condition);
     return `CASE WHEN (${truthinessScore}) = 1 THEN ${valueIfTrue} ELSE ${valueIfFalse} END`;
   }
 

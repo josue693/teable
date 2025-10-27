@@ -1071,6 +1071,399 @@ describe('OpenAPI formula (e2e)', () => {
         }
       }
     );
+
+    it('should normalize truthiness for non-boolean logical inputs', async () => {
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: 5,
+              [textFieldRo.name]: 'value',
+            },
+          },
+        ],
+      });
+      const recordId = records[0].id;
+
+      const [andField, orField, notField] = await Promise.all([
+        createField(table1Id, {
+          name: 'logical-truthiness-and',
+          type: FieldType.Formula,
+          options: {
+            expression: `AND({${numberFieldRo.id}}, {${textFieldRo.id}})`,
+          },
+        }),
+        createField(table1Id, {
+          name: 'logical-truthiness-or',
+          type: FieldType.Formula,
+          options: {
+            expression: `OR({${numberFieldRo.id}}, {${textFieldRo.id}})`,
+          },
+        }),
+        createField(table1Id, {
+          name: 'logical-truthiness-not',
+          type: FieldType.Formula,
+          options: {
+            expression: `NOT({${numberFieldRo.id}})`,
+          },
+        }),
+      ]);
+
+      const readValues = async () => {
+        const record = await getRecord(table1Id, recordId);
+        return {
+          and: record.data.fields[andField.name],
+          or: record.data.fields[orField.name],
+          not: record.data.fields[notField.name],
+        } as { and: boolean; or: boolean; not: boolean };
+      };
+
+      let values = await readValues();
+      expect(values.and).toBe(true);
+      expect(values.or).toBe(true);
+      expect(values.not).toBe(false);
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [numberFieldRo.name]: 0,
+            [textFieldRo.name]: '',
+          },
+        },
+      });
+
+      values = await readValues();
+      expect(values.and).toBe(false);
+      expect(values.or).toBe(false);
+      expect(values.not).toBe(true);
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [numberFieldRo.name]: null,
+            [textFieldRo.name]: 'fallback',
+          },
+        },
+      });
+
+      values = await readValues();
+      expect(values.and).toBe(false);
+      expect(values.or).toBe(true);
+      expect(values.not).toBe(true);
+    });
+
+    it('should treat numeric IF fallbacks with blank branches as nulls', async () => {
+      const numericCondition = await createField(table1Id, {
+        name: 'numeric-condition',
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Decimal, precision: 2 },
+        },
+      });
+
+      const numericSubtrahend = await createField(table1Id, {
+        name: 'numeric-subtrahend',
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Decimal, precision: 2 },
+        },
+      });
+
+      const blankCondition = await createField(table1Id, {
+        name: 'blank-condition',
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Decimal, precision: 2 },
+        },
+      });
+
+      const fallbackNumeric = await createField(table1Id, {
+        name: 'fallback-numeric',
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Decimal, precision: 2 },
+        },
+      });
+
+      const formulaField = await createField(table1Id, {
+        name: 'numeric-if-fallback',
+        type: FieldType.Formula,
+        options: {
+          expression:
+            `IF({${numericCondition.id}} > 0, {${numericCondition.id}} - {${numericSubtrahend.id}}, ` +
+            `IF({${blankCondition.id}} > 0, '', {${fallbackNumeric.id}}))`,
+        },
+      });
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numericCondition.name]: 10,
+              [numericSubtrahend.name]: 3,
+              [blankCondition.name]: 0,
+              [fallbackNumeric.name]: 5,
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+
+      const readFormulaValue = async () => {
+        const record = await getRecord(table1Id, recordId);
+        return record.data.fields[formulaField.name] as number | null;
+      };
+
+      // Numeric branch should compute the difference.
+      let value = await readFormulaValue();
+      expect(value).toBeCloseTo(7);
+
+      // Trigger the blank branch – it should evaluate to null rather than ''.
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [numericCondition.name]: 0,
+            [blankCondition.name]: 8,
+          },
+        },
+      });
+
+      value = await readFormulaValue();
+      expect(value ?? null).toBeNull();
+
+      // Finally, the nested fallback should surface the numeric value unchanged.
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [blankCondition.name]: 0,
+            [fallbackNumeric.name]: -4,
+          },
+        },
+      });
+
+      value = await readFormulaValue();
+      const numericValue = typeof value === 'number' ? value : Number(value);
+      expect(numericValue).toBe(-4);
+    });
+
+    it('should evaluate nested logical formulas with mixed field types', async () => {
+      const selectField = await createField(table1Id, {
+        name: 'logical-select',
+        type: FieldType.SingleSelect,
+        options: {
+          choices: [
+            { name: 'light', id: 'cho-light', color: 'grayBright' },
+            { name: 'medium', id: 'cho-medium', color: 'yellowBright' },
+            { name: 'heavy', id: 'cho-heavy', color: 'tealBright' },
+          ],
+        } as IFieldRo['options'],
+      });
+
+      const auxiliaryNumber = await createField(table1Id, {
+        name: 'aux-number',
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Decimal, precision: 0 },
+        },
+      });
+
+      const complexLogicField = await createField(table1Id, {
+        name: 'nested-mixed-logic',
+        type: FieldType.Formula,
+        options: {
+          expression:
+            `AND({${numberFieldRo.id}} > 0, ` +
+            `OR({${selectField.id}} = "heavy", {${selectField.id}} = "medium"), ` +
+            `{${textFieldRo.id}} != "", ` +
+            `IF({${auxiliaryNumber.id}}, {${auxiliaryNumber.id}}, ""))`,
+        },
+      });
+
+      const concatenationField = await createField(table1Id, {
+        name: 'nested-mixed-string',
+        type: FieldType.Formula,
+        options: {
+          expression: `2+2 & {${textFieldRo.id}} & {${selectField.id}} & 4 & "xxxxxxx"`,
+        },
+      });
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: 12,
+              [textFieldRo.name]: 'Alpha',
+              [selectField.name]: 'heavy',
+              [auxiliaryNumber.name]: 9,
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+
+      const readLogic = async () => {
+        const record = await getRecord(table1Id, recordId);
+        return record.data.fields[complexLogicField.name] as boolean;
+      };
+
+      const readConcat = async () => {
+        const record = await getRecord(table1Id, recordId);
+        return record.data.fields[concatenationField.name] as string;
+      };
+
+      let logicValue = await readLogic();
+      expect(logicValue).toBe(true);
+
+      let concatValue = await readConcat();
+      expect(concatValue).toBe('4Alphaheavy4xxxxxxx');
+
+      // Switch select choice to a value that should fail the OR expression.
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [selectField.name]: 'light',
+          },
+        },
+      });
+
+      logicValue = await readLogic();
+      expect(logicValue).toBe(false);
+
+      // Restore select, but clear the text field so another clause fails.
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [selectField.name]: 'medium',
+            [textFieldRo.name]: '',
+          },
+        },
+      });
+
+      logicValue = await readLogic();
+      expect(logicValue).toBe(false);
+
+      // Restore text, zero out auxiliary number so IF branch yields NULL (still falsy).
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [textFieldRo.name]: 'Restored',
+            [auxiliaryNumber.name]: 0,
+          },
+        },
+      });
+
+      logicValue = await readLogic();
+      expect(logicValue).toBe(false);
+
+      // Final update: all conditions satisfied again.
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [textFieldRo.name]: 'Ready',
+            [auxiliaryNumber.name]: 11,
+          },
+        },
+      });
+
+      logicValue = await readLogic();
+      expect(logicValue).toBe(true);
+
+      concatValue = await readConcat();
+      expect(concatValue).toBe('4Readymedium4xxxxxxx');
+    });
+
+    it('should evaluate SWITCH formulas with numeric branches and blank literals', async () => {
+      const statusField = await createField(table1Id, {
+        name: 'switch-select',
+        type: FieldType.SingleSelect,
+        options: {
+          choices: [
+            { name: 'light', id: 'cho-light', color: 'grayBright' },
+            { name: 'medium', id: 'cho-medium', color: 'yellowBright' },
+            { name: 'heavy', id: 'cho-heavy', color: 'tealBright' },
+          ],
+        } as IFieldRo['options'],
+      });
+
+      const amountField = await createField(table1Id, {
+        name: 'switch-amount',
+        type: FieldType.Number,
+        options: {
+          formatting: { type: NumberFormattingType.Decimal, precision: 0 },
+        },
+      });
+
+      const switchFormula = await createField(table1Id, {
+        name: 'switch-mixed-result',
+        type: FieldType.Formula,
+        options: {
+          expression:
+            `SWITCH({${statusField.id}}, ` +
+            `"heavy", '', ` +
+            `"medium", {${amountField.id}}, ` +
+            `123)`,
+        },
+      });
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [statusField.name]: 'medium',
+              [amountField.name]: 42,
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+
+      const readSwitchValue = async () => {
+        const record = await getRecord(table1Id, recordId);
+        return record.data.fields[switchFormula.name] as number | string | null;
+      };
+
+      let switchValue = await readSwitchValue();
+      expect(Number(switchValue)).toBe(42);
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [statusField.name]: 'heavy',
+          },
+        },
+      });
+
+      switchValue = await readSwitchValue();
+      expect(switchValue ?? null).toBeNull();
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [statusField.name]: 'light',
+          },
+        },
+      });
+
+      switchValue = await readSwitchValue();
+      expect(Number(switchValue)).toBe(123);
+    });
   });
 
   describe('field reference formulas', () => {
