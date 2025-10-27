@@ -428,9 +428,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
       const fieldCteMap = this.state.getFieldCteMap();
       // Prefer nested CTE if available; otherwise, derive CTE name and use subquery
       if (nestedLinkFieldId) {
-        // Derive CTE name deterministically to reference the pre-generated nested CTE
-        const derivedCteName = `CTE_${getTableAliasFromTable(this.foreignTable)}_${nestedLinkFieldId}`;
-        const nestedCteName = fieldCteMap.get(nestedLinkFieldId) ?? derivedCteName;
+        const nestedCteName = fieldCteMap.get(nestedLinkFieldId);
         if (nestedCteName) {
           if (this.joinedCtes?.has(nestedLinkFieldId)) {
             expression = `"${nestedCteName}"."lookup_${targetLookupField.id}"`;
@@ -438,7 +436,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
             expression = `((SELECT "lookup_${targetLookupField.id}" FROM "${nestedCteName}" WHERE "${nestedCteName}"."main_record_id" = "${foreignAlias}"."${ID_FIELD_NAME}"))`;
           }
         } else {
-          // As a last resort, fallback to direct select using select visitor
+          // No pre-generated CTE available for this nested lookup; fall back to the raw expression
           const targetFieldResult = targetLookupField.accept(selectVisitor);
           expression =
             typeof targetFieldResult === 'string'

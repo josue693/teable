@@ -120,11 +120,15 @@ export class SelectionService {
   private async rowSelectionToIds(tableId: string, query: IRangesToIdQuery): Promise<string[]> {
     const { type, ranges } = query;
     if (type === RangeType.Columns) {
-      const result = await this.recordService.getDocIdsByQuery(tableId, {
-        ...query,
-        skip: 0,
-        take: -1,
-      }, true);
+      const result = await this.recordService.getDocIdsByQuery(
+        tableId,
+        {
+          ...query,
+          skip: 0,
+          take: -1,
+        },
+        true
+      );
       return result.ids;
     }
 
@@ -135,11 +139,15 @@ export class SelectionService {
         throw new BadRequestException(`Exceed max read rows ${this.thresholdConfig.maxReadRows}`);
       }
       for (const [start, end] of ranges) {
-        const result = await this.recordService.getDocIdsByQuery(tableId, {
-          ...query,
-          skip: start,
-          take: end + 1 - start,
-        }, true);
+        const result = await this.recordService.getDocIdsByQuery(
+          tableId,
+          {
+            ...query,
+            skip: start,
+            take: end + 1 - start,
+          },
+          true
+        );
         recordIds = recordIds.concat(result.ids);
       }
 
@@ -153,11 +161,15 @@ export class SelectionService {
     if (total > this.thresholdConfig.maxReadRows) {
       throw new BadRequestException(`Exceed max read rows ${this.thresholdConfig.maxReadRows}`);
     }
-    const result = await this.recordService.getDocIdsByQuery(tableId, {
-      ...query,
-      skip: start[1],
-      take: end[1] + 1 - start[1],
-    }, true);
+    const result = await this.recordService.getDocIdsByQuery(
+      tableId,
+      {
+        ...query,
+        skip: start[1],
+        take: end[1] + 1 - start[1],
+      },
+      true
+    );
 
     return result.ids;
   }
@@ -175,13 +187,17 @@ export class SelectionService {
       projection,
     });
 
-    const records = await this.recordService.getRecordsFields(tableId, {
-      ...queryRo,
-      skip: 0,
-      take: -1,
-      fieldKeyType: FieldKeyType.Id,
-      projection: this.fieldsToProjection(fields, FieldKeyType.Id),
-    }, true);
+    const records = await this.recordService.getRecordsFields(
+      tableId,
+      {
+        ...queryRo,
+        skip: 0,
+        take: -1,
+        fieldKeyType: FieldKeyType.Id,
+        projection: this.fieldsToProjection(fields, FieldKeyType.Id),
+      },
+      true
+    );
 
     return {
       records,
@@ -200,13 +216,17 @@ export class SelectionService {
     });
     let records: Pick<IRecord, 'id' | 'fields'>[] = [];
     for (const [start, end] of ranges) {
-      const recordsFields = await this.recordService.getRecordsFields(tableId, {
-        ...queryRo,
-        skip: start,
-        take: end + 1 - start,
-        fieldKeyType: FieldKeyType.Id,
-        projection: this.fieldsToProjection(fields, FieldKeyType.Id),
-      }, true);
+      const recordsFields = await this.recordService.getRecordsFields(
+        tableId,
+        {
+          ...queryRo,
+          skip: start,
+          take: end + 1 - start,
+          fieldKeyType: FieldKeyType.Id,
+          projection: this.fieldsToProjection(fields, FieldKeyType.Id),
+        },
+        true
+      );
       records = records.concat(recordsFields);
     }
 
@@ -225,13 +245,17 @@ export class SelectionService {
       projection,
     });
     const selectedFields = fields.slice(start[0], end[0] + 1);
-    const records = await this.recordService.getRecordsFields(tableId, {
-      ...queryRo,
-      skip: start[1],
-      take: end[1] + 1 - start[1],
-      fieldKeyType: FieldKeyType.Id,
-      projection: this.fieldsToProjection(selectedFields, FieldKeyType.Id),
-    }, true);
+    const records = await this.recordService.getRecordsFields(
+      tableId,
+      {
+        ...queryRo,
+        skip: start[1],
+        take: end[1] + 1 - start[1],
+        fieldKeyType: FieldKeyType.Id,
+        projection: this.fieldsToProjection(selectedFields, FieldKeyType.Id),
+      },
+      true
+    );
     return { records, fields: selectedFields };
   }
 
@@ -738,13 +762,17 @@ export class SelectionService {
 
     const projection = effectFields.map((f) => f.id);
 
-    const existingRecords = await this.recordService.getRecordsFields(tableId, {
-      ...queryRo,
-      projection,
-      skip: row,
-      take: tableData.length,
-      fieldKeyType: FieldKeyType.Id,
-    }, true);
+    const existingRecords = await this.recordService.getRecordsFields(
+      tableId,
+      {
+        ...queryRo,
+        projection,
+        skip: row,
+        take: tableData.length,
+        fieldKeyType: FieldKeyType.Id,
+      },
+      true
+    );
     const [numColsToExpand, numRowsToExpand] = this.calculateExpansion(tableSize, cell, [
       tableColCount,
       tableRowCount,
