@@ -501,10 +501,8 @@ abstract class BaseSqlConversionVisitor<
           const trueIsBlank = this.isBlankLikeExpression(trueExprCtx) || trueSql.trim() === "''";
           const falseIsBlank = this.isBlankLikeExpression(falseExprCtx) || falseSql.trim() === "''";
 
-          const shouldNullOutTrueBranch =
-            trueIsBlank && !['string', 'datetime'].includes(falseType);
-          const shouldNullOutFalseBranch =
-            falseIsBlank && !['string', 'datetime'].includes(trueType);
+          const shouldNullOutTrueBranch = trueIsBlank && falseType !== 'string';
+          const shouldNullOutFalseBranch = falseIsBlank && trueType !== 'string';
 
           if (shouldNullOutTrueBranch) {
             coercedTrue = 'NULL';

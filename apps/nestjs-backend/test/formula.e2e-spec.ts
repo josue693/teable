@@ -2595,6 +2595,71 @@ describe('OpenAPI formula (e2e)', () => {
         });
       }
     );
+
+    it('should coerce blank IF branch to null for datetime results', async () => {
+      const dateField = await createField(table1Id, {
+        name: 'source-date',
+        type: FieldType.Date,
+        options: {
+          formatting: {
+            date: DateFormattingPreset.ISO,
+            time: TimeFormatting.None,
+            timeZone: 'Asia/Shanghai',
+          },
+        },
+      });
+
+      const datetimeFormulaField = await createField(table1Id, {
+        name: 'nullable-datetime-formula',
+        type: FieldType.Formula,
+        options: {
+          expression: `IF(YEAR({${dateField.id}}) < 2020, '', {${dateField.id}})`,
+        },
+      });
+
+      const initialIso = '2019-05-01T00:00:00.000Z';
+      const { records: createdRecords } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: 10,
+              [textFieldRo.name]: 'trigger-null',
+              [dateField.name]: initialIso,
+            },
+          },
+        ],
+      });
+
+      const createdRecord = createdRecords[0];
+      const recordAfterCreate = await getRecord(table1Id, createdRecord.id);
+      const createdFormulaValue =
+        recordAfterCreate.data.fields?.[datetimeFormulaField.name] ?? null;
+      expect(createdFormulaValue).toBeNull();
+
+      const updatedIso = '2024-05-01T12:00:00.000Z';
+      const updatedRecord = await updateRecord(table1Id, createdRecord.id, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [dateField.name]: updatedIso,
+          },
+        },
+      });
+
+      const updatedValue = updatedRecord.fields?.[datetimeFormulaField.name] as string | null;
+      expect(updatedValue).not.toBeNull();
+      expect(typeof updatedValue).toBe('string');
+      expect(updatedValue).toContain('2024');
+
+      const recordAfterUpdate = await getRecord(table1Id, createdRecord.id);
+      const persistedValue = recordAfterUpdate.data.fields?.[datetimeFormulaField.name] as
+        | string
+        | null;
+      expect(persistedValue).not.toBeNull();
+      expect(typeof persistedValue).toBe('string');
+      expect(persistedValue).toContain('2024');
+    });
   });
 
   it('should calculate primary field when have link relationship', async () => {
