@@ -332,7 +332,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   value(text: string): string {
-    return `${text}::numeric`;
+    return this.toNumericSafe(text);
   }
 
   // Text Functions

@@ -13,7 +13,7 @@ describe('GeneratedColumnQueryPostgres unit-aware helpers', () => {
   };
 
   beforeEach(() => {
-   query.setContext(stubContext);
+    query.setContext(stubContext);
   });
 
   it('left casts expressions to text for generated columns', () => {

@@ -1525,6 +1525,13 @@ describe('OpenAPI Lookup field (e2e)', () => {
       const formulaValue = projectRecord!.fields[formulaField.id];
       expect(typeof formulaValue).toBe('string');
       expect(formulaValue as string).toContain('prefix-');
+
+      await updateRecordByApi(
+        projectTable.id,
+        projectRecordId,
+        projectNameField.id,
+        'Project Beta'
+      );
     });
   });
 });

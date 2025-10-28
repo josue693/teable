@@ -191,7 +191,7 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
   }
 
   value(text: string): string {
-    return `${text}::numeric`;
+    return this.toNumericSafe(text);
   }
 
   // Text Functions

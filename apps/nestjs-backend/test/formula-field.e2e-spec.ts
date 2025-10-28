@@ -867,4 +867,55 @@ describe('OpenAPI Formula Field (e2e)', () => {
       expect(records[1].fields[formulaField.id]).toBe(1999);
     });
   });
+
+  describe('localized single select numeric coercion', () => {
+    let table: ITableFullVo;
+
+    beforeEach(async () => {
+      table = await createTable(baseId, {
+        name: 'Localized Duration Formula',
+        fields: [
+          {
+            name: '定型时长',
+            type: FieldType.SingleSelect,
+            options: {
+              preventAutoNewOptions: true,
+              choices: [
+                { name: '0分钟', color: Colors.GrayDark1 },
+                { name: '20分钟', color: Colors.BlueLight1 },
+                { name: '30分钟', color: Colors.BlueBright },
+              ],
+            },
+          },
+        ],
+        records: [
+          { fields: { 定型时长: '0分钟' } },
+          { fields: { 定型时长: '20分钟' } },
+          { fields: { 定型时长: '30分钟' } },
+        ],
+      });
+    });
+
+    afterEach(async () => {
+      if (table?.id) {
+        await deleteTable(baseId, table.id);
+      }
+    });
+
+    it('parses localized option labels through VALUE()', async () => {
+      const durationFieldId = table.fields.find((f) => f.name === '定型时长')!.id;
+
+      const numericField = await createField(table.id, {
+        type: FieldType.Formula,
+        name: '定型时长(数值)',
+        options: {
+          expression: `VALUE({${durationFieldId}})`,
+        },
+      });
+
+      const { records } = await getRecords(table.id, { fieldKeyType: FieldKeyType.Id });
+      const parsedValues = records.map((record) => record.fields[numericField.id]);
+      expect(parsedValues).toEqual([0, 20, 30]);
+    });
+  });
 });
