@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { INestApplication } from '@nestjs/common';
 import type { IFieldRo, ILookupOptionsRo } from '@teable/core';
-import { FieldKeyType, FieldType, Relationship } from '@teable/core';
+import { FieldKeyType, FieldType, Relationship, NumberFormattingType } from '@teable/core';
 import {
   createField,
   createTable,
+  getFields,
   permanentDeleteTable,
   getRecords,
   initApp,
@@ -104,5 +105,135 @@ describe('Nested Lookup via Formula target (e2e)', () => {
     await permanentDeleteTable(baseId, table3.id);
     await permanentDeleteTable(baseId, table2.id);
     await permanentDeleteTable(baseId, table1.id);
+  });
+
+  it('resolves lookup of a rollup-driven formula across the same link chain', async () => {
+    const projectTable = await createTable(baseId, {
+      name: 'Projects',
+      fields: [
+        {
+          name: 'Project Name',
+          type: FieldType.SingleLineText,
+          options: {},
+        },
+      ],
+      records: [{ fields: {} }],
+    });
+
+    const taskTable = await createTable(baseId, {
+      name: 'Tasks',
+      fields: [
+        {
+          name: 'Task Name',
+          type: FieldType.SingleLineText,
+          options: {},
+        },
+        {
+          name: 'Hours',
+          type: FieldType.Number,
+          options: {
+            formatting: {
+              type: NumberFormattingType.Decimal,
+              precision: 0,
+            },
+          },
+        },
+      ],
+      records: [{ fields: {} }, { fields: {} }],
+    });
+
+    try {
+      const projectNameFieldId = projectTable.fields.find((f) => f.name === 'Project Name')!.id;
+      const taskNameFieldId = taskTable.fields.find((f) => f.name === 'Task Name')!.id;
+      const hoursFieldId = taskTable.fields.find((f) => f.name === 'Hours')!.id;
+
+      await updateRecordByApi(
+        projectTable.id,
+        projectTable.records[0].id,
+        projectNameFieldId,
+        'Alpha'
+      );
+      await updateRecordByApi(taskTable.id, taskTable.records[0].id, taskNameFieldId, 'Design');
+      await updateRecordByApi(taskTable.id, taskTable.records[1].id, taskNameFieldId, 'Review');
+      await updateRecordByApi(taskTable.id, taskTable.records[0].id, hoursFieldId, 4);
+      await updateRecordByApi(taskTable.id, taskTable.records[1].id, hoursFieldId, 6);
+
+      const projectToTaskLink = await createField(projectTable.id, {
+        name: 'Tasks link',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: taskTable.id,
+        },
+      });
+
+      const taskFieldsAfterLink = await getFields(taskTable.id);
+      const taskToProjectLink = taskFieldsAfterLink.find(
+        (field) =>
+          field.type === FieldType.Link &&
+          (field.options as { foreignTableId?: string }).foreignTableId === projectTable.id
+      );
+      expect(taskToProjectLink).toBeDefined();
+
+      const sumRollup = await createField(projectTable.id, {
+        name: 'Total Hours',
+        type: FieldType.Rollup,
+        options: {
+          expression: 'sum({values})',
+        },
+        lookupOptions: {
+          foreignTableId: taskTable.id,
+          linkFieldId: projectToTaskLink.id,
+          lookupFieldId: hoursFieldId,
+        },
+      });
+
+      const countRollup = await createField(projectTable.id, {
+        name: 'Task Count',
+        type: FieldType.Rollup,
+        options: {
+          expression: 'counta({values})',
+        },
+        lookupOptions: {
+          foreignTableId: taskTable.id,
+          linkFieldId: projectToTaskLink.id,
+          lookupFieldId: hoursFieldId,
+        },
+      });
+
+      const rollupFormula = await createField(projectTable.id, {
+        name: 'Effort Index',
+        type: FieldType.Formula,
+        options: {
+          expression: `({${sumRollup.id}} + {${countRollup.id}}) / 2`,
+        },
+      } as unknown as IFieldRo);
+
+      const projectRollupLookup = await createField(taskTable.id, {
+        name: 'Project Effort',
+        type: FieldType.Formula,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: projectTable.id,
+          linkFieldId: taskToProjectLink!.id,
+          lookupFieldId: rollupFormula.id,
+        },
+      } as unknown as IFieldRo);
+
+      await updateRecordByApi(projectTable.id, projectTable.records[0].id, projectToTaskLink.id, [
+        { id: taskTable.records[0].id },
+        { id: taskTable.records[1].id },
+      ]);
+
+      const res = await getRecords(taskTable.id, { fieldKeyType: FieldKeyType.Id });
+      expect(res.records).toHaveLength(2);
+      const expectedValue = (4 + 6 + 2) / 2;
+      for (const record of res.records) {
+        expect(record.fields[projectRollupLookup.id]).toBeCloseTo(expectedValue);
+      }
+    } finally {
+      await permanentDeleteTable(baseId, taskTable.id);
+      await permanentDeleteTable(baseId, projectTable.id);
+    }
   });
 });

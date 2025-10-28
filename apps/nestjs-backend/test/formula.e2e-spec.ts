@@ -900,6 +900,174 @@ describe('OpenAPI formula (e2e)', () => {
       expect(formulaValue).toBe('2025-10-24-world');
     });
 
+    it('should apply LEFT/RIGHT to lookup fields', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'formula-lookup-left-foreign',
+        fields: [{ name: 'Title', type: FieldType.SingleLineText } as IFieldRo],
+        records: [{ fields: { Title: 'AlphaBeta' } }],
+      });
+      let host: ITableFullVo | undefined;
+      try {
+        host = await createTable(baseId, {
+          name: 'formula-lookup-left-host',
+          fields: [
+            { name: 'Note', type: FieldType.SingleLineText } as IFieldRo,
+            { name: 'Left Count', type: FieldType.Number } as IFieldRo,
+            { name: 'Right Count', type: FieldType.Number } as IFieldRo,
+          ],
+        });
+
+        const linkField = await createField(host.id, {
+          name: 'Foreign Link',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyOne,
+            foreignTableId: foreign.id,
+          } as ILinkFieldOptionsRo,
+        } as IFieldRo);
+
+        const foreignTitleFieldId = foreign.fields.find((field) => field.name === 'Title')!.id;
+        const lookupField = await createField(host.id, {
+          name: 'Linked Title',
+          type: FieldType.SingleLineText,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: foreignTitleFieldId,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const leftCountFieldId = host.fields.find((field) => field.name === 'Left Count')!.id;
+        const rightCountFieldId = host.fields.find((field) => field.name === 'Right Count')!.id;
+
+        const { records } = await createRecords(host.id, {
+          fieldKeyType: FieldKeyType.Name,
+          records: [
+            {
+              fields: {
+                Note: 'host note',
+                'Left Count': 3,
+                'Right Count': 4,
+              },
+            },
+          ],
+        });
+        const hostRecordId = records[0].id;
+
+        await updateRecordByApi(host.id, hostRecordId, linkField.id, {
+          id: foreign.records[0].id,
+        });
+
+        const leftFormula = await createField(host.id, {
+          name: 'lookup-left',
+          type: FieldType.Formula,
+          options: {
+            expression: `LEFT({${lookupField.id}}, {${leftCountFieldId}})`,
+          },
+        });
+
+        const rightFormula = await createField(host.id, {
+          name: 'lookup-right',
+          type: FieldType.Formula,
+          options: {
+            expression: `RIGHT({${lookupField.id}}, {${rightCountFieldId}})`,
+          },
+        });
+
+        const recordAfterFormula = await getRecord(host.id, hostRecordId);
+        expect(recordAfterFormula.data.fields[leftFormula.name]).toEqual('Alp');
+        expect(recordAfterFormula.data.fields[rightFormula.name]).toEqual('Beta');
+      } finally {
+        if (host) {
+          await permanentDeleteTable(baseId, host.id);
+        }
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
+    it('should calculate numeric formulas using lookup fields', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'formula-lookup-numeric-foreign',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Total Units', type: FieldType.Number } as IFieldRo,
+          { name: 'Completed Units', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          { fields: { Title: 'Alpha', 'Total Units': 12, 'Completed Units': 5 } },
+          { fields: { Title: 'Beta', 'Total Units': 20, 'Completed Units': 3 } },
+        ],
+      });
+      let host: ITableFullVo | undefined;
+      try {
+        host = await createTable(baseId, {
+          name: 'formula-lookup-numeric-host',
+          fields: [{ name: 'Note', type: FieldType.SingleLineText } as IFieldRo],
+          records: [{ fields: { Note: 'host note' } }],
+        });
+
+        const linkField = await createField(host.id, {
+          name: 'Numeric Link',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyOne,
+            foreignTableId: foreign.id,
+          } as ILinkFieldOptionsRo,
+        } as IFieldRo);
+
+        const totalFieldId = foreign.fields.find((field) => field.name === 'Total Units')!.id;
+        const completedFieldId = foreign.fields.find(
+          (field) => field.name === 'Completed Units'
+        )!.id;
+
+        const totalLookup = await createField(host.id, {
+          name: 'Total Units Lookup',
+          type: FieldType.Number,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: totalFieldId,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const completedLookup = await createField(host.id, {
+          name: 'Completed Units Lookup',
+          type: FieldType.Number,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: completedFieldId,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const hostRecordId = host.records[0].id;
+        await updateRecordByApi(host.id, hostRecordId, linkField.id, {
+          id: foreign.records[0].id,
+        });
+
+        const formulaField = await createField(host.id, {
+          name: 'Remaining Units',
+          type: FieldType.Formula,
+          options: {
+            expression: `{${totalLookup.id}} - {${completedLookup.id}}`,
+          },
+        });
+
+        const recordAfterFormula = await getRecord(host.id, hostRecordId);
+        const value = recordAfterFormula.data.fields[formulaField.name];
+        expect(typeof value).toBe('number');
+        expect(value).toBe(7);
+      } finally {
+        if (host) {
+          await permanentDeleteTable(baseId, host.id);
+        }
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
     it('should keep concatenated formula after updating referenced date field', async () => {
       const followDateField = await createField(table1Id, {
         name: 'follow date',

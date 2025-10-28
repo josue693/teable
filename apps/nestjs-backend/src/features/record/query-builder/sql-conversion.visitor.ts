@@ -432,8 +432,16 @@ abstract class BaseSqlConversionVisitor<
         .with(FunctionName.Find, () => this.formulaQuery.find(params[0], params[1], params[2]))
         .with(FunctionName.Search, () => this.formulaQuery.search(params[0], params[1], params[2]))
         .with(FunctionName.Mid, () => this.formulaQuery.mid(params[0], params[1], params[2]))
-        .with(FunctionName.Left, () => this.formulaQuery.left(params[0], params[1]))
-        .with(FunctionName.Right, () => this.formulaQuery.right(params[0], params[1]))
+        .with(FunctionName.Left, () => {
+          const textOperand = this.coerceToStringForConcatenation(params[0], exprContexts[0]);
+          const sliceLength = this.normalizeTextSliceCount(params[1], exprContexts[1]);
+          return this.formulaQuery.left(textOperand, sliceLength);
+        })
+        .with(FunctionName.Right, () => {
+          const textOperand = this.coerceToStringForConcatenation(params[0], exprContexts[0]);
+          const sliceLength = this.normalizeTextSliceCount(params[1], exprContexts[1]);
+          return this.formulaQuery.right(textOperand, sliceLength);
+        })
         .with(FunctionName.Replace, () =>
           this.formulaQuery.replace(params[0], params[1], params[2], params[3])
         )
@@ -759,11 +767,47 @@ abstract class BaseSqlConversionVisitor<
     exprCtx: ExprContext,
     inferredType?: 'string' | 'number' | 'boolean' | 'datetime' | 'unknown'
   ): string {
+    if (exprCtx instanceof FieldReferenceCurlyContext) {
+      const fieldId = exprCtx.text.slice(1, -1);
+      const fieldInfo = this.context.table.getField(fieldId);
+      if (fieldInfo?.isMultipleCellValue) {
+        // Multi-value references are projected as JSON arrays; keep the raw expression to avoid
+        // wrapping them with datetime casts which cannot handle array payloads.
+        return value;
+      }
+    }
     const type = inferredType ?? this.inferExpressionType(exprCtx);
     if (type === 'datetime') {
       return this.formulaQuery.datetimeFormat(value, "'YYYY-MM-DD'");
     }
     return value;
+  }
+
+  private normalizeTextSliceCount(valueSql?: string, exprCtx?: ExprContext): string {
+    if (!valueSql || !exprCtx) {
+      return '1';
+    }
+
+    const type = this.inferExpressionType(exprCtx);
+    const driver = this.context.driverClient ?? DriverClient.Pg;
+
+    if (type === 'boolean') {
+      if (driver === DriverClient.Sqlite) {
+        return `(CASE WHEN ${valueSql} IS NULL THEN 0 WHEN ${valueSql} <> 0 THEN 1 ELSE 0 END)`;
+      }
+      return `(CASE WHEN ${valueSql} IS NULL THEN 0 WHEN ${valueSql} THEN 1 ELSE 0 END)`;
+    }
+
+    const numericExpr = this.safeCastToNumeric(valueSql);
+    const flooredExpr =
+      driver === DriverClient.Sqlite ? `CAST(${numericExpr} AS INTEGER)` : `FLOOR(${numericExpr})`;
+    const flooredWrapped = `(${flooredExpr})`;
+
+    return `(CASE
+      WHEN ${flooredWrapped} IS NULL THEN 0
+      WHEN ${flooredWrapped} < 0 THEN 0
+      ELSE ${flooredWrapped}
+    END)`;
   }
   private normalizeBooleanExpression(valueSql: string, exprCtx: ExprContext): string {
     const type = this.inferExpressionType(exprCtx);
@@ -896,7 +940,22 @@ abstract class BaseSqlConversionVisitor<
     const fieldId = ctx.text.slice(1, -1); // Remove curly braces
     const fieldInfo = this.context.table.getField(fieldId);
 
-    if (!fieldInfo?.type) {
+    if (!fieldInfo) {
+      return 'unknown';
+    }
+
+    if (
+      fieldInfo.isMultipleCellValue ||
+      (fieldInfo.isLookup && fieldInfo.dbFieldType === DbFieldType.Json)
+    ) {
+      // Multi-value fields (e.g. lookups) are materialized as JSON arrays even when the
+      // referenced cellValueType is datetime. Treat them as strings to avoid pushing JSON
+      // expressions through datetime-specific casts like ::timestamptz, which PostgreSQL
+      // rejects at runtime.
+      return 'string';
+    }
+
+    if (!fieldInfo.type) {
       return 'unknown';
     }
 
@@ -1258,6 +1317,9 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
           return this.coerceRawMultiValueReference(columnRef, fieldInfo, selectContext);
         }
         if (fieldInfo.isLookup && isLinkLookupOptions(fieldInfo.lookupOptions)) {
+          if (fieldInfo.dbFieldType !== DbFieldType.Json) {
+            return columnRef;
+          }
           const titlesExpr = this.dialect!.linkExtractTitles(
             columnRef,
             !!fieldInfo.isMultipleCellValue

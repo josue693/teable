@@ -13,7 +13,21 @@ describe('GeneratedColumnQueryPostgres unit-aware helpers', () => {
   };
 
   beforeEach(() => {
-    query.setContext(stubContext);
+   query.setContext(stubContext);
+  });
+
+  it('left casts expressions to text for generated columns', () => {
+    expect(query.left('raw_expr', '5')).toBe(`LEFT((raw_expr)::text, 5::integer)`);
+  });
+
+  it('right casts expressions to text for generated columns', () => {
+    expect(query.right('raw_expr', '4')).toBe(`RIGHT((raw_expr)::text, 4::integer)`);
+  });
+
+  it('mid casts expressions to text for generated columns', () => {
+    expect(query.mid('raw_expr', '2', '5')).toBe(
+      `SUBSTRING((raw_expr)::text FROM 2::integer FOR 5::integer)`
+    );
   });
 
   const dateAddCases: Array<{ literal: string; unit: string; factor: number }> = [

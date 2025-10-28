@@ -361,15 +361,15 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   mid(text: string, startNum: string, numChars: string): string {
-    return `SUBSTRING(${text} FROM ${startNum}::integer FOR ${numChars}::integer)`;
+    return `SUBSTRING((${text})::text FROM ${startNum}::integer FOR ${numChars}::integer)`;
   }
 
   left(text: string, numChars: string): string {
-    return `LEFT(${text}, ${numChars}::integer)`;
+    return `LEFT((${text})::text, ${numChars}::integer)`;
   }
 
   right(text: string, numChars: string): string {
-    return `RIGHT(${text}, ${numChars}::integer)`;
+    return `RIGHT((${text})::text, ${numChars}::integer)`;
   }
 
   replace(oldText: string, startNum: string, numChars: string, newText: string): string {

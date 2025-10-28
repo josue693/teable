@@ -75,7 +75,12 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
     if (isMultiple) {
       return `(SELECT json_agg(value->>'title') FROM jsonb_array_elements(${selectionSql}::jsonb) AS value)::jsonb`;
     }
-    return `(${selectionSql}->>'title')`;
+    return `(CASE
+      WHEN ${selectionSql} IS NULL THEN NULL
+      WHEN pg_typeof(${selectionSql}) = 'jsonb'::regtype THEN (${selectionSql})::jsonb->>'title'
+      WHEN pg_typeof(${selectionSql}) = 'json'::regtype THEN (${selectionSql})::jsonb->>'title'
+      ELSE (${selectionSql})::text
+    END)`;
   }
 
   jsonTitleFromExpr(selectionSql: string): string {
