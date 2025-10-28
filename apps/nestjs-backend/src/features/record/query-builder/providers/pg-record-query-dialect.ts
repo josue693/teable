@@ -115,9 +115,28 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
 
   jsonAggregateNonNull(expression: string, orderByClause?: string): string {
     const order = orderByClause ? ` ORDER BY ${orderByClause}` : '';
+    const normalizedExpr = this.normalizeJsonbAggregateInput(expression);
     // Use jsonb_agg so downstream consumers (persisted link/lookup columns) expecting jsonb
     // do not hit implicit cast issues during UPDATE ... FROM assignments.
-    return `jsonb_agg(${expression}${order}) FILTER (WHERE ${expression} IS NOT NULL)`;
+    return `jsonb_agg(${normalizedExpr}${order}) FILTER (WHERE ${normalizedExpr} IS NOT NULL)`;
+  }
+
+  private normalizeJsonbAggregateInput(expression: string): string {
+    const trimmed = expression.trim();
+    if (!trimmed) {
+      return expression;
+    }
+    const upper = trimmed.toUpperCase();
+    if (upper === 'NULL') {
+      return 'NULL::jsonb';
+    }
+    if (upper === 'NULL::JSONB') {
+      return trimmed;
+    }
+    if (upper.startsWith('NULL::')) {
+      return `(${expression})::jsonb`;
+    }
+    return expression;
   }
 
   stringAggregate(expression: string, delimiter: string, orderByClause?: string): string {

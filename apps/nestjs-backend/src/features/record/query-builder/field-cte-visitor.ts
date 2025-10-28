@@ -160,6 +160,24 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
   private getJsonAggregationFunction(fieldReference: string): string {
     return this.dialect.jsonAggregateNonNull(fieldReference);
   }
+
+  private normalizeJsonAggregateExpression(expression: string): string {
+    const trimmed = expression.trim();
+    if (!trimmed) {
+      return expression;
+    }
+    const upper = trimmed.toUpperCase();
+    if (upper === 'NULL') {
+      return 'NULL::jsonb';
+    }
+    if (upper === 'NULL::JSONB') {
+      return trimmed;
+    }
+    if (upper.startsWith('NULL::')) {
+      return `(${expression})::jsonb`;
+    }
+    return expression;
+  }
   /**
    * Build a subquery (SELECT 1 WHERE ...) for foreign table filter using provider's filterQuery.
    * The subquery references the current foreign alias in-scope and carries proper bindings.
@@ -503,7 +521,8 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
         return expression;
       }
       if (this.dbProvider.driver === DriverClient.Pg && orderByClause) {
-        return `json_agg(${expression} ORDER BY ${orderByClause}) FILTER (WHERE ${expression} IS NOT NULL)`;
+        const sanitizedExpression = this.normalizeJsonAggregateExpression(expression);
+        return `json_agg(${sanitizedExpression} ORDER BY ${orderByClause}) FILTER (WHERE ${sanitizedExpression} IS NOT NULL)`;
       }
       // For SQLite, ensure deterministic ordering by aggregating from an ordered correlated subquery
       if (this.dbProvider.driver === DriverClient.Sqlite) {
@@ -590,10 +609,11 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     }
 
     if (this.dbProvider.driver === DriverClient.Pg) {
+      const sanitizedExpression = this.normalizeJsonAggregateExpression(expression);
       if (orderByClause) {
-        return `json_agg(${expression} ORDER BY ${orderByClause}) FILTER (WHERE (EXISTS ${sub}) AND ${expression} IS NOT NULL)`;
+        return `json_agg(${sanitizedExpression} ORDER BY ${orderByClause}) FILTER (WHERE (EXISTS ${sub}) AND ${sanitizedExpression} IS NOT NULL)`;
       }
-      return `json_agg(${expression}) FILTER (WHERE (EXISTS ${sub}) AND ${expression} IS NOT NULL)`;
+      return `json_agg(${sanitizedExpression}) FILTER (WHERE (EXISTS ${sub}) AND ${sanitizedExpression} IS NOT NULL)`;
     }
 
     // SQLite: use a correlated, ordered subquery to produce deterministic ordering
@@ -830,7 +850,8 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
           const appliedFilter = linkFilterSub
             ? `(EXISTS ${linkFilterSub}) AND ${baseFilter}`
             : baseFilter;
-          return `json_agg(${conditionalJsonObject} ORDER BY ${orderByClause}) FILTER (WHERE ${appliedFilter})`;
+          const sanitizedExpression = this.normalizeJsonAggregateExpression(conditionalJsonObject);
+          return `json_agg(${sanitizedExpression} ORDER BY ${orderByClause}) FILTER (WHERE ${appliedFilter})`;
         } else {
           // For single value relationships (ManyOne, OneOne)
           // If lookup field is a Formula, return array-of-one to keep API consistent with tests
