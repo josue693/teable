@@ -504,14 +504,15 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
     if (!normalized || normalized === 'undefined' || normalized.toLowerCase() === 'null') {
       return dateString;
     }
+    const valueExpr = `(${dateString})`;
+    const toTimestampExpr = `TO_TIMESTAMP(${valueExpr}::text, ${format})`;
     const guardPattern = this.buildDatetimeParseGuardRegex(normalized);
     if (!guardPattern) {
-      return `TO_TIMESTAMP(${dateString}, ${format})`;
+      return toTimestampExpr;
     }
-    const valueExpr = `(${dateString})`;
     const textExpr = `${valueExpr}::text`;
     const escapedPattern = guardPattern.replace(/'/g, "''");
-    return `(CASE WHEN ${valueExpr} IS NULL THEN NULL WHEN ${textExpr} = '' THEN NULL WHEN ${textExpr} ~ '${escapedPattern}' THEN TO_TIMESTAMP(${dateString}, ${format}) ELSE NULL END)`;
+    return `(CASE WHEN ${valueExpr} IS NULL THEN NULL WHEN ${textExpr} = '' THEN NULL WHEN ${textExpr} ~ '${escapedPattern}' THEN ${toTimestampExpr} ELSE NULL END)`;
   }
 
   day(date: string): string {
