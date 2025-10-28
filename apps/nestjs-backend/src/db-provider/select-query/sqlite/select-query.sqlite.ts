@@ -476,16 +476,20 @@ export class SelectQuerySqlite extends SelectQueryAbstract {
   }
 
   // Logical Functions
-  if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
-    const wrapped = `(${condition})`;
+  private truthinessScore(value: string): string {
+    const wrapped = `(${value})`;
     const valueType = `TYPEOF${wrapped}`;
-    const booleanCondition = `CASE
+    return `CASE
       WHEN ${wrapped} IS NULL THEN 0
       WHEN ${valueType} = 'integer' OR ${valueType} = 'real' THEN (${wrapped}) != 0
       WHEN ${valueType} = 'text' THEN (${wrapped} != '' AND LOWER(${wrapped}) != 'null')
       ELSE (${wrapped}) IS NOT NULL AND ${wrapped} != 'null'
     END`;
-    return `CASE WHEN (${booleanCondition}) THEN ${valueIfTrue} ELSE ${valueIfFalse} END`;
+  }
+
+  if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
+    const truthiness = this.truthinessScore(condition);
+    return `CASE WHEN (${truthiness}) = 1 THEN ${valueIfTrue} ELSE ${valueIfFalse} END`;
   }
 
   and(params: string[]): string {

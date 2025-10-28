@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/no-identical-functions */
 /* eslint-disable sonarjs/cognitive-complexity */
 /* eslint-disable sonarjs/no-duplicated-branches */
 /* eslint-disable sonarjs/no-duplicate-string */
@@ -110,6 +111,33 @@ const SUPPORTED_EQUALITY_RESIDUAL_OPERATORS = new Set<string>([
   FilterOperatorIsOnOrAfter.value,
 ]);
 
+const JSON_AGG_FUNCTIONS = new Set(['array_compact', 'array_unique']);
+
+function parseRollupFunctionName(expression: string): string {
+  const match = expression.match(/^(\w+)\(\{values\}\)$/);
+  if (!match) {
+    throw new Error(`Invalid rollup expression: ${expression}`);
+  }
+  return match[1].toLowerCase();
+}
+
+function unwrapJsonAggregateForScalar(
+  driver: DriverClient,
+  expression: string,
+  field: FieldCore,
+  isJsonAggregate: boolean
+): string {
+  if (
+    !isJsonAggregate ||
+    field.isMultipleCellValue ||
+    field.dbFieldType === DbFieldType.Json ||
+    driver !== DriverClient.Pg
+  ) {
+    return expression;
+  }
+  return `(${expression}) ->> 0`;
+}
+
 class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
   constructor(
     private readonly qb: Knex.QueryBuilder,
@@ -131,6 +159,24 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
   }
   private getJsonAggregationFunction(fieldReference: string): string {
     return this.dialect.jsonAggregateNonNull(fieldReference);
+  }
+
+  private normalizeJsonAggregateExpression(expression: string): string {
+    const trimmed = expression.trim();
+    if (!trimmed) {
+      return expression;
+    }
+    const upper = trimmed.toUpperCase();
+    if (upper === 'NULL') {
+      return 'NULL::jsonb';
+    }
+    if (upper === 'NULL::JSONB') {
+      return trimmed;
+    }
+    if (upper.startsWith('NULL::')) {
+      return `(${expression})::jsonb`;
+    }
+    return expression;
   }
   /**
    * Build a subquery (SELECT 1 WHERE ...) for foreign table filter using provider's filterQuery.
@@ -171,12 +217,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     orderByField?: string,
     rowPresenceExpr?: string
   ): string {
-    // Parse the rollup function from expression like 'sum({values})'
-    const functionMatch = expression.match(/^(\w+)\(\{values\}\)$/);
-    if (!functionMatch) {
-      throw new Error(`Invalid rollup expression: ${expression}`);
-    }
-    const functionName = functionMatch[1].toLowerCase();
+    const functionName = parseRollupFunctionName(expression);
     return this.dialect.rollupAggregate(functionName, fieldExpression, {
       targetField,
       orderByField,
@@ -194,13 +235,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     expression: string,
     fieldExpression: string
   ): string {
-    const functionMatch = expression.match(/^(\w+)\(\{values\}\)$/);
-    if (!functionMatch) {
-      throw new Error(`Invalid rollup expression: ${expression}`);
-    }
-
-    const functionName = functionMatch[1].toLowerCase();
-
+    const functionName = parseRollupFunctionName(expression);
     return this.dialect.singleValueRollupAggregate(functionName, fieldExpression, {
       rollupField,
       targetField,
@@ -260,26 +295,32 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
 
     const rowPresenceField = `"${this.getForeignAlias()}"."__id"`;
 
-    const rollupFilter = (rollupField as FieldCore).getFilter?.();
-    if (rollupFilter && this.dbProvider.driver === DriverClient.Pg) {
-      const sub = this.buildForeignFilterSubquery(rollupFilter);
-      const filteredExpr = `CASE WHEN EXISTS ${sub} THEN ${expression} ELSE NULL END`;
-      return this.generateRollupAggregation(
+    const rollupFunctionName = parseRollupFunctionName(rollupOptions.expression);
+    const aggregatesToJson = JSON_AGG_FUNCTIONS.has(rollupFunctionName);
+    const buildAggregate = (expr: string) => {
+      const aggregate = this.generateRollupAggregation(
         rollupOptions.expression,
-        filteredExpr,
+        expr,
         targetField,
         orderByField,
         rowPresenceField
       );
+      return unwrapJsonAggregateForScalar(
+        this.dbProvider.driver,
+        aggregate,
+        rollupField,
+        aggregatesToJson
+      );
+    };
+
+    const rollupFilter = (rollupField as FieldCore).getFilter?.();
+    if (rollupFilter && this.dbProvider.driver === DriverClient.Pg) {
+      const sub = this.buildForeignFilterSubquery(rollupFilter);
+      const filteredExpr = `CASE WHEN EXISTS ${sub} THEN ${expression} ELSE NULL END`;
+      return buildAggregate(filteredExpr);
     }
 
-    return this.generateRollupAggregation(
-      rollupOptions.expression,
-      expression,
-      targetField,
-      orderByField,
-      rowPresenceField
-    );
+    return buildAggregate(expression);
   }
   private visitLookupField(field: FieldCore): IFieldSelectName {
     if (!field.isLookup) {
@@ -406,9 +447,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
       const fieldCteMap = this.state.getFieldCteMap();
       // Prefer nested CTE if available; otherwise, derive CTE name and use subquery
       if (nestedLinkFieldId) {
-        // Derive CTE name deterministically to reference the pre-generated nested CTE
-        const derivedCteName = `CTE_${getTableAliasFromTable(this.foreignTable)}_${nestedLinkFieldId}`;
-        const nestedCteName = fieldCteMap.get(nestedLinkFieldId) ?? derivedCteName;
+        const nestedCteName = fieldCteMap.get(nestedLinkFieldId);
         if (nestedCteName) {
           if (this.joinedCtes?.has(nestedLinkFieldId)) {
             expression = `"${nestedCteName}"."lookup_${targetLookupField.id}"`;
@@ -416,7 +455,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
             expression = `((SELECT "lookup_${targetLookupField.id}" FROM "${nestedCteName}" WHERE "${nestedCteName}"."main_record_id" = "${foreignAlias}"."${ID_FIELD_NAME}"))`;
           }
         } else {
-          // As a last resort, fallback to direct select using select visitor
+          // No pre-generated CTE available for this nested lookup; fall back to the raw expression
           const targetFieldResult = targetLookupField.accept(selectVisitor);
           expression =
             typeof targetFieldResult === 'string'
@@ -482,7 +521,8 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
         return expression;
       }
       if (this.dbProvider.driver === DriverClient.Pg && orderByClause) {
-        return `json_agg(${expression} ORDER BY ${orderByClause}) FILTER (WHERE ${expression} IS NOT NULL)`;
+        const sanitizedExpression = this.normalizeJsonAggregateExpression(expression);
+        return `json_agg(${sanitizedExpression} ORDER BY ${orderByClause}) FILTER (WHERE ${sanitizedExpression} IS NOT NULL)`;
       }
       // For SQLite, ensure deterministic ordering by aggregating from an ordered correlated subquery
       if (this.dbProvider.driver === DriverClient.Sqlite) {
@@ -569,10 +609,11 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     }
 
     if (this.dbProvider.driver === DriverClient.Pg) {
+      const sanitizedExpression = this.normalizeJsonAggregateExpression(expression);
       if (orderByClause) {
-        return `json_agg(${expression} ORDER BY ${orderByClause}) FILTER (WHERE (EXISTS ${sub}) AND ${expression} IS NOT NULL)`;
+        return `json_agg(${sanitizedExpression} ORDER BY ${orderByClause}) FILTER (WHERE (EXISTS ${sub}) AND ${sanitizedExpression} IS NOT NULL)`;
       }
-      return `json_agg(${expression}) FILTER (WHERE (EXISTS ${sub}) AND ${expression} IS NOT NULL)`;
+      return `json_agg(${sanitizedExpression}) FILTER (WHERE (EXISTS ${sub}) AND ${sanitizedExpression} IS NOT NULL)`;
     }
 
     // SQLite: use a correlated, ordered subquery to produce deterministic ordering
@@ -809,7 +850,8 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
           const appliedFilter = linkFilterSub
             ? `(EXISTS ${linkFilterSub}) AND ${baseFilter}`
             : baseFilter;
-          return `json_agg(${conditionalJsonObject} ORDER BY ${orderByClause}) FILTER (WHERE ${appliedFilter})`;
+          const sanitizedExpression = this.normalizeJsonAggregateExpression(conditionalJsonObject);
+          return `json_agg(${sanitizedExpression} ORDER BY ${orderByClause}) FILTER (WHERE ${appliedFilter})`;
         } else {
           // For single value relationships (ManyOne, OneOne)
           // If lookup field is a Formula, return array-of-one to keep API consistent with tests
@@ -1092,6 +1134,21 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     }
   }
 
+  private ensureLinkDependencyForScope(
+    candidate: LinkFieldCore | null | undefined,
+    foreignTable: TableDomain,
+    currentLinkFieldId: string,
+    nestedJoins: Set<string>
+  ): void {
+    if (!candidate?.id || candidate.id === currentLinkFieldId) {
+      return;
+    }
+    if (!this.fieldCteMap.has(candidate.id)) {
+      this.generateLinkFieldCteForTable(foreignTable, candidate);
+    }
+    nestedJoins.add(candidate.id);
+  }
+
   /**
    * Apply an explicit cast to align the SQL expression type with the target field's DB column type.
    * This prevents Postgres from rejecting UPDATE ... FROM assignments due to type mismatches
@@ -1121,14 +1178,6 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     return `(${expression})${castSuffix}`;
   }
 
-  private parseRollupFunction(expression: string): string {
-    const match = expression.match(/^(\w+)\(\{values\}\)$/);
-    if (!match) {
-      throw new Error(`Invalid rollup expression: ${expression}`);
-    }
-    return match[1].toLowerCase();
-  }
-
   private shouldUseFormattedExpressionForAggregation(fn: string): boolean {
     switch (fn) {
       case 'array_join':
@@ -1140,7 +1189,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
   }
 
   private rollupFunctionSupportsOrdering(expression: string): boolean {
-    const fn = this.parseRollupFunction(expression);
+    const fn = parseRollupFunctionName(expression);
     switch (fn) {
       case 'array_join':
       case 'array_compact':
@@ -1158,7 +1207,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     foreignAlias: string,
     orderByClause?: string
   ): string {
-    const fn = this.parseRollupFunction(rollupExpression);
+    const fn = parseRollupFunctionName(rollupExpression);
     return this.dialect.rollupAggregate(fn, fieldExpression, {
       targetField,
       rowPresenceExpr: `"${foreignAlias}"."${ID_FIELD_NAME}"`,
@@ -1373,7 +1422,8 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         new ScopedSelectionState(this.state),
         this.dialect,
         foreignAliasUsed,
-        true
+        true,
+        false
       );
 
       const rawExpression = this.resolveConditionalComputedTargetExpression(
@@ -1385,7 +1435,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
       const formattingVisitor = new FieldFormattingVisitor(rawExpression, this.dialect);
       const formattedExpression = targetField.accept(formattingVisitor);
 
-      const aggregationFn = this.parseRollupFunction(expression);
+      const aggregationFn = parseRollupFunctionName(expression);
       const aggregationInputExpression = this.shouldUseFormattedExpressionForAggregation(
         aggregationFn
       )
@@ -1425,7 +1475,17 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         foreignAliasUsed,
         supportsOrdering ? orderByClause : undefined
       );
-      const castedAggregateExpression = this.castExpressionForDbType(aggregateExpression, field);
+      const aggregatesToJson = JSON_AGG_FUNCTIONS.has(aggregationFn);
+      const normalizedAggregateExpression = unwrapJsonAggregateForScalar(
+        this.dbProvider.driver,
+        aggregateExpression,
+        field,
+        aggregatesToJson
+      );
+      const castedAggregateExpression = this.castExpressionForDbType(
+        normalizedAggregateExpression,
+        field
+      );
 
       const equalityEnabledFns = new Set(['countall', 'count', 'sum', 'average', 'max', 'min']);
       const canUseEqualityPlan =
@@ -1633,7 +1693,8 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         new ScopedSelectionState(this.state),
         this.dialect,
         foreignAliasUsed,
-        true
+        true,
+        false
       );
 
       const rawExpression = this.resolveConditionalComputedTargetExpression(
@@ -1667,17 +1728,35 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
         }
       }
 
-      const aggregateExpression =
+      const aggregateExpressionInfo =
         field.type === FieldType.ConditionalRollup
-          ? this.dialect.jsonAggregateNonNull(rawExpression, orderByClause)
-          : this.buildConditionalRollupAggregation(
-              'array_compact({values})',
-              rawExpression,
-              targetField,
-              foreignAliasUsed,
-              orderByClause
-            );
-      const castedAggregateExpression = this.castExpressionForDbType(aggregateExpression, field);
+          ? {
+              expression: this.dialect.jsonAggregateNonNull(rawExpression, orderByClause),
+              isJsonAggregate: true,
+            }
+          : (() => {
+              const expression = this.buildConditionalRollupAggregation(
+                'array_compact({values})',
+                rawExpression,
+                targetField,
+                foreignAliasUsed,
+                orderByClause
+              );
+              return {
+                expression,
+                isJsonAggregate: JSON_AGG_FUNCTIONS.has('array_compact'),
+              };
+            })();
+      const normalizedAggregateExpression = unwrapJsonAggregateForScalar(
+        this.dbProvider.driver,
+        aggregateExpressionInfo.expression,
+        field,
+        aggregateExpressionInfo.isJsonAggregate
+      );
+      const castedAggregateExpression = this.castExpressionForDbType(
+        normalizedAggregateExpression,
+        field
+      );
 
       const applyConditionalFilter = (targetQb: Knex.QueryBuilder) => {
         if (!filter) return;
@@ -1835,10 +1914,10 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     // Collect all nested link dependencies that need to be JOINed
     const nestedJoins = new Set<string>();
 
-    // Helper: add dependent link fields from a target field
-    const addDepLinksFromTarget = (field: FieldCore) => {
-      const targetField = field.getForeignLookupField(foreignTable);
-      if (!targetField) return;
+    const ensureConditionalComputedCteForField = (targetField?: FieldCore) => {
+      if (!targetField) {
+        return;
+      }
       if (targetField.type === FieldType.ConditionalRollup && !targetField.isLookup) {
         this.generateConditionalRollupFieldCteForScope(
           foreignTable,
@@ -1851,15 +1930,55 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
           this.generateConditionalLookupFieldCteForScope(foreignTable, targetField, options);
         }
       }
-      const depLinks = targetField.getLinkFields(foreignTable);
-      for (const lf of depLinks) {
-        if (!lf?.id) continue;
-        if (!this.fieldCteMap.has(lf.id)) {
-          // Pre-generate nested CTE for foreign link field
-          this.generateLinkFieldCteForTable(foreignTable, lf);
-        }
-        nestedJoins.add(lf.id);
+    };
+
+    const ensureLinkDependency = (linkFieldCore?: LinkFieldCore | null) =>
+      this.ensureLinkDependencyForScope(linkFieldCore, foreignTable, linkField.id, nestedJoins);
+
+    const collectLinkDependencies = (
+      field: FieldCore | undefined,
+      visited: Set<string> = new Set()
+    ) => {
+      if (!field || visited.has(field.id)) {
+        return;
       }
+      visited.add(field.id);
+
+      ensureConditionalComputedCteForField(field);
+
+      if (field.type === FieldType.Link) {
+        ensureLinkDependency(field as LinkFieldCore);
+      }
+
+      const viaLookupId = getLinkFieldId(field.lookupOptions);
+      if (viaLookupId) {
+        const nestedLinkField = foreignTable.getField(viaLookupId) as LinkFieldCore | undefined;
+        ensureLinkDependency(nestedLinkField);
+      }
+
+      const directLinks = field.getLinkFields(foreignTable);
+      for (const lf of directLinks) {
+        ensureLinkDependency(lf);
+      }
+
+      const maybeGetReferenceFields = (
+        field as unknown as {
+          getReferenceFields?: (table: TableDomain) => FieldCore[];
+        }
+      ).getReferenceFields;
+      if (typeof maybeGetReferenceFields === 'function') {
+        const referencedFields = maybeGetReferenceFields.call(field, foreignTable) ?? [];
+        for (const refField of referencedFields) {
+          collectLinkDependencies(refField, visited);
+        }
+      }
+    };
+
+    // Helper: add dependent link fields from a target field
+    const addDepLinksFromTarget = (field: FieldCore) => {
+      const targetField = field.getForeignLookupField(foreignTable);
+      if (!targetField) return;
+      collectLinkDependencies(targetField);
     };
 
     // Check lookup fields: collect all dependent link fields
@@ -2179,62 +2298,82 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
       // by main-table projection IDs; keep all nested lookup/rollup columns to ensure correctness.
     }
 
+    const ensureConditionalComputedCteForField = (targetField?: FieldCore) => {
+      if (!targetField) {
+        return;
+      }
+      if (targetField.type === FieldType.ConditionalRollup && !targetField.isLookup) {
+        this.generateConditionalRollupFieldCteForScope(
+          foreignTable,
+          targetField as ConditionalRollupFieldCore
+        );
+      }
+      if (targetField.isConditionalLookup) {
+        const options = targetField.getConditionalLookupOptions?.();
+        if (options) {
+          this.generateConditionalLookupFieldCteForScope(foreignTable, targetField, options);
+        }
+      }
+    };
+
+    const ensureLinkDependency = (linkFieldCore?: LinkFieldCore | null) =>
+      this.ensureLinkDependencyForScope(linkFieldCore, foreignTable, linkField.id, nestedJoins);
+
+    const collectLinkDependencies = (
+      field: FieldCore | undefined,
+      visited: Set<string> = new Set()
+    ) => {
+      if (!field || visited.has(field.id)) {
+        return;
+      }
+      visited.add(field.id);
+
+      ensureConditionalComputedCteForField(field);
+
+      if (field.type === FieldType.Link) {
+        ensureLinkDependency(field as LinkFieldCore);
+      }
+
+      const viaLookupId = getLinkFieldId(field.lookupOptions);
+      if (viaLookupId) {
+        const nestedLinkField = foreignTable.getField(viaLookupId) as LinkFieldCore | undefined;
+        ensureLinkDependency(nestedLinkField);
+      }
+
+      const directLinks = field.getLinkFields(foreignTable);
+      for (const lf of directLinks) {
+        ensureLinkDependency(lf);
+      }
+
+      const maybeGetReferenceFields = (
+        field as unknown as {
+          getReferenceFields?: (table: TableDomain) => FieldCore[];
+        }
+      ).getReferenceFields;
+      if (typeof maybeGetReferenceFields === 'function') {
+        const referencedFields = maybeGetReferenceFields.call(field, foreignTable) ?? [];
+        for (const refField of referencedFields) {
+          collectLinkDependencies(refField, visited);
+        }
+      }
+    };
+
     // Check if any lookup/rollup fields depend on nested CTEs
     for (const lookupField of lookupFields) {
       const target = lookupField.getForeignLookupField(foreignTable);
       if (target) {
-        if (target.type === FieldType.ConditionalRollup && !target.isLookup) {
-          this.generateConditionalRollupFieldCteForScope(
-            foreignTable,
-            target as ConditionalRollupFieldCore
-          );
-        }
-        if (target.isConditionalLookup) {
-          const options = target.getConditionalLookupOptions?.();
-          if (options) {
-            this.generateConditionalLookupFieldCteForScope(foreignTable, target, options);
-          }
-        }
-        if (target.type === FieldType.Link) {
-          const lf = target as LinkFieldCore;
-          if (this.fieldCteMap.has(lf.id)) {
-            nestedJoins.add(lf.id);
-          }
-        }
-        const nestedLinkFieldId = getLinkFieldId(target.lookupOptions);
-        if (nestedLinkFieldId && this.fieldCteMap.has(nestedLinkFieldId)) {
-          nestedJoins.add(nestedLinkFieldId);
-        }
+        collectLinkDependencies(target);
       }
     }
 
     for (const rollupField of rollupFields) {
       const target = rollupField.getForeignLookupField(foreignTable);
       if (target) {
-        if (target.type === FieldType.ConditionalRollup && !target.isLookup) {
-          this.generateConditionalRollupFieldCteForScope(
-            foreignTable,
-            target as ConditionalRollupFieldCore
-          );
-        }
-        if (target.isConditionalLookup) {
-          const options = target.getConditionalLookupOptions?.();
-          if (options) {
-            this.generateConditionalLookupFieldCteForScope(foreignTable, target, options);
-          }
-        }
-        if (target.type === FieldType.Link) {
-          const lf = target as LinkFieldCore;
-          if (this.fieldCteMap.has(lf.id)) {
-            nestedJoins.add(lf.id);
-          }
-        }
-        const nestedLinkFieldId = getLinkFieldId(target.lookupOptions);
-        if (nestedLinkFieldId && this.fieldCteMap.has(nestedLinkFieldId)) {
-          nestedJoins.add(nestedLinkFieldId);
-        }
+        collectLinkDependencies(target);
       }
     }
+
+    collectLinkDependencies(linkField.getForeignLookupField(foreignTable));
 
     this.qb.with(cteName, (cqb) => {
       // Create set of JOINed CTEs for this scope

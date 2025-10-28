@@ -83,7 +83,7 @@ export class ShareSocketService {
   async getRecordDocIdsByQuery(
     shareInfo: IShareViewInfo,
     query: IGetRecordsRo,
-    useQueryModel = false
+    useQueryModel = true
   ) {
     const { tableId, view, linkOptions, shareMeta } = shareInfo;
 

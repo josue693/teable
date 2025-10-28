@@ -856,19 +856,31 @@ export class AggregationService implements IAggregationService {
       return null;
     }
 
+    const selectionMap = new Map(
+      Object.values(fieldInstanceMap).map((f) => [f.id, `"${f.dbFieldName}"`])
+    );
+
     const basicSortIndex = await this.recordService.getBasicOrderIndexField(dbTableName, viewId);
 
     const filterQuery = (qb: Knex.QueryBuilder) => {
       this.dbProvider
-        .filterQuery(qb, fieldInstanceMap, filter, {
-          withUserId: this.cls.get('user.id'),
-        })
+        .filterQuery(
+          qb,
+          fieldInstanceMap,
+          filter,
+          {
+            withUserId: this.cls.get('user.id'),
+          },
+          { selectionMap }
+        )
         .appendQueryBuilder();
     };
 
     const sortQuery = (qb: Knex.QueryBuilder) => {
       this.dbProvider
-        .sortQuery(qb, fieldInstanceMap, [...(groupBy ?? []), ...(orderBy ?? [])])
+        .sortQuery(qb, fieldInstanceMap, [...(groupBy ?? []), ...(orderBy ?? [])], undefined, {
+          selectionMap,
+        })
         .appendSortBuilder();
     };
 
@@ -881,10 +893,6 @@ export class AggregationService implements IAggregationService {
         viewId,
         keepPrimaryKey: Boolean(queryRo.filterLinkCellSelected),
       }
-    );
-
-    const selectionMap = new Map(
-      Object.values(fieldInstanceMap).map((f) => [f.id, `"${f.dbFieldName}"`])
     );
 
     const queryBuilder = this.dbProvider.searchIndexQuery(
@@ -930,7 +938,7 @@ export class AggregationService implements IAggregationService {
         }
 
         const { queryBuilder: viewRecordsQB, alias } =
-          await this.recordService.buildFilterSortQuery(tableId, queryRo);
+          await this.recordService.buildFilterSortQuery(tableId, queryRo, true);
         // step 2. find the index in current view
         const indexQueryBuilder = this.knex
           .with('t', viewRecordsQB.from({ [alias]: viewCte || dbTableName }))

@@ -483,13 +483,17 @@ describe('selectionService', () => {
       // Assertions
       expect(selectionService['parseCopyContent']).toHaveBeenCalledWith(content);
       expect(aggregationService.performRowCount).toHaveBeenCalledWith(tableId, { viewId });
-      expect(recordService.getRecordsFields).toHaveBeenCalledWith(tableId, {
-        viewId,
-        skip: 1,
-        projection: ['fieldId3'],
-        take: tableData.length,
-        fieldKeyType: 'id',
-      });
+      expect(recordService.getRecordsFields).toHaveBeenCalledWith(
+        tableId,
+        {
+          viewId,
+          skip: 1,
+          projection: ['fieldId3'],
+          take: tableData.length,
+          fieldKeyType: 'id',
+        },
+        true
+      );
 
       expect(fieldService.getFieldInstances).toHaveBeenCalledWith(tableId, {
         viewId,

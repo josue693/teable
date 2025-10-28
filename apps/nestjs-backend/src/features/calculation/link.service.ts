@@ -805,7 +805,8 @@ export class LinkService {
     fieldMapByTableId: { [tableId: string]: IFieldMap },
     recordMapByTableId: IRecordMapByTableId,
     cellContexts: ICellContext[],
-    fromReset?: boolean
+    fromReset?: boolean,
+    useQueryModel = false
   ): Promise<IRecordMapByTableId> {
     const cellContextGroup = keyBy(cellContexts, (ctx) => `${ctx.recordId}-${ctx.fieldId}`);
     for (const tableId in recordMapByTableId) {
@@ -820,6 +821,7 @@ export class LinkService {
           viewId: undefined,
           rawProjection: true,
           preferRawFieldReferences: true,
+          useQueryModel,
         }
       );
 
@@ -940,7 +942,8 @@ export class LinkService {
       fieldMapByTableId,
       recordMapStruct,
       cellContexts,
-      fromReset
+      fromReset,
+      true
     );
 
     let updatedRecordMapByTableId: IRecordMapByTableId;

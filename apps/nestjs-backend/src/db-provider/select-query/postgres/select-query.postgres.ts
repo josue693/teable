@@ -222,17 +222,22 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     return `(${normalizedLeft} ${operator} ${normalizedRight})`;
   }
 
+  private sanitizeTimestampInput(date: string): string {
+    return `NULLIF(BTRIM((${date})::text), '')`;
+  }
+
   private tzWrap(date: string): string {
     const tz = this.context?.timeZone as string | undefined;
+    const sanitized = this.sanitizeTimestampInput(date);
     if (!tz) {
       // Default behavior: interpret as timestamp without timezone
-      return `(${date})::timestamp`;
+      return `(${sanitized})::timestamp`;
     }
     // Sanitize single quotes to prevent SQL issues
     const safeTz = tz.replace(/'/g, "''");
     // Interpret input as timestamptz if it has offset and convert to target timezone
     // AT TIME ZONE returns timestamp without time zone in that zone
-    return `(${date})::timestamptz AT TIME ZONE '${safeTz}'`;
+    return `(${sanitized})::timestamptz AT TIME ZONE '${safeTz}'`;
   }
   // Numeric Functions
   sum(params: string[]): string {
@@ -332,7 +337,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   value(text: string): string {
-    return `${text}::numeric`;
+    return this.toNumericSafe(text);
   }
 
   // Text Functions
@@ -361,15 +366,15 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   mid(text: string, startNum: string, numChars: string): string {
-    return `SUBSTRING(${text} FROM ${startNum}::integer FOR ${numChars}::integer)`;
+    return `SUBSTRING((${text})::text FROM ${startNum}::integer FOR ${numChars}::integer)`;
   }
 
   left(text: string, numChars: string): string {
-    return `LEFT(${text}, ${numChars}::integer)`;
+    return `LEFT((${text})::text, ${numChars}::integer)`;
   }
 
   right(text: string, numChars: string): string {
-    return `RIGHT(${text}, ${numChars}::integer)`;
+    return `RIGHT((${text})::text, ${numChars}::integer)`;
   }
 
   replace(oldText: string, startNum: string, numChars: string, newText: string): string {
@@ -472,7 +477,15 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     if (!normalized || normalized === 'undefined' || normalized.toLowerCase() === 'null') {
       return dateString;
     }
-    return `TO_TIMESTAMP(${dateString}, ${format})`;
+    const valueExpr = `(${dateString})`;
+    const toTimestampExpr = `TO_TIMESTAMP(${valueExpr}::text, ${format})`;
+    const guardPattern = this.buildDatetimeParseGuardRegex(normalized);
+    if (!guardPattern) {
+      return toTimestampExpr;
+    }
+    const textExpr = `${valueExpr}::text`;
+    const escapedPattern = guardPattern.replace(/'/g, "''");
+    return `(CASE WHEN ${valueExpr} IS NULL THEN NULL WHEN ${textExpr} = '' THEN NULL WHEN ${textExpr} ~ '${escapedPattern}' THEN ${toTimestampExpr} ELSE NULL END)`;
   }
 
   day(date: string): string {
@@ -570,8 +583,8 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   // Logical Functions
-  if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
-    const wrapped = `(${condition})`;
+  private truthinessScore(value: string): string {
+    const wrapped = `(${value})`;
     const conditionType = `pg_typeof${wrapped}::text`;
     const numericTypes = "('smallint','integer','bigint','numeric','double precision','real')";
     const wrappedText = `(${wrapped})::text`;
@@ -582,12 +595,16 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
       WHEN LOWER(${wrappedText}) = 'null' THEN 0
       ELSE 1
     END`;
-    const truthinessScore = `CASE
+    return `CASE
       WHEN ${wrapped} IS NULL THEN 0
       WHEN ${conditionType} = 'boolean' THEN ${booleanTruthyScore}
       WHEN ${conditionType} IN ${numericTypes} THEN ${numericTruthyScore}
       ELSE ${fallbackTruthyScore}
     END`;
+  }
+
+  if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
+    const truthinessScore = this.truthinessScore(condition);
     return `CASE WHEN (${truthinessScore}) = 1 THEN ${valueIfTrue} ELSE ${valueIfFalse} END`;
   }
 
@@ -859,5 +876,58 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   // Parentheses for grouping
   parentheses(expression: string): string {
     return `(${expression})`;
+  }
+
+  private buildDatetimeParseGuardRegex(formatLiteral: string): string | null {
+    if (!formatLiteral.startsWith("'") || !formatLiteral.endsWith("'")) {
+      return null;
+    }
+    const literal = formatLiteral.slice(1, -1);
+    const tokenPatterns: Array<[string, string]> = [
+      ['HH24', '\\d{2}'],
+      ['HH12', '\\d{2}'],
+      ['HH', '\\d{2}'],
+      ['MI', '\\d{2}'],
+      ['SS', '\\d{2}'],
+      ['MS', '\\d{1,3}'],
+      ['YYYY', '\\d{4}'],
+      ['YYY', '\\d{3}'],
+      ['YY', '\\d{2}'],
+      ['Y', '\\d'],
+      ['MM', '\\d{2}'],
+      ['DD', '\\d{2}'],
+    ];
+    const optionalTokens = new Set(['FM', 'TM', 'TH']);
+    let pattern = '^';
+    for (let i = 0; i < literal.length; ) {
+      let matched = false;
+      const remaining = literal.slice(i);
+      const upperRemaining = remaining.toUpperCase();
+      for (const [token, tokenPattern] of tokenPatterns) {
+        if (upperRemaining.startsWith(token)) {
+          pattern += tokenPattern;
+          i += token.length;
+          matched = true;
+          break;
+        }
+      }
+      if (matched) {
+        continue;
+      }
+      const optionalToken = upperRemaining.slice(0, 2);
+      if (optionalTokens.has(optionalToken)) {
+        i += optionalToken.length;
+        continue;
+      }
+      const currentChar = literal[i];
+      if (/\s/.test(currentChar)) {
+        pattern += '\\s';
+      } else {
+        pattern += currentChar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+      i += 1;
+    }
+    pattern += '$';
+    return pattern;
   }
 }

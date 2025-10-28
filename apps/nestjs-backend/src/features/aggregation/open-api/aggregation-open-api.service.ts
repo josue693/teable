@@ -74,7 +74,7 @@ export class AggregationOpenApiService {
   async getGroupPoints(
     tableId: string,
     query?: IGroupPointsRo,
-    useQueryModel = false
+    useQueryModel = true
   ): Promise<IGroupPointsVo> {
     return await this.aggregationService.getGroupPoints(tableId, query, useQueryModel);
   }

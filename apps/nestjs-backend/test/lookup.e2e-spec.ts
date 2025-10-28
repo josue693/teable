@@ -32,6 +32,7 @@ import {
   getField,
   getRecord,
   initApp,
+  createRecords,
   updateRecordByApi,
   convertField,
 } from './utils/init-app';
@@ -1377,6 +1378,160 @@ describe('OpenAPI Lookup field (e2e)', () => {
 
       expect(hardwareRecord.fields[rootConditionalRollup.id]).toEqual(30);
       expect(softwareRecord.fields[rootConditionalRollup.id]).toEqual(30);
+    });
+  });
+
+  describe('lookup of multi-value datetime used inside formulas', () => {
+    let projectTable: ITableFullVo;
+    let contractTable: ITableFullVo;
+    let projectNameField: IFieldVo;
+    let contractNameField: IFieldVo;
+    let contractStartField: IFieldVo;
+    let linkField: IFieldVo;
+    let lookupField: IFieldVo;
+    let formulaField: IFieldVo;
+    let projectRecordId: string;
+    const contractRecordIds: string[] = [];
+
+    beforeAll(async () => {
+      contractTable = await createTable(baseId, {
+        name: 'lookup-contracts',
+        fields: [
+          { name: 'Contract Name', type: FieldType.SingleLineText, options: {} },
+          {
+            name: 'Contract Start',
+            type: FieldType.Date,
+            options: {
+              formatting: {
+                date: 'YYYY-MM-DD',
+                time: TimeFormatting.None,
+                timeZone: 'Asia/Shanghai',
+              },
+            },
+          },
+        ],
+      });
+
+      projectTable = await createTable(baseId, {
+        name: 'lookup-projects',
+        fields: [{ name: 'Project Name', type: FieldType.SingleLineText, options: {} }],
+      });
+
+      await updateTableFields(contractTable);
+      await updateTableFields(projectTable);
+
+      contractNameField = contractTable.fields.find((f) => f.name === 'Contract Name')!;
+      contractStartField = contractTable.fields.find((f) => f.name === 'Contract Start')!;
+      projectNameField = projectTable.fields.find((f) => f.name === 'Project Name')!;
+
+      linkField = await createField(projectTable.id, {
+        name: 'Contracts',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyMany,
+          foreignTableId: contractTable.id,
+        },
+      });
+
+      const symmetricLinkFieldId = (linkField.options as ILinkFieldOptions)
+        .symmetricFieldId as string;
+
+      await updateTableFields(projectTable);
+      await updateTableFields(contractTable);
+
+      lookupField = await createField(projectTable.id, {
+        name: 'Contract Starts',
+        type: FieldType.Date,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: contractTable.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: contractStartField.id,
+        },
+      });
+
+      const formulaExpression = `"prefix-" & {${lookupField.id}}`;
+      formulaField = await createField(projectTable.id, {
+        name: 'Lookup Path',
+        type: FieldType.Formula,
+        options: { expression: formulaExpression },
+      });
+
+      await updateTableFields(projectTable);
+
+      const projectRecords = await createRecords(projectTable.id, {
+        typecast: true,
+        records: [
+          {
+            fields: {
+              [projectNameField.id]: 'Project Alpha',
+            },
+          },
+        ],
+      });
+      projectRecordId = projectRecords.records[0].id;
+
+      const contractRecords = await createRecords(contractTable.id, {
+        typecast: true,
+        records: [
+          {
+            fields: {
+              [contractNameField.id]: 'Contract A',
+              [contractStartField.id]: '2024-01-10T00:00:00.000Z',
+            },
+          },
+          {
+            fields: {
+              [contractNameField.id]: 'Contract B',
+              [contractStartField.id]: '2024-02-15T00:00:00.000Z',
+            },
+          },
+        ],
+      });
+
+      contractRecordIds.push(...contractRecords.records.map((r) => r.id));
+
+      await updateRecords(contractTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+        typecast: true,
+        records: contractRecordIds.map((id) => ({
+          id,
+          fields: {
+            [symmetricLinkFieldId]: [projectRecordId],
+          },
+        })),
+      });
+    });
+
+    afterAll(async () => {
+      if (projectTable?.id) {
+        await permanentDeleteTable(baseId, projectTable.id);
+      }
+      if (contractTable?.id) {
+        await permanentDeleteTable(baseId, contractTable.id);
+      }
+    });
+
+    it('should return records when multi-value datetime lookup feeds a string formula', async () => {
+      const recordsVo = (await getRecords(projectTable.id, { fieldKeyType: FieldKeyType.Id })).data;
+      const projectRecord = recordsVo.records.find((r) => r.id === projectRecordId);
+      expect(projectRecord).toBeDefined();
+
+      const lookupValue = projectRecord!.fields[lookupField.id];
+      expect(Array.isArray(lookupValue)).toBe(true);
+      expect(lookupValue).toHaveLength(2);
+      expect(typeof (lookupValue as any[])[0]).toBe('string');
+
+      const formulaValue = projectRecord!.fields[formulaField.id];
+      expect(typeof formulaValue).toBe('string');
+      expect(formulaValue as string).toContain('prefix-');
+
+      await updateRecordByApi(
+        projectTable.id,
+        projectRecordId,
+        projectNameField.id,
+        'Project Beta'
+      );
     });
   });
 });

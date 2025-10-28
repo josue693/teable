@@ -191,7 +191,7 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
   }
 
   value(text: string): string {
-    return `${text}::numeric`;
+    return this.toNumericSafe(text);
   }
 
   // Text Functions
@@ -249,15 +249,15 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
   }
 
   mid(text: string, startNum: string, numChars: string): string {
-    return `SUBSTRING(${text} FROM ${startNum}::integer FOR ${numChars}::integer)`;
+    return `SUBSTRING((${text})::text FROM ${startNum}::integer FOR ${numChars}::integer)`;
   }
 
   left(text: string, numChars: string): string {
-    return `LEFT(${text}, ${numChars}::integer)`;
+    return `LEFT((${text})::text, ${numChars}::integer)`;
   }
 
   right(text: string, numChars: string): string {
-    return `RIGHT(${text}, ${numChars}::integer)`;
+    return `RIGHT((${text})::text, ${numChars}::integer)`;
   }
 
   replace(oldText: string, startNum: string, numChars: string, newText: string): string {
@@ -504,7 +504,15 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
     if (!normalized || normalized === 'undefined' || normalized.toLowerCase() === 'null') {
       return dateString;
     }
-    return `TO_TIMESTAMP(${dateString}, ${format})`;
+    const valueExpr = `(${dateString})`;
+    const toTimestampExpr = `TO_TIMESTAMP(${valueExpr}::text, ${format})`;
+    const guardPattern = this.buildDatetimeParseGuardRegex(normalized);
+    if (!guardPattern) {
+      return toTimestampExpr;
+    }
+    const textExpr = `${valueExpr}::text`;
+    const escapedPattern = guardPattern.replace(/'/g, "''");
+    return `(CASE WHEN ${valueExpr} IS NULL THEN NULL WHEN ${textExpr} = '' THEN NULL WHEN ${textExpr} ~ '${escapedPattern}' THEN ${toTimestampExpr} ELSE NULL END)`;
   }
 
   day(date: string): string {
@@ -628,7 +636,10 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
       return `((${params[0]}) AND NOT (${params[1]})) OR (NOT (${params[0]}) AND (${params[1]}))`;
     }
     // For multiple values, we need a more complex implementation
-    return `(${this.joinParams(params, ' + ')}) % 2 = 1`;
+    return `(${this.joinParams(
+      params.map((p) => `CASE WHEN ${p} THEN 1 ELSE 0 END`),
+      ' + '
+    )}) % 2 = 1`;
   }
 
   blank(): string {
@@ -746,5 +757,58 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
 
   protected escapeIdentifier(identifier: string): string {
     return `"${identifier.replace(/"/g, '""')}"`;
+  }
+
+  private buildDatetimeParseGuardRegex(formatLiteral: string): string | null {
+    if (!formatLiteral.startsWith("'") || !formatLiteral.endsWith("'")) {
+      return null;
+    }
+    const literal = formatLiteral.slice(1, -1);
+    const tokenPatterns: Array<[string, string]> = [
+      ['HH24', '\\d{2}'],
+      ['HH12', '\\d{2}'],
+      ['HH', '\\d{2}'],
+      ['MI', '\\d{2}'],
+      ['SS', '\\d{2}'],
+      ['MS', '\\d{1,3}'],
+      ['YYYY', '\\d{4}'],
+      ['YYY', '\\d{3}'],
+      ['YY', '\\d{2}'],
+      ['Y', '\\d'],
+      ['MM', '\\d{2}'],
+      ['DD', '\\d{2}'],
+    ];
+    const optionalTokens = new Set(['FM', 'TM', 'TH']);
+    let pattern = '^';
+    for (let i = 0; i < literal.length; ) {
+      let matched = false;
+      const remaining = literal.slice(i);
+      const upperRemaining = remaining.toUpperCase();
+      for (const [token, tokenPattern] of tokenPatterns) {
+        if (upperRemaining.startsWith(token)) {
+          pattern += tokenPattern;
+          i += token.length;
+          matched = true;
+          break;
+        }
+      }
+      if (matched) {
+        continue;
+      }
+      const optionalToken = upperRemaining.slice(0, 2);
+      if (optionalTokens.has(optionalToken)) {
+        i += optionalToken.length;
+        continue;
+      }
+      const currentChar = literal[i];
+      if (/\s/.test(currentChar)) {
+        pattern += '\\s';
+      } else {
+        pattern += currentChar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+      i += 1;
+    }
+    pattern += '$';
+    return pattern;
   }
 }

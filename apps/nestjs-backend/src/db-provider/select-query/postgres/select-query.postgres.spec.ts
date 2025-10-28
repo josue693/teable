@@ -22,6 +22,20 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
     timeZone,
   });
 
+  it('left casts expressions to text before truncation', () => {
+    expect(query.left('raw_expr', '5')).toBe(`LEFT((raw_expr)::text, 5::integer)`);
+  });
+
+  it('right casts expressions to text before truncation', () => {
+    expect(query.right('raw_expr', '4')).toBe(`RIGHT((raw_expr)::text, 4::integer)`);
+  });
+
+  it('mid casts expressions to text before slicing', () => {
+    expect(query.mid('raw_expr', '2', '5')).toBe(
+      `SUBSTRING((raw_expr)::text FROM 2::integer FOR 5::integer)`
+    );
+  });
+
   describe('timezone-aware wrappers', () => {
     let tzQuery: SelectQueryPostgres;
 

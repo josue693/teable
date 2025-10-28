@@ -162,6 +162,170 @@ describe('OpenAPI FieldOpenApiController for duplicate field (e2e)', () => {
     });
   });
 
+  describe('duplicate lookup with nested multi-hop dependencies', () => {
+    let seasonTable: ITableFullVo;
+    let productTable: ITableFullVo;
+    let mainTable: ITableFullVo;
+    let seasonNameFieldId: string;
+    let productNameFieldId: string;
+    let orderNameFieldId: string;
+    let productSeasonLinkId: string;
+    let productSeasonLookupId: string;
+    let mainProductLinkId: string;
+    let mainSeasonLookupId: string;
+
+    beforeAll(async () => {
+      seasonTable = await createTable(baseId, {
+        name: 'season_table_nested_lookup',
+        fields: [
+          {
+            type: FieldType.SingleLineText,
+            name: 'season_name',
+          },
+        ],
+      });
+      seasonNameFieldId = seasonTable.fields.find((f) => f.name === 'season_name')!.id;
+      const seasonRecords = await createRecords(seasonTable.id, {
+        records: [
+          { fields: { [seasonNameFieldId]: 'Spring' } },
+          { fields: { [seasonNameFieldId]: 'Autumn' } },
+        ],
+      });
+
+      productTable = await createTable(baseId, {
+        name: 'product_table_nested_lookup',
+        fields: [
+          {
+            type: FieldType.SingleLineText,
+            name: 'product_name',
+          },
+        ],
+      });
+      productNameFieldId = productTable.fields.find((f) => f.name === 'product_name')!.id;
+
+      const productSeasonLink = (
+        await createField(productTable.id, {
+          type: FieldType.Link,
+          name: 'season_link',
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: seasonTable.id,
+          },
+        })
+      ).data;
+      productSeasonLinkId = productSeasonLink.id;
+
+      const productSeasonLookup = (
+        await createField(productTable.id, {
+          type: FieldType.SingleLineText,
+          name: 'season_lookup',
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: seasonTable.id,
+            linkFieldId: productSeasonLinkId,
+            lookupFieldId: seasonNameFieldId,
+          },
+        })
+      ).data;
+      productSeasonLookupId = productSeasonLookup.id;
+
+      const productRecords = await createRecords(productTable.id, {
+        records: [
+          {
+            fields: {
+              [productNameFieldId]: 'Starter Pack',
+              [productSeasonLinkId]: [{ id: seasonRecords.records[0].id }],
+            },
+          },
+          {
+            fields: {
+              [productNameFieldId]: 'Advanced Pack',
+              [productSeasonLinkId]: [{ id: seasonRecords.records[1].id }],
+            },
+          },
+        ],
+      });
+
+      mainTable = await createTable(baseId, {
+        name: 'main_table_nested_lookup',
+        fields: [
+          {
+            type: FieldType.SingleLineText,
+            name: 'order_name',
+          },
+        ],
+      });
+      orderNameFieldId = mainTable.fields.find((f) => f.name === 'order_name')!.id;
+
+      const mainProductLink = (
+        await createField(mainTable.id, {
+          type: FieldType.Link,
+          name: 'product_link',
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: productTable.id,
+          },
+        })
+      ).data;
+      mainProductLinkId = mainProductLink.id;
+
+      const mainSeasonLookup = (
+        await createField(mainTable.id, {
+          type: FieldType.SingleLineText,
+          name: 'season_lookup',
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: productTable.id,
+            linkFieldId: mainProductLinkId,
+            lookupFieldId: productSeasonLookupId,
+          },
+        })
+      ).data;
+      mainSeasonLookupId = mainSeasonLookup.id;
+
+      await createRecords(mainTable.id, {
+        records: [
+          {
+            fields: {
+              [orderNameFieldId]: 'Order-1',
+              [mainProductLinkId]: productRecords.records.map((rec) => ({ id: rec.id })),
+            },
+          },
+        ],
+      });
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, mainTable.id);
+      await permanentDeleteTable(baseId, productTable.id);
+      await permanentDeleteTable(baseId, seasonTable.id);
+    });
+
+    it('duplicates multi-hop lookup field without missing CTEs', async () => {
+      const duplicatedLookup = (
+        await duplicateField(mainTable.id, mainSeasonLookupId, {
+          name: 'season_lookup_copy',
+        })
+      ).data;
+
+      expect(duplicatedLookup.isLookup).toBe(true);
+      expect(duplicatedLookup.lookupOptions?.lookupFieldId).toBe(productSeasonLookupId);
+
+      const records = await getRecords(mainTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+        projection: [orderNameFieldId, mainSeasonLookupId, duplicatedLookup.id],
+      });
+
+      const orderRecord = records.records.find(
+        (record) => record.fields[orderNameFieldId] === 'Order-1'
+      );
+      expect(orderRecord).toBeDefined();
+      expect(orderRecord!.fields[duplicatedLookup.id]).toEqual(
+        orderRecord!.fields[mainSeasonLookupId]
+      );
+    });
+  });
+
   describe('duplicate link fields', () => {
     let table: ITableFullVo;
     let subTable: ITableFullVo;
