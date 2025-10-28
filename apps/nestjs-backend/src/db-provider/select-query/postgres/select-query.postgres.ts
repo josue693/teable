@@ -472,7 +472,14 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     if (!normalized || normalized === 'undefined' || normalized.toLowerCase() === 'null') {
       return dateString;
     }
-    return `TO_TIMESTAMP(${dateString}, ${format})`;
+    const guardPattern = this.buildDatetimeParseGuardRegex(normalized);
+    if (!guardPattern) {
+      return `TO_TIMESTAMP(${dateString}, ${format})`;
+    }
+    const valueExpr = `(${dateString})`;
+    const textExpr = `${valueExpr}::text`;
+    const escapedPattern = guardPattern.replace(/'/g, "''");
+    return `(CASE WHEN ${valueExpr} IS NULL THEN NULL WHEN ${textExpr} = '' THEN NULL WHEN ${textExpr} ~ '${escapedPattern}' THEN TO_TIMESTAMP(${dateString}, ${format}) ELSE NULL END)`;
   }
 
   day(date: string): string {
@@ -863,5 +870,58 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   // Parentheses for grouping
   parentheses(expression: string): string {
     return `(${expression})`;
+  }
+
+  private buildDatetimeParseGuardRegex(formatLiteral: string): string | null {
+    if (!formatLiteral.startsWith("'") || !formatLiteral.endsWith("'")) {
+      return null;
+    }
+    const literal = formatLiteral.slice(1, -1);
+    const tokenPatterns: Array<[string, string]> = [
+      ['HH24', '\\d{2}'],
+      ['HH12', '\\d{2}'],
+      ['HH', '\\d{2}'],
+      ['MI', '\\d{2}'],
+      ['SS', '\\d{2}'],
+      ['MS', '\\d{1,3}'],
+      ['YYYY', '\\d{4}'],
+      ['YYY', '\\d{3}'],
+      ['YY', '\\d{2}'],
+      ['Y', '\\d'],
+      ['MM', '\\d{2}'],
+      ['DD', '\\d{2}'],
+    ];
+    const optionalTokens = new Set(['FM', 'TM', 'TH']);
+    let pattern = '^';
+    for (let i = 0; i < literal.length; ) {
+      let matched = false;
+      const remaining = literal.slice(i);
+      const upperRemaining = remaining.toUpperCase();
+      for (const [token, tokenPattern] of tokenPatterns) {
+        if (upperRemaining.startsWith(token)) {
+          pattern += tokenPattern;
+          i += token.length;
+          matched = true;
+          break;
+        }
+      }
+      if (matched) {
+        continue;
+      }
+      const optionalToken = upperRemaining.slice(0, 2);
+      if (optionalTokens.has(optionalToken)) {
+        i += optionalToken.length;
+        continue;
+      }
+      const currentChar = literal[i];
+      if (/\s/.test(currentChar)) {
+        pattern += '\\s';
+      } else {
+        pattern += currentChar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+      i += 1;
+    }
+    pattern += '$';
+    return pattern;
   }
 }

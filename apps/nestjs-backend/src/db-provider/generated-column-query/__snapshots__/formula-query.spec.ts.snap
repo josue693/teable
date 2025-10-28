@@ -60,7 +60,7 @@ exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Date Fun
 
 exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Date Functions > should implement datetimeFormat function with parameters 1`] = `"TO_CHAR(column_a::timestamp, 'YYYY-MM-DD')"`;
 
-exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Date Functions > should implement datetimeParse function with parameters 1`] = `"TO_TIMESTAMP(column_a, 'YYYY-MM-DD')"`;
+exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Date Functions > should implement datetimeParse function with parameters 1`] = `"(CASE WHEN (column_a) IS NULL THEN NULL WHEN (column_a)::text = '' THEN NULL WHEN (column_a)::text ~ '^\\d{4}\\-\\d{2}\\-\\d{2}$' THEN TO_TIMESTAMP(column_a, 'YYYY-MM-DD') ELSE NULL END)"`;
 
 exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Date Functions > should implement day function 1`] = `"EXTRACT(DAY FROM column_a::timestamp)"`;
 
