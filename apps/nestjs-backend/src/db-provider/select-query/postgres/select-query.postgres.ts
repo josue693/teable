@@ -222,17 +222,22 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     return `(${normalizedLeft} ${operator} ${normalizedRight})`;
   }
 
+  private sanitizeTimestampInput(date: string): string {
+    return `NULLIF(BTRIM((${date})::text), '')`;
+  }
+
   private tzWrap(date: string): string {
     const tz = this.context?.timeZone as string | undefined;
+    const sanitized = this.sanitizeTimestampInput(date);
     if (!tz) {
       // Default behavior: interpret as timestamp without timezone
-      return `(${date})::timestamp`;
+      return `(${sanitized})::timestamp`;
     }
     // Sanitize single quotes to prevent SQL issues
     const safeTz = tz.replace(/'/g, "''");
     // Interpret input as timestamptz if it has offset and convert to target timezone
     // AT TIME ZONE returns timestamp without time zone in that zone
-    return `(${date})::timestamptz AT TIME ZONE '${safeTz}'`;
+    return `(${sanitized})::timestamptz AT TIME ZONE '${safeTz}'`;
   }
   // Numeric Functions
   sum(params: string[]): string {
