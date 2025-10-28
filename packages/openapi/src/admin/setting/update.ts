@@ -73,6 +73,8 @@ export const aiConfigVoSchema = aiConfigSchema.merge(
 
 export const appConfigSchema = z.object({
   apiKey: z.string().optional(),
+  vercelToken: z.string().optional(),
+  customDomain: z.string().optional(),
   creditCount: z.number().min(0).optional(),
 });
 
