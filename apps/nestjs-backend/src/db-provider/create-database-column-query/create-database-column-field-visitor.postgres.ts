@@ -379,7 +379,11 @@ export class CreatePostgresDatabaseColumnFieldVisitor implements IFieldVisitor<v
     this.createFormulaColumns(field);
   }
 
-  visitCreatedTimeField(_field: CreatedTimeFieldCore): void {
+  visitCreatedTimeField(field: CreatedTimeFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     this.context.table.specificType(
       this.context.dbFieldName,
       'TIMESTAMP GENERATED ALWAYS AS (__created_time) STORED'
@@ -389,7 +393,11 @@ export class CreatePostgresDatabaseColumnFieldVisitor implements IFieldVisitor<v
     });
   }
 
-  visitLastModifiedTimeField(_field: LastModifiedTimeFieldCore): void {
+  visitLastModifiedTimeField(field: LastModifiedTimeFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     this.context.table.specificType(
       this.context.dbFieldName,
       'TIMESTAMP GENERATED ALWAYS AS (__last_modified_time) STORED'
@@ -404,7 +412,11 @@ export class CreatePostgresDatabaseColumnFieldVisitor implements IFieldVisitor<v
     this.createStandardColumn(field);
   }
 
-  visitCreatedByField(_field: CreatedByFieldCore): void {
+  visitCreatedByField(field: CreatedByFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     // Persist as generated column that mirrors __created_by (TEXT)
     this.context.table.specificType(
       this.context.dbFieldName,
@@ -415,7 +427,11 @@ export class CreatePostgresDatabaseColumnFieldVisitor implements IFieldVisitor<v
     });
   }
 
-  visitLastModifiedByField(_field: LastModifiedByFieldCore): void {
+  visitLastModifiedByField(field: LastModifiedByFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     // Persist as generated column that mirrors __last_modified_by (TEXT)
     this.context.table.specificType(
       this.context.dbFieldName,

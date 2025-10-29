@@ -135,7 +135,7 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
       // Lookup has no standard column in base table.
       // When building from a materialized view, fallback to the view's column.
       if (this.shouldSelectRaw()) {
-        if (isSystemUserField(field)) {
+        if (isSystemUserField(field) && !field.isLookup) {
           const columnSelector = this.getColumnSelector(field) as string;
           const expr = this.dialect.buildUserJsonObjectById(columnSelector);
           this.state.setSelection(field.id, expr);

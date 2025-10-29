@@ -377,7 +377,11 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
     this.createStandardColumn(field);
   }
 
-  visitCreatedTimeField(_field: CreatedTimeFieldCore): void {
+  visitCreatedTimeField(field: CreatedTimeFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     const storageType = this.context.isNewTable ? 'STORED' : 'VIRTUAL';
     this.context.table.specificType(
       this.context.dbFieldName,
@@ -388,7 +392,11 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
     });
   }
 
-  visitLastModifiedTimeField(_field: LastModifiedTimeFieldCore): void {
+  visitLastModifiedTimeField(field: LastModifiedTimeFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     const storageType = this.context.isNewTable ? 'STORED' : 'VIRTUAL';
     this.context.table.specificType(
       this.context.dbFieldName,
@@ -404,7 +412,11 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
     this.createStandardColumn(field);
   }
 
-  visitCreatedByField(_field: CreatedByFieldCore): void {
+  visitCreatedByField(field: CreatedByFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     // Persist as generated column that mirrors __created_by (TEXT)
     const storageType = this.context.isNewTable ? 'STORED' : 'VIRTUAL';
     this.context.table.specificType(
@@ -416,7 +428,11 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
     });
   }
 
-  visitLastModifiedByField(_field: LastModifiedByFieldCore): void {
+  visitLastModifiedByField(field: LastModifiedByFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     // Persist as generated column that mirrors __last_modified_by (TEXT)
     const storageType = this.context.isNewTable ? 'STORED' : 'VIRTUAL';
     this.context.table.specificType(

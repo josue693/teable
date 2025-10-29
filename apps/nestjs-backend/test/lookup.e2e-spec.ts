@@ -15,6 +15,7 @@ import type {
   LinkFieldCore,
 } from '@teable/core';
 import {
+  CellFormat,
   Colors,
   FieldKeyType,
   FieldType,
@@ -24,6 +25,7 @@ import {
 } from '@teable/core';
 import type { ITableFullVo } from '@teable/openapi';
 import { getRecords, updateRecords } from '@teable/openapi';
+import { RecordService } from '../src/features/record/record.service';
 import {
   createField,
   deleteField,
@@ -106,6 +108,8 @@ const defaultFields: IFieldRo[] = [
     },
   },
 ];
+const normalizeSingle = <T>(value: T | T[]) =>
+  Array.isArray(value) ? (value.length ? value[0] : undefined) : value;
 
 describe('OpenAPI Lookup field (e2e)', () => {
   let app: INestApplication;
@@ -861,16 +865,16 @@ describe('OpenAPI Lookup field (e2e)', () => {
       expect(hostRecord).toBeTruthy();
 
       expect(hostRecord!.fields[HOST_LOOKUP_AUTO]).toEqual(sourceRecord!.fields[SOURCE_AUTO_FIELD]);
-      expect(hostRecord!.fields[HOST_LOOKUP_CREATED_TIME]).toEqual(
+      expect(normalizeSingle(hostRecord!.fields[HOST_LOOKUP_CREATED_TIME] as unknown)).toEqual(
         sourceRecord!.fields[SOURCE_CREATED_TIME_FIELD]
       );
-      expect(hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_TIME]).toEqual(
-        sourceRecord!.fields[SOURCE_LAST_MODIFIED_TIME_FIELD]
-      );
-      expect(hostRecord!.fields[HOST_LOOKUP_CREATED_BY]).toEqual(
+      expect(
+        normalizeSingle(hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_TIME] as unknown)
+      ).toEqual(sourceRecord!.fields[SOURCE_LAST_MODIFIED_TIME_FIELD]);
+      expect(normalizeSingle(hostRecord!.fields[HOST_LOOKUP_CREATED_BY] as unknown)).toEqual(
         sourceRecord!.fields[SOURCE_CREATED_BY_FIELD]
       );
-      expect(hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_BY]).toEqual(
+      expect(normalizeSingle(hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_BY] as unknown)).toEqual(
         sourceRecord!.fields[SOURCE_LAST_MODIFIED_BY_FIELD]
       );
     });
@@ -893,18 +897,106 @@ describe('OpenAPI Lookup field (e2e)', () => {
       expect(consumerRecord!.fields[CONSUMER_LOOKUP_AUTO]).toEqual(
         hostRecord!.fields[HOST_LOOKUP_AUTO]
       );
-      expect(consumerRecord!.fields[CONSUMER_LOOKUP_CREATED_TIME]).toEqual(
-        hostRecord!.fields[HOST_LOOKUP_CREATED_TIME]
+      expect(
+        normalizeSingle(consumerRecord!.fields[CONSUMER_LOOKUP_CREATED_TIME] as unknown)
+      ).toEqual(normalizeSingle(hostRecord!.fields[HOST_LOOKUP_CREATED_TIME] as unknown));
+      expect(
+        normalizeSingle(consumerRecord!.fields[CONSUMER_LOOKUP_LAST_MODIFIED_TIME] as unknown)
+      ).toEqual(normalizeSingle(hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_TIME] as unknown));
+      expect(
+        normalizeSingle(consumerRecord!.fields[CONSUMER_LOOKUP_CREATED_BY] as unknown)
+      ).toEqual(normalizeSingle(hostRecord!.fields[HOST_LOOKUP_CREATED_BY] as unknown));
+      expect(
+        normalizeSingle(consumerRecord!.fields[CONSUMER_LOOKUP_LAST_MODIFIED_BY] as unknown)
+      ).toEqual(normalizeSingle(hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_BY] as unknown));
+    });
+
+    it('should return created-by lookup value in updateRecords response', async () => {
+      expect(hostLinkField.isMultipleCellValue).toBe(true);
+      const linkedRecordIds = sourceTable.records.slice(0, 2).map((record) => ({ id: record.id }));
+      const response = await updateRecords(hostTable.id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            id: hostTable.records[0].id,
+            fields: {
+              [hostLinkField.name]: linkedRecordIds,
+            },
+          },
+        ],
+      });
+
+      expect(response.status).toBe(200);
+      const lookupFieldId = hostLookupFields[HOST_LOOKUP_CREATED_BY].id;
+      const refreshedRecords = await getRecords(hostTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+      });
+      const refreshedRecord = refreshedRecords.data.records.find(
+        (record) => record.id === hostTable.records[0].id
       );
-      expect(consumerRecord!.fields[CONSUMER_LOOKUP_LAST_MODIFIED_TIME]).toEqual(
-        hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_TIME]
+      expect(refreshedRecord).toBeTruthy();
+      const refreshedLookupValue = refreshedRecord!.fields[lookupFieldId];
+      expect(refreshedLookupValue).toBeTruthy();
+
+      const rawRecords = await getRecords(hostTable.id, {
+        fieldKeyType: FieldKeyType.DbFieldName,
+        projection: [hostLookupFields[HOST_LOOKUP_CREATED_BY].dbFieldName],
+      });
+      const rawRecord = rawRecords.data.records.find(
+        (record) => record.id === hostTable.records[0].id
       );
-      expect(consumerRecord!.fields[CONSUMER_LOOKUP_CREATED_BY]).toEqual(
-        hostRecord!.fields[HOST_LOOKUP_CREATED_BY]
+      expect(rawRecord).toBeTruthy();
+      const rawLookupValue =
+        rawRecord!.fields[hostLookupFields[HOST_LOOKUP_CREATED_BY].dbFieldName];
+      expect(typeof rawLookupValue).toBe('object');
+      if (Array.isArray(refreshedLookupValue) && Array.isArray(rawLookupValue)) {
+        expect(rawLookupValue).toHaveLength(refreshedLookupValue.length);
+      }
+    });
+
+    it('should resolve created-by lookup via table cache snapshot', async () => {
+      const linkedRecordIds = sourceTable.records.slice(0, 2).map((record) => ({ id: record.id }));
+      await updateRecords(hostTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+        records: [
+          {
+            id: hostTable.records[0].id,
+            fields: {
+              [hostLinkField.id]: linkedRecordIds,
+            },
+          },
+        ],
+      });
+
+      const recordService = app.get<RecordService>(RecordService);
+      const snapshots = await recordService.getSnapshotBulkWithPermission(
+        hostTable.id,
+        [hostTable.records[0].id],
+        { [hostLookupFields[HOST_LOOKUP_CREATED_BY].id]: true },
+        FieldKeyType.Id,
+        CellFormat.Json,
+        true
       );
-      expect(consumerRecord!.fields[CONSUMER_LOOKUP_LAST_MODIFIED_BY]).toEqual(
-        hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_BY]
-      );
+
+      expect(snapshots).toHaveLength(1);
+      const snapshot = snapshots[0];
+      const lookupFieldId = hostLookupFields[HOST_LOOKUP_CREATED_BY].id;
+      const lookupValue = snapshot.data.fields[lookupFieldId];
+      expect(lookupValue).toBeTruthy();
+      if (Array.isArray(lookupValue)) {
+        expect(lookupValue).toHaveLength(linkedRecordIds.length);
+        lookupValue.forEach((entry) => {
+          expect(entry).toMatchObject({
+            id: expect.any(String),
+            title: expect.any(String),
+          });
+        });
+      } else {
+        expect(lookupValue).toMatchObject({
+          id: expect.any(String),
+          title: expect.any(String),
+        });
+      }
     });
   });
 

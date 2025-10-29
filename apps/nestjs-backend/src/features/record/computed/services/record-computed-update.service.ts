@@ -45,14 +45,11 @@ export class RecordComputedUpdateService {
         // Skip formula persisted as generated columns
         return match(f)
           .when(isFormulaField, (f) => !f.getIsPersistedAsGeneratedColumn())
-          .with(
-            { type: FieldType.AutoNumber },
-            { type: FieldType.CreatedTime },
-            { type: FieldType.LastModifiedTime },
-            { type: FieldType.CreatedBy },
-            { type: FieldType.LastModifiedBy },
-            () => false
-          )
+          .with({ type: FieldType.AutoNumber }, () => false)
+          .with({ type: FieldType.CreatedTime }, () => isLookupStyle)
+          .with({ type: FieldType.LastModifiedTime }, () => isLookupStyle)
+          .with({ type: FieldType.CreatedBy }, () => isLookupStyle)
+          .with({ type: FieldType.LastModifiedBy }, () => isLookupStyle)
           .otherwise(() => true);
       })
       .map((f) => f.dbFieldName);
@@ -64,10 +61,11 @@ export class RecordComputedUpdateService {
     const cols: string[] = [];
     for (const f of fields) {
       if (
-        f.type === FieldType.CreatedBy ||
-        f.type === FieldType.LastModifiedBy ||
-        f.type === FieldType.CreatedTime ||
-        f.type === FieldType.LastModifiedTime
+        !f.isLookup &&
+        (f.type === FieldType.CreatedBy ||
+          f.type === FieldType.LastModifiedBy ||
+          f.type === FieldType.CreatedTime ||
+          f.type === FieldType.LastModifiedTime)
       ) {
         continue;
       }
