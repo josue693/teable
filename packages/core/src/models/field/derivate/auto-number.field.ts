@@ -7,6 +7,7 @@ import {
   type IAutoNumberFieldOptions,
   type IAutoNumberFieldOptionsRo,
 } from './auto-number-option.schema';
+import type { IFormulaFieldMeta } from './formula-option.schema';
 
 export const autoNumberCellValueSchema = z.number().int();
 
@@ -15,7 +16,7 @@ export class AutoNumberFieldCore extends FormulaAbstractCore {
 
   declare options: IAutoNumberFieldOptions;
 
-  meta?: undefined;
+  declare meta?: IFormulaFieldMeta;
 
   declare cellValueType: CellValueType.Number;
 

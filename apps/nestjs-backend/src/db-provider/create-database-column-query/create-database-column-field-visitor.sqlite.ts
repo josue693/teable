@@ -25,7 +25,12 @@ import type {
 } from '@teable/core';
 import { DbFieldType, Relationship } from '@teable/core';
 import type { Knex } from 'knex';
+import type { AutoNumberFieldDto } from '../../features/field/model/field-dto/auto-number-field.dto';
+import type { CreatedByFieldDto } from '../../features/field/model/field-dto/created-by-field.dto';
+import type { CreatedTimeFieldDto } from '../../features/field/model/field-dto/created-time-field.dto';
 import type { FormulaFieldDto } from '../../features/field/model/field-dto/formula-field.dto';
+import type { LastModifiedByFieldDto } from '../../features/field/model/field-dto/last-modified-by-field.dto';
+import type { LastModifiedTimeFieldDto } from '../../features/field/model/field-dto/last-modified-time-field.dto';
 import type { LinkFieldDto } from '../../features/field/model/field-dto/link-field.dto';
 import { SchemaType } from '../../features/field/util';
 import type { IFormulaConversionContext } from '../../features/record/query-builder/sql-conversion.visitor';
@@ -187,6 +192,9 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
       this.context.dbFieldName,
       `INTEGER GENERATED ALWAYS AS (__auto_number) ${storageType}`
     );
+    (this.context.field as AutoNumberFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 
   visitLinkField(field: LinkFieldCore): void {
@@ -375,6 +383,9 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
       this.context.dbFieldName,
       `TEXT GENERATED ALWAYS AS (__created_time) ${storageType}`
     );
+    (this.context.field as CreatedTimeFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 
   visitLastModifiedTimeField(_field: LastModifiedTimeFieldCore): void {
@@ -383,6 +394,9 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
       this.context.dbFieldName,
       `TEXT GENERATED ALWAYS AS (__last_modified_time) ${storageType}`
     );
+    (this.context.field as LastModifiedTimeFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 
   // User field types
@@ -397,6 +411,9 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
       this.context.dbFieldName,
       `TEXT GENERATED ALWAYS AS (__created_by) ${storageType}`
     );
+    (this.context.field as CreatedByFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 
   visitLastModifiedByField(_field: LastModifiedByFieldCore): void {
@@ -406,5 +423,8 @@ export class CreateSqliteDatabaseColumnFieldVisitor implements IFieldVisitor<voi
       this.context.dbFieldName,
       `TEXT GENERATED ALWAYS AS (__last_modified_by) ${storageType}`
     );
+    (this.context.field as LastModifiedByFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 }

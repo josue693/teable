@@ -5,10 +5,12 @@ import {
   createdByFieldOptionsSchema,
   type ICreatedByFieldOptions,
 } from './created-by-option.schema';
+import type { IFormulaFieldMeta } from './formula-option.schema';
 
 export class CreatedByFieldCore extends UserAbstractCore {
   type!: FieldType.CreatedBy;
   options!: ICreatedByFieldOptions;
+  declare meta?: IFormulaFieldMeta;
 
   override get isStructuredCellValue() {
     return true;

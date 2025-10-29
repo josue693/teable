@@ -14,7 +14,7 @@ export type IUserCellValue = z.infer<typeof userCellValueSchema>;
 export abstract class UserAbstractCore extends FieldCore {
   cellValueType!: CellValueType.String;
 
-  meta?: undefined;
+  declare meta?: FieldCore['meta'];
 
   item2String(value: unknown) {
     if (value == null) {

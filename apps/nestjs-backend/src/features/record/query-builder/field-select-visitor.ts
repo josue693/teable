@@ -110,8 +110,38 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
    * @param field The field to get the selector for
    * @returns String column name with table alias or Raw expression
    */
-  private getColumnSelector(field: { dbFieldName: string }): IFieldSelectName {
-    return this.generateColumnSelect(field.dbFieldName);
+  private getColumnSelector(field: FieldCore): IFieldSelectName {
+    switch (field.type) {
+      case FieldType.AutoNumber:
+        return this.selectSystemColumn(field, '__auto_number');
+      case FieldType.CreatedTime:
+        return this.selectSystemColumn(field, '__created_time');
+      case FieldType.LastModifiedTime:
+        return this.selectSystemColumn(field, '__last_modified_time');
+      case FieldType.CreatedBy: {
+        const alias = this.tableAlias;
+        const idRef = alias ? `"${alias}"."__created_by"` : `"__created_by"`;
+        const expr = this.dialect.buildUserJsonObjectById(idRef);
+        this.state.setSelection(field.id, expr);
+        return this.qb.client.raw(expr);
+      }
+      case FieldType.LastModifiedBy: {
+        const alias = this.tableAlias;
+        const idRef = alias ? `"${alias}"."__last_modified_by"` : `"__last_modified_by"`;
+        const expr = this.dialect.buildUserJsonObjectById(idRef);
+        this.state.setSelection(field.id, expr);
+        return this.qb.client.raw(expr);
+      }
+      default:
+        return this.generateColumnSelect(field.dbFieldName);
+    }
+  }
+
+  private selectSystemColumn(field: FieldCore, columnName: string): IFieldSelectName {
+    const alias = this.tableAlias;
+    const selector = alias ? `"${alias}"."${columnName}"` : columnName;
+    this.state.setSelection(field.id, selector);
+    return selector;
   }
 
   // Typed NULL generation is delegated to the dialect implementation
@@ -467,20 +497,10 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
   }
 
   visitCreatedByField(field: CreatedByFieldCore): IFieldSelectName {
-    // Build JSON with user info from system column __created_by
-    const alias = this.tableAlias;
-    const idRef = alias ? `"${alias}"."__created_by"` : `"__created_by"`;
-    const expr = this.dialect.buildUserJsonObjectById(idRef);
-    this.state.setSelection(field.id, expr);
-    return this.qb.client.raw(expr);
+    return this.checkAndSelectLookupField(field);
   }
 
   visitLastModifiedByField(field: LastModifiedByFieldCore): IFieldSelectName {
-    // Build JSON with user info from system column __last_modified_by
-    const alias = this.tableAlias;
-    const idRef = alias ? `"${alias}"."__last_modified_by"` : `"__last_modified_by"`;
-    const expr = this.dialect.buildUserJsonObjectById(idRef);
-    this.state.setSelection(field.id, expr);
-    return this.qb.client.raw(expr);
+    return this.checkAndSelectLookupField(field);
   }
 }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -672,6 +673,238 @@ describe('OpenAPI Lookup field (e2e)', () => {
       const lookupField = await createField(table2.id, lookupFieldRo);
 
       expect(lookupField).toMatchObject(lookupFieldRo);
+    });
+  });
+
+  describe('system field lookup propagation', () => {
+    const SOURCE_AUTO_FIELD = 'Auto Number Field';
+    const SOURCE_CREATED_TIME_FIELD = 'Created Time Field';
+    const SOURCE_LAST_MODIFIED_TIME_FIELD = 'Last Modified Time Field';
+    const SOURCE_CREATED_BY_FIELD = 'Created By Field';
+    const SOURCE_LAST_MODIFIED_BY_FIELD = 'Last Modified By Field';
+
+    const HOST_LOOKUP_AUTO = 'Lookup Auto Number';
+    const HOST_LOOKUP_CREATED_TIME = 'Lookup Created Time';
+    const HOST_LOOKUP_LAST_MODIFIED_TIME = 'Lookup Last Modified Time';
+    const HOST_LOOKUP_CREATED_BY = 'Lookup Created By';
+    const HOST_LOOKUP_LAST_MODIFIED_BY = 'Lookup Last Modified By';
+
+    const CONSUMER_LOOKUP_AUTO = 'Nested Lookup Auto Number';
+    const CONSUMER_LOOKUP_CREATED_TIME = 'Nested Lookup Created Time';
+    const CONSUMER_LOOKUP_LAST_MODIFIED_TIME = 'Nested Lookup Last Modified Time';
+    const CONSUMER_LOOKUP_CREATED_BY = 'Nested Lookup Created By';
+    const CONSUMER_LOOKUP_LAST_MODIFIED_BY = 'Nested Lookup Last Modified By';
+
+    let sourceTable: ITableFullVo;
+    let hostTable: ITableFullVo;
+    let consumerTable: ITableFullVo;
+    let hostLinkField: IFieldVo;
+    let consumerLinkField: IFieldVo;
+
+    const hostLookupFields: Record<string, IFieldVo> = {};
+
+    async function refreshFields(table: ITableFullVo) {
+      const updated = await getFields(table.id);
+      table.fields = updated;
+      return updated;
+    }
+
+    beforeAll(async () => {
+      sourceTable = await createTable(baseId, {
+        name: 'system-source',
+        fields: [
+          { name: 'Source Title', type: FieldType.SingleLineText, options: {} },
+          { name: SOURCE_AUTO_FIELD, type: FieldType.AutoNumber },
+          { name: SOURCE_CREATED_TIME_FIELD, type: FieldType.CreatedTime },
+          { name: SOURCE_LAST_MODIFIED_TIME_FIELD, type: FieldType.LastModifiedTime },
+          { name: SOURCE_CREATED_BY_FIELD, type: FieldType.CreatedBy },
+          { name: SOURCE_LAST_MODIFIED_BY_FIELD, type: FieldType.LastModifiedBy },
+        ],
+      });
+
+      hostTable = await createTable(baseId, {
+        name: 'system-host',
+        fields: [{ name: 'Host Title', type: FieldType.SingleLineText, options: {} }],
+      });
+
+      consumerTable = await createTable(baseId, {
+        name: 'system-consumer',
+        fields: [{ name: 'Consumer Title', type: FieldType.SingleLineText, options: {} }],
+      });
+
+      await refreshFields(sourceTable);
+      await refreshFields(hostTable);
+      await refreshFields(consumerTable);
+
+      hostLinkField = await createField(hostTable.id, {
+        name: 'Link To Source',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: sourceTable.id,
+        } as ILinkFieldOptions,
+      });
+      hostTable.fields.push(hostLinkField);
+
+      const lookupConfigs: Array<{ name: string; type: FieldType; targetName: string }> = [
+        { name: HOST_LOOKUP_AUTO, type: FieldType.AutoNumber, targetName: SOURCE_AUTO_FIELD },
+        {
+          name: HOST_LOOKUP_CREATED_TIME,
+          type: FieldType.CreatedTime,
+          targetName: SOURCE_CREATED_TIME_FIELD,
+        },
+        {
+          name: HOST_LOOKUP_LAST_MODIFIED_TIME,
+          type: FieldType.LastModifiedTime,
+          targetName: SOURCE_LAST_MODIFIED_TIME_FIELD,
+        },
+        {
+          name: HOST_LOOKUP_CREATED_BY,
+          type: FieldType.CreatedBy,
+          targetName: SOURCE_CREATED_BY_FIELD,
+        },
+        {
+          name: HOST_LOOKUP_LAST_MODIFIED_BY,
+          type: FieldType.LastModifiedBy,
+          targetName: SOURCE_LAST_MODIFIED_BY_FIELD,
+        },
+      ];
+
+      for (const config of lookupConfigs) {
+        const sourceField = sourceTable.fields.find((f) => f.name === config.targetName);
+        if (!sourceField) {
+          throw new Error(`Source field ${config.targetName} not found`);
+        }
+        const createdLookup = await createField(hostTable.id, {
+          name: config.name,
+          type: config.type,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: sourceTable.id,
+            linkFieldId: hostLinkField.id,
+            lookupFieldId: sourceField.id,
+          } satisfies ILookupOptionsRo,
+        });
+        hostLookupFields[config.name] = createdLookup;
+        hostTable.fields.push(createdLookup);
+      }
+
+      consumerLinkField = await createField(consumerTable.id, {
+        name: 'Link To Host',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: hostTable.id,
+        } as ILinkFieldOptions,
+      });
+      consumerTable.fields.push(consumerLinkField);
+
+      const nestedConfigs: Array<{ name: string; hostLookupName: string }> = [
+        { name: CONSUMER_LOOKUP_AUTO, hostLookupName: HOST_LOOKUP_AUTO },
+        { name: CONSUMER_LOOKUP_CREATED_TIME, hostLookupName: HOST_LOOKUP_CREATED_TIME },
+        {
+          name: CONSUMER_LOOKUP_LAST_MODIFIED_TIME,
+          hostLookupName: HOST_LOOKUP_LAST_MODIFIED_TIME,
+        },
+        { name: CONSUMER_LOOKUP_CREATED_BY, hostLookupName: HOST_LOOKUP_CREATED_BY },
+        {
+          name: CONSUMER_LOOKUP_LAST_MODIFIED_BY,
+          hostLookupName: HOST_LOOKUP_LAST_MODIFIED_BY,
+        },
+      ];
+
+      for (const config of nestedConfigs) {
+        const hostLookup = hostLookupFields[config.hostLookupName];
+        const nestedLookup = await createField(consumerTable.id, {
+          name: config.name,
+          type: hostLookup.type,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: hostTable.id,
+            linkFieldId: consumerLinkField.id,
+            lookupFieldId: hostLookup.id,
+          } satisfies ILookupOptionsRo,
+        });
+        consumerTable.fields.push(nestedLookup);
+      }
+
+      await updateRecordByApi(hostTable.id, hostTable.records[0].id, hostLinkField.id, [
+        { id: sourceTable.records[0].id },
+      ]);
+
+      await updateRecordByApi(consumerTable.id, consumerTable.records[0].id, consumerLinkField.id, [
+        { id: hostTable.records[0].id },
+      ]);
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, consumerTable.id);
+      await permanentDeleteTable(baseId, hostTable.id);
+      await permanentDeleteTable(baseId, sourceTable.id);
+    });
+
+    it('should resolve lookup values for system fields', async () => {
+      const sourceRecords = await getRecords(sourceTable.id, {
+        fieldKeyType: FieldKeyType.Name,
+      });
+      const hostRecords = await getRecords(hostTable.id, {
+        fieldKeyType: FieldKeyType.Name,
+      });
+
+      const sourceRecord = sourceRecords.data.records.find(
+        (record) => record.id === sourceTable.records[0].id
+      );
+      const hostRecord = hostRecords.data.records.find(
+        (record) => record.id === hostTable.records[0].id
+      );
+      expect(sourceRecord).toBeTruthy();
+      expect(hostRecord).toBeTruthy();
+
+      expect(hostRecord!.fields[HOST_LOOKUP_AUTO]).toEqual(sourceRecord!.fields[SOURCE_AUTO_FIELD]);
+      expect(hostRecord!.fields[HOST_LOOKUP_CREATED_TIME]).toEqual(
+        sourceRecord!.fields[SOURCE_CREATED_TIME_FIELD]
+      );
+      expect(hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_TIME]).toEqual(
+        sourceRecord!.fields[SOURCE_LAST_MODIFIED_TIME_FIELD]
+      );
+      expect(hostRecord!.fields[HOST_LOOKUP_CREATED_BY]).toEqual(
+        sourceRecord!.fields[SOURCE_CREATED_BY_FIELD]
+      );
+      expect(hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_BY]).toEqual(
+        sourceRecord!.fields[SOURCE_LAST_MODIFIED_BY_FIELD]
+      );
+    });
+
+    it('should resolve nested lookup values for system fields', async () => {
+      const hostRecords = await getRecords(hostTable.id, { fieldKeyType: FieldKeyType.Name });
+      const consumerRecords = await getRecords(consumerTable.id, {
+        fieldKeyType: FieldKeyType.Name,
+      });
+
+      const hostRecord = hostRecords.data.records.find(
+        (record) => record.id === hostTable.records[0].id
+      );
+      const consumerRecord = consumerRecords.data.records.find(
+        (record) => record.id === consumerTable.records[0].id
+      );
+      expect(hostRecord).toBeTruthy();
+      expect(consumerRecord).toBeTruthy();
+
+      expect(consumerRecord!.fields[CONSUMER_LOOKUP_AUTO]).toEqual(
+        hostRecord!.fields[HOST_LOOKUP_AUTO]
+      );
+      expect(consumerRecord!.fields[CONSUMER_LOOKUP_CREATED_TIME]).toEqual(
+        hostRecord!.fields[HOST_LOOKUP_CREATED_TIME]
+      );
+      expect(consumerRecord!.fields[CONSUMER_LOOKUP_LAST_MODIFIED_TIME]).toEqual(
+        hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_TIME]
+      );
+      expect(consumerRecord!.fields[CONSUMER_LOOKUP_CREATED_BY]).toEqual(
+        hostRecord!.fields[HOST_LOOKUP_CREATED_BY]
+      );
+      expect(consumerRecord!.fields[CONSUMER_LOOKUP_LAST_MODIFIED_BY]).toEqual(
+        hostRecord!.fields[HOST_LOOKUP_LAST_MODIFIED_BY]
+      );
     });
   });
 
