@@ -1,4 +1,4 @@
-import type { IUserCellValue } from '@teable/core';
+import type { IFormulaFieldMeta, IUserCellValue } from '@teable/core';
 import { LastModifiedByFieldCore } from '@teable/core';
 import { omit } from 'lodash';
 import type { FieldBase } from '../field-base';
@@ -34,5 +34,9 @@ export class LastModifiedByFieldDto extends LastModifiedByFieldCore implements F
       transform(value);
     }
     return value;
+  }
+
+  setMetadata(meta: IFormulaFieldMeta) {
+    this.meta = meta;
   }
 }

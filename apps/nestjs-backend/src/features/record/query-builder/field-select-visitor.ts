@@ -27,6 +27,7 @@ import { FieldType, isLinkLookupOptions } from '@teable/core';
 // no driver-specific logic here; use dialect for differences
 import type { Knex } from 'knex';
 import type { IDbProvider } from '../../../db-provider/db.provider.interface';
+import { isSystemUserField } from '../../field/fields-utils';
 import type { IFieldSelectName } from './field-select.type';
 import type {
   IRecordSelectionMap,
@@ -110,8 +111,15 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
    * @param field The field to get the selector for
    * @returns String column name with table alias or Raw expression
    */
-  private getColumnSelector(field: { dbFieldName: string }): IFieldSelectName {
+  private getColumnSelector(field: FieldCore): IFieldSelectName {
     return this.generateColumnSelect(field.dbFieldName);
+  }
+
+  private selectSystemColumn(field: FieldCore, columnName: string): IFieldSelectName {
+    const alias = this.tableAlias;
+    const selector = alias ? `"${alias}"."${columnName}"` : columnName;
+    this.state.setSelection(field.id, selector);
+    return selector;
   }
 
   // Typed NULL generation is delegated to the dialect implementation
@@ -127,6 +135,12 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
       // Lookup has no standard column in base table.
       // When building from a materialized view, fallback to the view's column.
       if (this.shouldSelectRaw()) {
+        if (isSystemUserField(field) && !field.isLookup) {
+          const columnSelector = this.getColumnSelector(field) as string;
+          const expr = this.dialect.buildUserJsonObjectById(columnSelector);
+          this.state.setSelection(field.id, expr);
+          return this.qb.client.raw(expr);
+        }
         const columnSelector = this.getColumnSelector(field);
         this.state.setSelection(field.id, columnSelector);
         return columnSelector;
@@ -453,20 +467,31 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
     return this.getFormulaColumnSelector(field);
   }
 
-  visitCreatedTimeField(field: CreatedTimeFieldCore): IFieldSelectName {
-    return this.checkAndSelectLookupField(field);
-  }
-
-  visitLastModifiedTimeField(field: LastModifiedTimeFieldCore): IFieldSelectName {
-    return this.checkAndSelectLookupField(field);
-  }
-
   // User field types
   visitUserField(field: UserFieldCore): IFieldSelectName {
     return this.checkAndSelectLookupField(field);
   }
 
+  visitCreatedTimeField(field: CreatedTimeFieldCore): IFieldSelectName {
+    if (field.isLookup) {
+      return this.checkAndSelectLookupField(field);
+    }
+
+    return this.selectSystemColumn(field, '__created_time');
+  }
+
+  visitLastModifiedTimeField(field: LastModifiedTimeFieldCore): IFieldSelectName {
+    if (field.isLookup) {
+      return this.checkAndSelectLookupField(field);
+    }
+
+    return this.selectSystemColumn(field, '__last_modified_time');
+  }
+
   visitCreatedByField(field: CreatedByFieldCore): IFieldSelectName {
+    if (field.isLookup) {
+      return this.checkAndSelectLookupField(field);
+    }
     // Build JSON with user info from system column __created_by
     const alias = this.tableAlias;
     const idRef = alias ? `"${alias}"."__created_by"` : `"__created_by"`;
@@ -476,6 +501,10 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
   }
 
   visitLastModifiedByField(field: LastModifiedByFieldCore): IFieldSelectName {
+    if (field.isLookup) {
+      return this.checkAndSelectLookupField(field);
+    }
+
     // Build JSON with user info from system column __last_modified_by
     const alias = this.tableAlias;
     const idRef = alias ? `"${alias}"."__last_modified_by"` : `"__last_modified_by"`;

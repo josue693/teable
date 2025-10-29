@@ -1,12 +1,14 @@
 import type { FieldType } from '../constant';
 import type { IFieldVisitor } from '../field-visitor.interface';
 import { UserAbstractCore } from './abstract/user.field.abstract';
+import type { IFormulaFieldMeta } from './formula-option.schema';
 import type { ILastModifiedByFieldOptions } from './last-modified-by-option.schema';
 import { lastModifiedByFieldOptionsSchema } from './last-modified-by-option.schema';
 
 export class LastModifiedByFieldCore extends UserAbstractCore {
   type!: FieldType.LastModifiedBy;
   options!: ILastModifiedByFieldOptions;
+  declare meta?: IFormulaFieldMeta;
 
   override get isStructuredCellValue() {
     return true;

@@ -4,6 +4,7 @@ import type { FieldType, CellValueType } from '../constant';
 import type { IFieldVisitor } from '../field-visitor.interface';
 import { defaultDatetimeFormatting } from '../formatting';
 import { FormulaAbstractCore } from './abstract/formula.field.abstract';
+import type { IFormulaFieldMeta } from './formula-option.schema';
 import type {
   ILastModifiedTimeFieldOptions,
   ILastModifiedTimeFieldOptionsRo,
@@ -17,7 +18,7 @@ export class LastModifiedTimeFieldCore extends FormulaAbstractCore {
 
   declare options: ILastModifiedTimeFieldOptions;
 
-  meta?: undefined;
+  declare meta?: IFormulaFieldMeta;
 
   declare cellValueType: CellValueType.DateTime;
 

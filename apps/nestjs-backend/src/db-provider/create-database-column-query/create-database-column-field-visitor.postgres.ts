@@ -25,7 +25,12 @@ import type {
 } from '@teable/core';
 import { DbFieldType, Relationship } from '@teable/core';
 import type { Knex } from 'knex';
+import type { AutoNumberFieldDto } from '../../features/field/model/field-dto/auto-number-field.dto';
+import type { CreatedByFieldDto } from '../../features/field/model/field-dto/created-by-field.dto';
+import type { CreatedTimeFieldDto } from '../../features/field/model/field-dto/created-time-field.dto';
 import type { FormulaFieldDto } from '../../features/field/model/field-dto/formula-field.dto';
+import type { LastModifiedByFieldDto } from '../../features/field/model/field-dto/last-modified-by-field.dto';
+import type { LastModifiedTimeFieldDto } from '../../features/field/model/field-dto/last-modified-time-field.dto';
 import type { LinkFieldDto } from '../../features/field/model/field-dto/link-field.dto';
 import { SchemaType } from '../../features/field/util';
 import type { IFormulaConversionContext } from '../../features/record/query-builder/sql-conversion.visitor';
@@ -187,6 +192,9 @@ export class CreatePostgresDatabaseColumnFieldVisitor implements IFieldVisitor<v
       this.context.dbFieldName,
       'INTEGER GENERATED ALWAYS AS (__auto_number) STORED'
     );
+    (this.context.field as AutoNumberFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 
   visitLinkField(field: LinkFieldCore): void {
@@ -371,18 +379,32 @@ export class CreatePostgresDatabaseColumnFieldVisitor implements IFieldVisitor<v
     this.createFormulaColumns(field);
   }
 
-  visitCreatedTimeField(_field: CreatedTimeFieldCore): void {
+  visitCreatedTimeField(field: CreatedTimeFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     this.context.table.specificType(
       this.context.dbFieldName,
       'TIMESTAMP GENERATED ALWAYS AS (__created_time) STORED'
     );
+    (this.context.field as CreatedTimeFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 
-  visitLastModifiedTimeField(_field: LastModifiedTimeFieldCore): void {
+  visitLastModifiedTimeField(field: LastModifiedTimeFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     this.context.table.specificType(
       this.context.dbFieldName,
       'TIMESTAMP GENERATED ALWAYS AS (__last_modified_time) STORED'
     );
+    (this.context.field as LastModifiedTimeFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 
   // User field types
@@ -390,19 +412,33 @@ export class CreatePostgresDatabaseColumnFieldVisitor implements IFieldVisitor<v
     this.createStandardColumn(field);
   }
 
-  visitCreatedByField(_field: CreatedByFieldCore): void {
+  visitCreatedByField(field: CreatedByFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     // Persist as generated column that mirrors __created_by (TEXT)
     this.context.table.specificType(
       this.context.dbFieldName,
       'TEXT GENERATED ALWAYS AS (__created_by) STORED'
     );
+    (this.context.field as CreatedByFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 
-  visitLastModifiedByField(_field: LastModifiedByFieldCore): void {
+  visitLastModifiedByField(field: LastModifiedByFieldCore): void {
+    if (field.isLookup) {
+      this.createStandardColumn(field);
+      return;
+    }
     // Persist as generated column that mirrors __last_modified_by (TEXT)
     this.context.table.specificType(
       this.context.dbFieldName,
       'TEXT GENERATED ALWAYS AS (__last_modified_by) STORED'
     );
+    (this.context.field as LastModifiedByFieldDto).setMetadata({
+      persistedAsGeneratedColumn: true,
+    });
   }
 }

@@ -1,4 +1,5 @@
 import { CreatedTimeFieldCore } from '@teable/core';
+import type { IFormulaFieldMeta } from '@teable/core';
 import type { FieldBase } from '../field-base';
 
 export class CreatedTimeFieldDto extends CreatedTimeFieldCore implements FieldBase {
@@ -21,5 +22,9 @@ export class CreatedTimeFieldDto extends CreatedTimeFieldCore implements FieldBa
       return value.toISOString();
     }
     return value;
+  }
+
+  setMetadata(meta: IFormulaFieldMeta) {
+    this.meta = meta;
   }
 }

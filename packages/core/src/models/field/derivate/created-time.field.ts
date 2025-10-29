@@ -9,6 +9,7 @@ import {
   type ICreatedTimeFieldOptions,
   type ICreatedTimeFieldOptionsRo,
 } from './created-time-option.schema';
+import type { IFormulaFieldMeta } from './formula-option.schema';
 
 extend(timezone);
 
@@ -17,7 +18,7 @@ export class CreatedTimeFieldCore extends FormulaAbstractCore {
 
   declare options: ICreatedTimeFieldOptions;
 
-  meta?: undefined;
+  declare meta?: IFormulaFieldMeta;
 
   declare cellValueType: CellValueType.DateTime;
 

@@ -22,6 +22,13 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
     timeZone,
   });
 
+  const sanitizeTimestampInput = (expr: string) => `NULLIF(BTRIM((${expr})::text), '')`;
+  const tzWrap = (expr: string, timeZone: string) => {
+    const safeTz = timeZone.replace(/'/g, "''");
+    return `(${sanitizeTimestampInput(expr)})::timestamptz AT TIME ZONE '${safeTz}'`;
+  };
+  const localWrap = (expr: string) => `(${sanitizeTimestampInput(expr)})::timestamp`;
+
   it('left casts expressions to text before truncation', () => {
     expect(query.left('raw_expr', '5')).toBe(`LEFT((raw_expr)::text, 5::integer)`);
   });
@@ -38,123 +45,99 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
 
   describe('timezone-aware wrappers', () => {
     let tzQuery: SelectQueryPostgres;
+    const timeZone = 'Asia/Shanghai';
+    const tz = (expr: string) => tzWrap(expr, timeZone);
 
     beforeEach(() => {
       tzQuery = new SelectQueryPostgres();
-      tzQuery.setContext(createTimezoneContext('Asia/Shanghai'));
+      tzQuery.setContext(createTimezoneContext(timeZone));
     });
 
     it('datestr wraps timezone-adjusted expressions before casting', () => {
-      expect(tzQuery.datestr('date_col')).toBe(
-        `((date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::date::text`
-      );
+      expect(tzQuery.datestr('date_col')).toBe(`(${tz('date_col')})::date::text`);
     });
 
     it('timestr wraps timezone-adjusted expressions before casting', () => {
-      expect(tzQuery.timestr('date_col')).toBe(
-        `((date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::time::text`
-      );
+      expect(tzQuery.timestr('date_col')).toBe(`(${tz('date_col')})::time::text`);
     });
 
     it('workday casts after timezone normalization', () => {
       expect(tzQuery.workday('start_col', '5')).toBe(
-        `((start_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::date + INTERVAL '5 days'`
+        `(${tz('start_col')})::date + INTERVAL '5 days'`
       );
     });
 
     it('dateAdd uses timezone-normalized base expression', () => {
       expect(tzQuery.dateAdd('date_col', '2', `'day'`)).toBe(
-        `(date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai' + ((2)) * INTERVAL '1 day'`
+        `${tz('date_col')} + ((2)) * INTERVAL '1 day'`
       );
     });
 
     it('day extracts day after timezone normalization', () => {
-      expect(tzQuery.day('date_col')).toBe(
-        `EXTRACT(DAY FROM (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::int`
-      );
+      expect(tzQuery.day('date_col')).toBe(`EXTRACT(DAY FROM ${tz('date_col')})::int`);
     });
 
     it('datetimeFormat formats timezone-normalized timestamp', () => {
-      expect(tzQuery.datetimeFormat('date_col', `'%Y'`)).toBe(
-        `TO_CHAR((date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai', '%Y')`
-      );
+      expect(tzQuery.datetimeFormat('date_col', `'%Y'`)).toBe(`TO_CHAR(${tz('date_col')}, '%Y')`);
     });
 
     it('isAfter compares timezone-normalized expressions', () => {
-      expect(tzQuery.isAfter('date_a', 'date_b')).toBe(
-        `(date_a)::timestamptz AT TIME ZONE 'Asia/Shanghai' > (date_b)::timestamptz AT TIME ZONE 'Asia/Shanghai'`
-      );
+      expect(tzQuery.isAfter('date_a', 'date_b')).toBe(`${tz('date_a')} > ${tz('date_b')}`);
     });
 
     it('isBefore compares timezone-normalized expressions', () => {
-      expect(tzQuery.isBefore('date_a', 'date_b')).toBe(
-        `(date_a)::timestamptz AT TIME ZONE 'Asia/Shanghai' < (date_b)::timestamptz AT TIME ZONE 'Asia/Shanghai'`
-      );
+      expect(tzQuery.isBefore('date_a', 'date_b')).toBe(`${tz('date_a')} < ${tz('date_b')}`);
     });
 
     it('isSame normalizes unit comparisons after timezone conversion', () => {
       expect(tzQuery.isSame('date_a', 'date_b', `'hour'`)).toBe(
-        `DATE_TRUNC('hour', (date_a)::timestamptz AT TIME ZONE 'Asia/Shanghai') = DATE_TRUNC('hour', (date_b)::timestamptz AT TIME ZONE 'Asia/Shanghai')`
+        `DATE_TRUNC('hour', ${tz('date_a')}) = DATE_TRUNC('hour', ${tz('date_b')})`
       );
     });
 
     it('hour extracts hour after timezone normalization', () => {
-      expect(tzQuery.hour('date_col')).toBe(
-        `EXTRACT(HOUR FROM (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::int`
-      );
+      expect(tzQuery.hour('date_col')).toBe(`EXTRACT(HOUR FROM ${tz('date_col')})::int`);
     });
 
     it('minute extracts minute after timezone normalization', () => {
-      expect(tzQuery.minute('date_col')).toBe(
-        `EXTRACT(MINUTE FROM (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::int`
-      );
+      expect(tzQuery.minute('date_col')).toBe(`EXTRACT(MINUTE FROM ${tz('date_col')})::int`);
     });
 
     it('second extracts second after timezone normalization', () => {
-      expect(tzQuery.second('date_col')).toBe(
-        `EXTRACT(SECOND FROM (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::int`
-      );
+      expect(tzQuery.second('date_col')).toBe(`EXTRACT(SECOND FROM ${tz('date_col')})::int`);
     });
 
     it('month extracts month after timezone normalization', () => {
-      expect(tzQuery.month('date_col')).toBe(
-        `EXTRACT(MONTH FROM (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::int`
-      );
+      expect(tzQuery.month('date_col')).toBe(`EXTRACT(MONTH FROM ${tz('date_col')})::int`);
     });
 
     it('year extracts year after timezone normalization', () => {
-      expect(tzQuery.year('date_col')).toBe(
-        `EXTRACT(YEAR FROM (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::int`
-      );
+      expect(tzQuery.year('date_col')).toBe(`EXTRACT(YEAR FROM ${tz('date_col')})::int`);
     });
 
     it('weekNum extracts week number after timezone normalization', () => {
-      expect(tzQuery.weekNum('date_col')).toBe(
-        `EXTRACT(WEEK FROM (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::int`
-      );
+      expect(tzQuery.weekNum('date_col')).toBe(`EXTRACT(WEEK FROM ${tz('date_col')})::int`);
     });
 
     it('weekday extracts day of week after timezone normalization', () => {
-      expect(tzQuery.weekday('date_col')).toBe(
-        `EXTRACT(DOW FROM (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai')::int`
-      );
+      expect(tzQuery.weekday('date_col')).toBe(`EXTRACT(DOW FROM ${tz('date_col')})::int`);
     });
 
     it('toNow computes epoch difference using timezone context', () => {
       expect(tzQuery.toNow('date_col')).toBe(
-        `EXTRACT(EPOCH FROM ((date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai' - (NOW() AT TIME ZONE 'Asia/Shanghai')))`
+        `EXTRACT(EPOCH FROM (${tz('date_col')} - (NOW() AT TIME ZONE '${timeZone}')))`
       );
     });
 
     it('datetimeDiff subtracts timezone-normalized expressions', () => {
       expect(tzQuery.datetimeDiff('start_col', 'end_col', `'day'`)).toBe(
-        `(EXTRACT(EPOCH FROM ((end_col)::timestamptz AT TIME ZONE 'Asia/Shanghai' - (start_col)::timestamptz AT TIME ZONE 'Asia/Shanghai'))) / 86400`
+        `(EXTRACT(EPOCH FROM (${tz('end_col')} - ${tz('start_col')}))) / 86400`
       );
     });
 
     it('fromNow uses timezone-aware current timestamp', () => {
       expect(tzQuery.fromNow('date_col')).toBe(
-        `EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE 'Asia/Shanghai') - (date_col)::timestamptz AT TIME ZONE 'Asia/Shanghai'))`
+        `EXTRACT(EPOCH FROM ((NOW() AT TIME ZONE '${timeZone}') - ${tz('date_col')}))`
       );
     });
 
@@ -163,7 +146,7 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
       customTzQuery.setContext(createTimezoneContext("America/St_John's"));
 
       expect(customTzQuery.datestr('date_col')).toBe(
-        `((date_col)::timestamptz AT TIME ZONE 'America/St_John''s')::date::text`
+        `(${tzWrap('date_col', "America/St_John's")})::date::text`
       );
     });
   });
@@ -199,88 +182,30 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
   it.each(dateAddCases)('dateAdd normalizes unit "%s" to "%s"', ({ literal, unit, factor }) => {
     const sql = query.dateAdd('date_col', 'count_expr', `'${literal}'`);
     const scaled = factor === 1 ? '(count_expr)' : `(count_expr) * ${factor}`;
-    expect(sql).toBe(`(date_col)::timestamp + (${scaled}) * INTERVAL '1 ${unit}'`);
+    expect(sql).toBe(`${localWrap('date_col')} + (${scaled}) * INTERVAL '1 ${unit}'`);
   });
 
+  const localDiffBase = `(EXTRACT(EPOCH FROM (${localWrap('date_end')} - ${localWrap('date_start')})))`;
   const datetimeDiffCases: Array<{ literal: string; expected: string }> = [
-    {
-      literal: 'millisecond',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) * 1000',
-    },
-    {
-      literal: 'milliseconds',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) * 1000',
-    },
-    {
-      literal: 'ms',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) * 1000',
-    },
-    {
-      literal: 'second',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp)))',
-    },
-    {
-      literal: 'seconds',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp)))',
-    },
-    {
-      literal: 'sec',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp)))',
-    },
-    {
-      literal: 'secs',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp)))',
-    },
-    {
-      literal: 'minute',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 60',
-    },
-    {
-      literal: 'minutes',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 60',
-    },
-    {
-      literal: 'min',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 60',
-    },
-    {
-      literal: 'mins',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 60',
-    },
-    {
-      literal: 'hour',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 3600',
-    },
-    {
-      literal: 'hours',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 3600',
-    },
-    {
-      literal: 'hr',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 3600',
-    },
-    {
-      literal: 'hrs',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 3600',
-    },
-    {
-      literal: 'week',
-      expected:
-        '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / (86400 * 7)',
-    },
-    {
-      literal: 'weeks',
-      expected:
-        '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / (86400 * 7)',
-    },
-    {
-      literal: 'day',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 86400',
-    },
-    {
-      literal: 'days',
-      expected: '(EXTRACT(EPOCH FROM ((date_end)::timestamp - (date_start)::timestamp))) / 86400',
-    },
+    { literal: 'millisecond', expected: `${localDiffBase} * 1000` },
+    { literal: 'milliseconds', expected: `${localDiffBase} * 1000` },
+    { literal: 'ms', expected: `${localDiffBase} * 1000` },
+    { literal: 'second', expected: `${localDiffBase}` },
+    { literal: 'seconds', expected: `${localDiffBase}` },
+    { literal: 'sec', expected: `${localDiffBase}` },
+    { literal: 'secs', expected: `${localDiffBase}` },
+    { literal: 'minute', expected: `${localDiffBase} / 60` },
+    { literal: 'minutes', expected: `${localDiffBase} / 60` },
+    { literal: 'min', expected: `${localDiffBase} / 60` },
+    { literal: 'mins', expected: `${localDiffBase} / 60` },
+    { literal: 'hour', expected: `${localDiffBase} / 3600` },
+    { literal: 'hours', expected: `${localDiffBase} / 3600` },
+    { literal: 'hr', expected: `${localDiffBase} / 3600` },
+    { literal: 'hrs', expected: `${localDiffBase} / 3600` },
+    { literal: 'week', expected: `${localDiffBase} / (86400 * 7)` },
+    { literal: 'weeks', expected: `${localDiffBase} / (86400 * 7)` },
+    { literal: 'day', expected: `${localDiffBase} / 86400` },
+    { literal: 'days', expected: `${localDiffBase} / 86400` },
   ];
 
   it.each(datetimeDiffCases)('datetimeDiff normalizes unit "%s"', ({ literal, expected }) => {
@@ -319,7 +244,7 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
   it.each(isSameCases)('isSame normalizes unit "%s"', ({ literal, expectedUnit }) => {
     const sql = query.isSame('date_a', 'date_b', `'${literal}'`);
     expect(sql).toBe(
-      `DATE_TRUNC('${expectedUnit}', (date_a)::timestamp) = DATE_TRUNC('${expectedUnit}', (date_b)::timestamp)`
+      `DATE_TRUNC('${expectedUnit}', ${localWrap('date_a')}) = DATE_TRUNC('${expectedUnit}', ${localWrap('date_b')})`
     );
   });
 

@@ -1,4 +1,5 @@
 import { LastModifiedTimeFieldCore } from '@teable/core';
+import type { IFormulaFieldMeta } from '@teable/core';
 import type { FieldBase } from '../field-base';
 
 export class LastModifiedTimeFieldDto extends LastModifiedTimeFieldCore implements FieldBase {
@@ -21,5 +22,9 @@ export class LastModifiedTimeFieldDto extends LastModifiedTimeFieldCore implemen
       return value.toISOString();
     }
     return value;
+  }
+
+  setMetadata(meta: IFormulaFieldMeta) {
+    this.meta = meta;
   }
 }

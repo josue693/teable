@@ -1,4 +1,4 @@
-import type { IUserCellValue } from '@teable/core';
+import type { IFormulaFieldMeta, IUserCellValue } from '@teable/core';
 import { CreatedByFieldCore } from '@teable/core';
 import { omit } from 'lodash';
 import type { FieldBase } from '../field-base';
@@ -34,5 +34,9 @@ export class CreatedByFieldDto extends CreatedByFieldCore implements FieldBase {
       transform(value);
     }
     return value;
+  }
+
+  setMetadata(meta: IFormulaFieldMeta) {
+    this.meta = meta;
   }
 }
