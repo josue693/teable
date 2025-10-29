@@ -1882,12 +1882,12 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     const { fkHostTableName, selfKeyName, foreignKeyName, relationship } = options;
 
     // Determine which lookup/rollup fields are actually needed from this link
-    let lookupFields = linkField.getLookupFields(this.table);
-    let rollupFields = linkField.getRollupFields(this.table);
-    if (this.filteredIdSet) {
-      lookupFields = lookupFields.filter((f) => this.filteredIdSet!.has(f.id));
-      rollupFields = rollupFields.filter((f) => this.filteredIdSet!.has(f.id));
-    }
+    // NOTE: We intentionally do not filter by the projection (filteredIdSet). A lookup that
+    // is not part of the direct projection can still be an intermediate dependency for
+    // another lookup/rollup selected via a different table. Filtering here can therefore
+    // omit required CTE columns, leading to generated SQL that references non-existent
+    const lookupFields = linkField.getLookupFields(this.table);
+    const rollupFields = linkField.getRollupFields(this.table);
 
     // Pre-generate nested CTEs limited to selected lookup/rollup dependencies
     this.generateNestedForeignCtesIfNeeded(

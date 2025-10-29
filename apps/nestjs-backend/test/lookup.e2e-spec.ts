@@ -675,6 +675,196 @@ describe('OpenAPI Lookup field (e2e)', () => {
     });
   });
 
+  describe('nested lookup dependencies', () => {
+    let usersTable: ITableFullVo;
+    let projectsTable: ITableFullVo;
+    let tasksTable: ITableFullVo;
+    let userNameField: IFieldVo;
+    let projectNameField: IFieldVo;
+    let taskNameField: IFieldVo;
+    let projectOwnerLookupField: IFieldVo;
+    let taskOwnerLookupField: IFieldVo;
+    let projectLinkFieldId: string;
+    let taskLinkFieldId: string;
+    let userRecordId: string;
+    let projectRecordId: string;
+    let taskRecordId: string;
+
+    const refreshFields = async (table: ITableFullVo) => {
+      table.fields = await getFields(table.id);
+    };
+
+    const getFieldByName = (fields: IFieldVo[], name: string) => {
+      const field = fields.find((f) => f.name === name);
+      if (!field) {
+        throw new Error(`Field ${name} not found`);
+      }
+      return field;
+    };
+
+    beforeAll(async () => {
+      usersTable = await createTable(baseId, {
+        name: 'lookup-nested-users',
+        fields: [
+          {
+            name: 'User Name',
+            type: FieldType.SingleLineText,
+            options: {},
+          },
+        ],
+      });
+
+      projectsTable = await createTable(baseId, {
+        name: 'lookup-nested-projects',
+        fields: [
+          {
+            name: 'Project Name',
+            type: FieldType.SingleLineText,
+            options: {},
+          },
+        ],
+      });
+
+      tasksTable = await createTable(baseId, {
+        name: 'lookup-nested-tasks',
+        fields: [
+          {
+            name: 'Task Name',
+            type: FieldType.SingleLineText,
+            options: {},
+          },
+        ],
+      });
+
+      await refreshFields(usersTable);
+      await refreshFields(projectsTable);
+      await refreshFields(tasksTable);
+
+      userNameField = getFieldByName(usersTable.fields, 'User Name');
+      projectNameField = getFieldByName(projectsTable.fields, 'Project Name');
+      taskNameField = getFieldByName(tasksTable.fields, 'Task Name');
+
+      const projectLinkField = await createField(projectsTable.id, {
+        name: 'Project -> User',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: usersTable.id,
+        },
+      });
+      projectLinkFieldId = projectLinkField.id;
+
+      await refreshFields(projectsTable);
+      await refreshFields(usersTable);
+
+      projectOwnerLookupField = await createField(projectsTable.id, {
+        name: 'Project Owner (lookup)',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: usersTable.id,
+          linkFieldId: projectLinkFieldId,
+          lookupFieldId: userNameField.id,
+        } as ILookupOptionsRo,
+      });
+
+      await refreshFields(projectsTable);
+
+      const taskLinkField = await createField(tasksTable.id, {
+        name: 'Task -> Project',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: projectsTable.id,
+        },
+      });
+      taskLinkFieldId = taskLinkField.id;
+
+      await refreshFields(tasksTable);
+      await refreshFields(projectsTable);
+
+      taskOwnerLookupField = await createField(tasksTable.id, {
+        name: 'Task Project Owner (lookup)',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: projectsTable.id,
+          linkFieldId: taskLinkFieldId,
+          lookupFieldId: projectOwnerLookupField.id,
+        } as ILookupOptionsRo,
+      });
+
+      await refreshFields(tasksTable);
+
+      const createdUsers = await createRecords(usersTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+        records: [
+          {
+            fields: {
+              [userNameField.id]: 'Alice',
+            },
+          },
+        ],
+      });
+      userRecordId = createdUsers.records[0].id;
+
+      const createdProjects = await createRecords(projectsTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+        records: [
+          {
+            fields: {
+              [projectNameField.id]: 'Project Alpha',
+            },
+          },
+        ],
+      });
+      projectRecordId = createdProjects.records[0].id;
+
+      await updateRecordByApi(projectsTable.id, projectRecordId, projectLinkFieldId, {
+        id: userRecordId,
+      });
+
+      const createdTasks = await createRecords(tasksTable.id, {
+        fieldKeyType: FieldKeyType.Id,
+        records: [
+          {
+            fields: {
+              [taskNameField.id]: 'Task 1',
+            },
+          },
+        ],
+      });
+      taskRecordId = createdTasks.records[0].id;
+
+      await updateRecordByApi(tasksTable.id, taskRecordId, taskLinkFieldId, {
+        id: projectRecordId,
+      });
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, tasksTable.id);
+      await permanentDeleteTable(baseId, projectsTable.id);
+      await permanentDeleteTable(baseId, usersTable.id);
+    });
+
+    it('should recompute nested lookup values after relinking', async () => {
+      let taskRecord = await getRecord(tasksTable.id, taskRecordId);
+      expect(taskRecord.fields[taskOwnerLookupField.id]).toEqual('Alice');
+
+      await updateRecordByApi(tasksTable.id, taskRecordId, taskLinkFieldId, null);
+
+      taskRecord = await getRecord(tasksTable.id, taskRecordId);
+      expect(taskRecord.fields[taskOwnerLookupField.id]).toBeUndefined();
+
+      await updateRecordByApi(tasksTable.id, taskRecordId, taskLinkFieldId, {
+        id: projectRecordId,
+      });
+
+      taskRecord = await getRecord(tasksTable.id, taskRecordId);
+      expect(taskRecord.fields[taskOwnerLookupField.id]).toEqual('Alice');
+    });
+  });
+
   describe('lookup filter', () => {
     let table1: ITableFullVo;
     let table2: ITableFullVo;
