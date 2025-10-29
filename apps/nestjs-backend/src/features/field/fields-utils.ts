@@ -1,4 +1,12 @@
-import { FieldKeyType, type IFieldVo, type IGetFieldsQuery, type IViewVo } from '@teable/core';
+import { FieldKeyType, FieldType } from '@teable/core';
+import type {
+  CreatedByFieldCore,
+  FieldCore,
+  LastModifiedByFieldCore,
+  IFieldVo,
+  IGetFieldsQuery,
+  IViewVo,
+} from '@teable/core';
 import { sortBy } from 'lodash';
 import { isNotHiddenField } from '../../utils/is-not-hidden-field';
 
@@ -60,3 +68,9 @@ export const filterFieldsByView = (
   }
   return result;
 };
+
+export function isSystemUserField(
+  field: FieldCore
+): field is CreatedByFieldCore | LastModifiedByFieldCore {
+  return field.type === FieldType.CreatedBy || field.type === FieldType.LastModifiedBy;
+}

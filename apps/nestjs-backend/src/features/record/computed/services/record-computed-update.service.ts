@@ -63,6 +63,14 @@ export class RecordComputedUpdateService {
       f.type === FieldType.Formula;
     const cols: string[] = [];
     for (const f of fields) {
+      if (
+        f.type === FieldType.CreatedBy ||
+        f.type === FieldType.LastModifiedBy ||
+        f.type === FieldType.CreatedTime ||
+        f.type === FieldType.LastModifiedTime
+      ) {
+        continue;
+      }
       if (isFormulaField(f)) {
         // Lookup-formula fields are persisted as regular columns on the host table
         // and must be included in the RETURNING list by their dbFieldName.
