@@ -66,7 +66,9 @@ export async function setUpAppMiddleware(app: INestApplication, configService: C
 }
 
 export async function bootstrap() {
-  otelSDK.start();
+  if (!process.env.BACKEND_SENTRY_DSN) {
+    otelSDK.start();
+  }
 
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   const configService = app.get(ConfigService);
