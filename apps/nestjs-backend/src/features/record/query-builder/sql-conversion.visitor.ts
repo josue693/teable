@@ -1350,6 +1350,22 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
           selectionSql = `"${fieldInfo.dbFieldName}"`;
         }
       }
+
+      if (preferRaw && selectContext.targetDbFieldType === DbFieldType.Json) {
+        if (fieldInfo.isMultipleCellValue) {
+          return this.dialect!.linkExtractTitles(selectionSql, true);
+        }
+        // For single-value formulas targeting json columns, wrap scalar title as json
+        const titleExpr = this.dialect!.jsonTitleFromExpr(selectionSql);
+        if (this.dialect!.driver === DriverClient.Pg) {
+          return `to_jsonb(${titleExpr})`;
+        }
+        if (this.dialect!.driver === DriverClient.Sqlite) {
+          return `json(${titleExpr})`;
+        }
+        return titleExpr;
+      }
+
       return this.dialect!.jsonTitleFromExpr(selectionSql);
     }
 
