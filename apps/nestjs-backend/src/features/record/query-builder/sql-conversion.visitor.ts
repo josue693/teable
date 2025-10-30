@@ -1312,9 +1312,13 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
           ? `rollup_${fieldInfo.id}`
           : undefined;
       if (columnName) {
-        const columnRef = `"${cteName}"."${columnName}"`;
+        let columnRef = `"${cteName}"."${columnName}"`;
         if (preferRaw && fieldInfo.type !== FieldType.Link) {
-          return this.coerceRawMultiValueReference(columnRef, fieldInfo, selectContext);
+          const adjusted = this.coerceRawMultiValueReference(columnRef, fieldInfo, selectContext);
+          if (selectContext.targetDbFieldType === DbFieldType.Json) {
+            return adjusted;
+          }
+          columnRef = adjusted;
         }
         if (fieldInfo.isLookup && isLinkLookupOptions(fieldInfo.lookupOptions)) {
           if (fieldInfo.dbFieldType !== DbFieldType.Json) {
