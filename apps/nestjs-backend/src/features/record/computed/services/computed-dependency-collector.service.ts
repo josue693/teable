@@ -832,6 +832,38 @@ export class ComputedDependencyCollectorService {
       }).fieldIds.add(fieldId);
     }
 
+    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(startFieldIds);
+    const fallbackLookupIds = new Set<string>();
+    if (relatedLinkIds.length) {
+      const byTable = await this.findLookupsByLinkIds(relatedLinkIds);
+      for (const [tid, fset] of Object.entries(byTable)) {
+        const group = (impact[tid] ||= {
+          fieldIds: new Set<string>(),
+          recordIds: new Set<string>(),
+        });
+        fset.forEach((fid) => {
+          if (!group.fieldIds.has(fid)) {
+            group.fieldIds.add(fid);
+            fallbackLookupIds.add(fid);
+          }
+        });
+      }
+    }
+
+    if (fallbackLookupIds.size) {
+      // Legacy compatibility: pre-link reference rows created before lookupOptions.linkFieldId
+      // existed do not include the link→lookup edge. We need to synthesize those missing
+      // dependencies so downstream lookups/formulas still recompute.
+      const extraDeps = await this.collectDependentFieldsByTable(Array.from(fallbackLookupIds));
+      for (const [tid, fset] of Object.entries(extraDeps)) {
+        const group = (impact[tid] ||= {
+          fieldIds: new Set<string>(),
+          recordIds: new Set<string>(),
+        });
+        fset.forEach((fid) => group.fieldIds.add(fid));
+      }
+    }
+
     if (!Object.keys(impact).length) return {};
 
     // 2) Seed recordIds for origin tables with ALL record ids
@@ -1015,9 +1047,31 @@ export class ComputedDependencyCollectorService {
 
     // Additionally: include lookup/rollup fields that directly reference any changed link fields
     // (or their symmetric counterparts). This ensures cross-table lookups update when links change.
+    const fallbackLookupIds = new Set<string>();
     if (relatedLinkIds.length) {
       const byTable = await this.findLookupsByLinkIds(relatedLinkIds);
       for (const [tid, fset] of Object.entries(byTable)) {
+        const group = (impact[tid] ||= {
+          fieldIds: new Set<string>(),
+          recordIds: new Set<string>(),
+        });
+        fset.forEach((fid) => {
+          if (!group.fieldIds.has(fid)) {
+            group.fieldIds.add(fid);
+            fallbackLookupIds.add(fid);
+          }
+        });
+      }
+    }
+
+    if (fallbackLookupIds.size) {
+      // Legacy compatibility: some lookup records were created when linkFieldId was
+      // not persisted in reference graph, so we back-fill their dependents via traversal.
+      const extraDeps = await this.collectDependentFieldsByTable(
+        Array.from(fallbackLookupIds),
+        excludeFieldIds
+      );
+      for (const [tid, fset] of Object.entries(extraDeps)) {
         const group = (impact[tid] ||= {
           fieldIds: new Set<string>(),
           recordIds: new Set<string>(),
