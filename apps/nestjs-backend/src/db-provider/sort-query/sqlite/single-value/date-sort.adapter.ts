@@ -6,6 +6,9 @@ import { SortFunctionSqlite } from '../sort-query.function';
 
 export class DateSortAdapter extends SortFunctionSqlite {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { options } = this.field;
     const { date, time, timeZone } = (options as IDateFieldOptions).formatting;
     const formatString = getSqliteDateTimeFormatString(date as DateFormattingPreset, time);
@@ -24,6 +27,9 @@ export class DateSortAdapter extends SortFunctionSqlite {
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { options } = this.field;
     const { date, time, timeZone } = (options as IDateFieldOptions).formatting;
     const formatString = getSqliteDateTimeFormatString(date as DateFormattingPreset, time);
@@ -42,6 +48,9 @@ export class DateSortAdapter extends SortFunctionSqlite {
   }
 
   getAscSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { options } = this.field;
     const { date, time, timeZone } = (options as IDateFieldOptions).formatting;
     const formatString = getSqliteDateTimeFormatString(date as DateFormattingPreset, time);
@@ -60,6 +69,9 @@ export class DateSortAdapter extends SortFunctionSqlite {
   }
 
   getDescSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { options } = this.field;
     const { date, time, timeZone } = (options as IDateFieldOptions).formatting;
     const formatString = getSqliteDateTimeFormatString(date as DateFormattingPreset, time);

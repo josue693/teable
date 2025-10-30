@@ -4,6 +4,9 @@ import { SortFunctionPostgres } from '../sort-query.function';
 
 export class MultipleNumberSortAdapter extends SortFunctionPostgres {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { options } = this.field;
     const { precision } = (options as INumberFieldOptions).formatting;
 
@@ -23,6 +26,9 @@ export class MultipleNumberSortAdapter extends SortFunctionPostgres {
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { options } = this.field;
     const { precision } = (options as INumberFieldOptions).formatting;
 
@@ -42,6 +48,9 @@ export class MultipleNumberSortAdapter extends SortFunctionPostgres {
   }
 
   getAscSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { options } = this.field;
     const { precision } = (options as INumberFieldOptions).formatting;
 
@@ -61,6 +70,9 @@ export class MultipleNumberSortAdapter extends SortFunctionPostgres {
   }
 
   getDescSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { options } = this.field;
     const { precision } = (options as INumberFieldOptions).formatting;
 

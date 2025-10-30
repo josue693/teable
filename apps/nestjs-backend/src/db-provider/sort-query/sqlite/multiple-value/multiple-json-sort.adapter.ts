@@ -3,6 +3,9 @@ import { SortFunctionSqlite } from '../sort-query.function';
 
 export class MultipleJsonSortAdapter extends SortFunctionSqlite {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     builderClient.orderByRaw(
       `
       json_extract(${this.columnName}, '$[0]') ASC NULLS FIRST,
@@ -13,6 +16,9 @@ export class MultipleJsonSortAdapter extends SortFunctionSqlite {
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     builderClient.orderByRaw(
       `
       json_extract(${this.columnName}, '$[0]') DESC NULLS LAST,
@@ -23,6 +29,9 @@ export class MultipleJsonSortAdapter extends SortFunctionSqlite {
   }
 
   getAscSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     return this.knex
       .raw(
         `
@@ -34,6 +43,9 @@ export class MultipleJsonSortAdapter extends SortFunctionSqlite {
   }
 
   getDescSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     return this.knex
       .raw(
         `

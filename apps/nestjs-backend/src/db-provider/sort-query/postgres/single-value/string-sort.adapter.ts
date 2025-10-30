@@ -5,6 +5,9 @@ import { SortFunctionPostgres } from '../sort-query.function';
 
 export class StringSortAdapter extends SortFunctionPostgres {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { type, options } = this.field;
 
     if (type !== FieldType.SingleSelect) {
@@ -24,6 +27,9 @@ export class StringSortAdapter extends SortFunctionPostgres {
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { type, options } = this.field;
 
     if (type !== FieldType.SingleSelect) {
@@ -48,6 +54,9 @@ export class StringSortAdapter extends SortFunctionPostgres {
     if (type !== FieldType.SingleSelect) {
       return super.getAscSQL();
     }
+    if (!this.columnName) {
+      return undefined;
+    }
 
     const { choices } = options as ISelectFieldOptions;
 
@@ -65,6 +74,9 @@ export class StringSortAdapter extends SortFunctionPostgres {
 
     if (type !== FieldType.SingleSelect) {
       return super.getDescSQL();
+    }
+    if (!this.columnName) {
+      return undefined;
     }
 
     const { choices } = options as ISelectFieldOptions;

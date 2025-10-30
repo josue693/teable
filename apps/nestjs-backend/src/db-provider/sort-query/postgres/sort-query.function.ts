@@ -4,6 +4,9 @@ import { AbstractSortFunction } from '../function/sort-function.abstract';
 
 export class SortFunctionPostgres extends AbstractSortFunction {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { dbFieldType } = this.field;
 
     builderClient.orderByRaw(
@@ -13,6 +16,9 @@ export class SortFunctionPostgres extends AbstractSortFunction {
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { dbFieldType } = this.field;
 
     builderClient.orderByRaw(
@@ -22,6 +28,9 @@ export class SortFunctionPostgres extends AbstractSortFunction {
   }
 
   getAscSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { dbFieldType } = this.field;
 
     return this.knex
@@ -32,6 +41,9 @@ export class SortFunctionPostgres extends AbstractSortFunction {
   }
 
   getDescSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { dbFieldType } = this.field;
 
     return this.knex

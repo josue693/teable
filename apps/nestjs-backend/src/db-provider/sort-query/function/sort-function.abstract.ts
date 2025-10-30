@@ -6,7 +6,7 @@ import type { IRecordQuerySortContext } from '../../../features/record/query-bui
 import type { ISortFunctionInterface } from './sort-function.interface';
 
 export abstract class AbstractSortFunction implements ISortFunctionInterface {
-  protected columnName: string;
+  protected columnName?: string;
 
   constructor(
     protected readonly knex: Knex,
@@ -16,11 +16,18 @@ export abstract class AbstractSortFunction implements ISortFunctionInterface {
     const { dbFieldName, id } = field;
 
     const selection = context?.selectionMap.get(id);
-    if (selection !== undefined && selection !== null) {
-      this.columnName = this.normalizeSelection(selection) ?? this.quoteIdentifier(dbFieldName);
-    } else {
-      this.columnName = this.quoteIdentifier(dbFieldName);
+    const normalizedSelection =
+      selection !== undefined && selection !== null ? this.normalizeSelection(selection) : undefined;
+    if (this.isNullConstant(normalizedSelection)) {
+      this.columnName = undefined;
+      return;
     }
+    if (normalizedSelection) {
+      this.columnName = normalizedSelection;
+      return;
+    }
+    const quotedIdentifier = this.quoteIdentifier(dbFieldName);
+    this.columnName = this.isNullConstant(quotedIdentifier) ? undefined : quotedIdentifier;
   }
 
   compiler(builderClient: Knex.QueryBuilder, sortFunc: SortFunc) {
@@ -37,7 +44,7 @@ export abstract class AbstractSortFunction implements ISortFunctionInterface {
     return chosenHandler(builderClient);
   }
 
-  generateSQL(sortFunc: SortFunc) {
+  generateSQL(sortFunc: SortFunc): string | undefined {
     const functionHandlers = {
       [SortFunc.Asc]: this.getAscSQL,
       [SortFunc.Desc]: this.getDescSQL,
@@ -52,20 +59,32 @@ export abstract class AbstractSortFunction implements ISortFunctionInterface {
   }
 
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     builderClient.orderByRaw(`${this.columnName} ASC NULLS FIRST`);
     return builderClient;
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     builderClient.orderByRaw(`${this.columnName} DESC NULLS LAST`);
     return builderClient;
   }
 
   getAscSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     return this.knex.raw(`${this.columnName} ASC NULLS FIRST`).toQuery();
   }
 
   getDescSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     return this.knex.raw(`${this.columnName} DESC NULLS LAST`).toQuery();
   }
 
@@ -98,5 +117,16 @@ export abstract class AbstractSortFunction implements ISortFunctionInterface {
     }
     const escaped = identifier.replace(/"/g, '""');
     return `"${escaped}"`;
+  }
+
+  private isNullConstant(selection?: string): boolean {
+    if (!selection) {
+      return false;
+    }
+    const trimmed = selection.trim().toUpperCase();
+    if (trimmed === 'NULL') {
+      return true;
+    }
+    return trimmed.startsWith('NULL::');
   }
 }

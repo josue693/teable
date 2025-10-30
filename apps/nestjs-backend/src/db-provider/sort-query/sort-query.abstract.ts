@@ -32,16 +32,22 @@ export abstract class AbstractSortQuery implements ISortQueryInterface {
     if (!sortObjs?.length) {
       return defaultSortSql;
     }
-    let sortSQLText = sortObjs
+    const sortClauses = sortObjs
       .map(({ fieldId, order }) => {
-        const field = (this.fields && this.fields[fieldId]) as FieldCore;
-
+        const field = this.fields && this.fields[fieldId];
+        if (!field) {
+          return undefined;
+        }
         return this.getSortAdapter(field).generateSQL(order);
       })
-      .join();
+      .filter((clause): clause is string => typeof clause === 'string' && clause.length > 0);
 
-    sortSQLText += `, ${defaultSortSql}`;
-    return sortSQLText;
+    if (!sortClauses.length) {
+      return defaultSortSql;
+    }
+
+    sortClauses.push(defaultSortSql);
+    return sortClauses.join(', ');
   }
 
   private parseSorts(queryBuilder: Knex.QueryBuilder, sortObjs?: ISortItem[]): Knex.QueryBuilder {
