@@ -17,7 +17,9 @@ export abstract class AbstractSortFunction implements ISortFunctionInterface {
 
     const selection = context?.selectionMap.get(id);
     const normalizedSelection =
-      selection !== undefined && selection !== null ? this.normalizeSelection(selection) : undefined;
+      selection !== undefined && selection !== null
+        ? this.normalizeSelection(selection)
+        : undefined;
     if (this.isNullConstant(normalizedSelection)) {
       this.columnName = undefined;
       return;

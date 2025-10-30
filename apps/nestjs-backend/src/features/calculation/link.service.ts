@@ -1679,14 +1679,54 @@ export class LinkService {
 
     const referenceFieldIds = references.map((ref) => ref.toFieldId);
 
-    return await this.prismaService.txClient().field.findMany({
-      where: {
-        id: { in: referenceFieldIds },
-        type: FieldType.Link,
-        isLookup: null,
-        deletedTime: null,
-      },
+    const relatedFieldsByReference = referenceFieldIds.length
+      ? await this.prismaService.txClient().field.findMany({
+          where: {
+            id: { in: referenceFieldIds },
+            type: FieldType.Link,
+            isLookup: null,
+            deletedTime: null,
+          },
+        })
+      : [];
+
+    // Fallback: reference graph might be missing for legacy data, so look for link fields whose
+    // options still point to this table as their foreign target.
+    const knownFieldIds = new Set(relatedFieldsByReference.map((field) => field.id));
+
+    const relatedFieldsByForeignTable = (
+      await this.prismaService.txClient().field.findMany({
+        where: {
+          type: FieldType.Link,
+          isLookup: null,
+          deletedTime: null,
+        },
+      })
+    ).filter((field) => {
+      if (knownFieldIds.has(field.id)) {
+        return false;
+      }
+      if (!field.options) {
+        return false;
+      }
+      try {
+        const options = JSON.parse(field.options as string) as ILinkFieldOptions;
+        return options.foreignTableId === tableId;
+      } catch (error) {
+        this.logger.warn(
+          `Failed to parse link field options for ${field.id} while resolving delete context: ${String(
+            error
+          )}`
+        );
+        return false;
+      }
     });
+
+    const merged = new Map<string, Field>();
+    relatedFieldsByReference.forEach((field) => merged.set(field.id, field));
+    relatedFieldsByForeignTable.forEach((field) => merged.set(field.id, field));
+
+    return Array.from(merged.values());
   }
 
   async getDeleteRecordUpdateContext(tableId: string, records: IRecord[]) {
