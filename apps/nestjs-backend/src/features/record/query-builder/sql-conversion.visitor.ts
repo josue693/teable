@@ -1370,9 +1370,20 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
     }
 
     if (selectionSql) {
+      const normalizedSelection = this.normalizeLookupSelection(
+        selectionSql,
+        fieldInfo,
+        selectContext
+      );
+
+      if (normalizedSelection !== selectionSql) {
+        return normalizedSelection;
+      }
+
       if (preferRaw) {
         return this.coerceRawMultiValueReference(selectionSql, fieldInfo, selectContext);
       }
+
       return selectionSql;
     }
     // Use table alias if provided in context
@@ -1387,6 +1398,49 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
     return preferRaw
       ? this.coerceRawMultiValueReference(fallbackExpr, fieldInfo, selectContext)
       : fallbackExpr;
+  }
+
+  private normalizeLookupSelection(
+    expr: string,
+    fieldInfo: FieldCore,
+    selectContext: ISelectFormulaConversionContext
+  ): string {
+    if (!expr) {
+      return expr;
+    }
+
+    const dialect = this.dialect;
+    if (!dialect) {
+      return expr;
+    }
+
+    if (
+      !fieldInfo.isLookup ||
+      !fieldInfo.lookupOptions ||
+      !isLinkLookupOptions(fieldInfo.lookupOptions)
+    ) {
+      return expr;
+    }
+
+    const preferRaw = !!selectContext.preferRawFieldReferences;
+    if (preferRaw && selectContext.targetDbFieldType === DbFieldType.Json) {
+      return expr;
+    }
+
+    const trimmed = expr.trim();
+    if (!trimmed || trimmed.toUpperCase() === 'NULL') {
+      return expr;
+    }
+
+    if (fieldInfo.dbFieldType !== DbFieldType.Json) {
+      return expr;
+    }
+
+    const titlesExpr = dialect.linkExtractTitles(expr, !!fieldInfo.isMultipleCellValue);
+    if (fieldInfo.isMultipleCellValue) {
+      return dialect.formatStringArray(titlesExpr);
+    }
+    return titlesExpr;
   }
 
   private coerceRawMultiValueReference(
