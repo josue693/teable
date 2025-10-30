@@ -223,7 +223,8 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   private sanitizeTimestampInput(date: string): string {
-    return `NULLIF(BTRIM((${date})::text), '')`;
+    const trimmed = `NULLIF(BTRIM((${date})::text), '')`;
+    return `CASE WHEN ${trimmed} IS NULL THEN NULL WHEN LOWER(${trimmed}) IN ('null', 'undefined') THEN NULL ELSE ${trimmed} END`;
   }
 
   private tzWrap(date: string): string {

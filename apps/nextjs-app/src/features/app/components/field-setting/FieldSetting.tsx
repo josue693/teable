@@ -288,9 +288,12 @@ const FieldSettingBase = (props: IFieldSettingBase) => {
 
   const onFieldEditorChange = useCallback(
     (nextField: IFieldEditorRo) => {
+      const sanitizedLookupOptions = sanitizeLookupOptions(nextField.lookupOptions);
       const normalizedField: IFieldEditorRo = {
         ...nextField,
-        lookupOptions: sanitizeLookupOptions(nextField.lookupOptions),
+        lookupOptions:
+          sanitizedLookupOptions ??
+          (nextField.isConditionalLookup ? nextField.lookupOptions : undefined),
       };
       setField(normalizedField);
       setUpdateCount(1);
@@ -313,13 +316,18 @@ const FieldSettingBase = (props: IFieldSettingBase) => {
       return;
     }
 
+    const normalizedField: IFieldEditorRo = {
+      ...field,
+      lookupOptions: sanitizeLookupOptions(field.lookupOptions),
+    };
+
     const validateRes = validateFieldOptions({
-      type: field.type as FieldType,
-      isLookup: field.isLookup,
-      isConditionalLookup: field.isConditionalLookup,
-      lookupOptions: field.lookupOptions,
-      options: field.options,
-      aiConfig: field.aiConfig,
+      type: normalizedField.type as FieldType,
+      isLookup: normalizedField.isLookup,
+      isConditionalLookup: normalizedField.isConditionalLookup,
+      lookupOptions: normalizedField.lookupOptions,
+      options: normalizedField.options,
+      aiConfig: normalizedField.aiConfig,
     });
     if (validateRes.length > 0) {
       toast.error(
@@ -333,7 +341,7 @@ const FieldSettingBase = (props: IFieldSettingBase) => {
 
     const fieldRoSchema =
       operator === FieldOperator.Edit ? convertFieldRoSchema : createFieldRoSchema;
-    const result = fieldRoSchema.safeParse(field);
+    const result = fieldRoSchema.safeParse(normalizedField);
     if (result.success) {
       setIsSaving(true);
       try {
@@ -344,7 +352,7 @@ const FieldSettingBase = (props: IFieldSettingBase) => {
       return;
     }
 
-    console.error('fieldConFirm', field);
+    console.error('fieldConFirm', normalizedField);
     console.error('fieldConFirmResult', fromZodError(result.error).message);
     const errorMessage = fromZodError(result.error).message;
     toast.error(`Validation Error`, {

@@ -1,6 +1,6 @@
 /* eslint-disable sonarjs/cognitive-complexity */
 /* eslint-disable sonarjs/no-duplicate-string */
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { ILinkCellValue, ILinkFieldOptions, IRecord } from '@teable/core';
 import { FieldType, HttpErrorCode, Relationship } from '@teable/core';
 import type { Field } from '@teable/db-main-prisma';
@@ -52,6 +52,7 @@ export interface ILinkCellContext {
 
 @Injectable()
 export class LinkService {
+  private logger = new Logger(LinkService.name);
   constructor(
     private readonly prismaService: PrismaService,
     private readonly batchService: BatchService,
@@ -826,6 +827,7 @@ export class LinkService {
       );
 
       const nativeQuery = qb.whereIn('__id', recordIds).toQuery();
+      this.logger.debug(`Fetch records with query: ${nativeQuery}`);
       const recordRaw = await this.prismaService
         .txClient()
         .$queryRawUnsafe<{ [dbTableName: string]: unknown }[]>(nativeQuery);
@@ -1361,32 +1363,26 @@ export class LinkService {
               );
             }
           } else {
-            // One-many without order column implies one-way using a junction table.
-            // To preserve the explicit order provided by the client (e.g., typecast "id1,id2"),
-            // delete all existing rows for this source record and re-insert in the new order.
-            const oldArr = oldKey ?? [];
-            const newArr = newKey ?? [];
+            // One-many without an order column stores the FK directly on the foreign table.
+            // Only update rows where the foreign key actually changes.
+            const toAdd = difference(newKey, oldKey);
 
-            const needsReorder =
-              oldArr.length !== newArr.length || !oldArr.every((key, i) => key === newArr[i]);
+            if (toAdd.length > 0) {
+              const dbFields = [{ dbFieldName: selfKeyName, schemaType: SchemaType.String }];
 
-            if (needsReorder) {
-              // Delete all existing associations for this source record
-              const deleteAllQuery = this.knex(fkHostTableName)
-                .where(selfKeyName, recordId)
-                .delete()
-                .toQuery();
-              await this.prismaService.txClient().$executeRawUnsafe(deleteAllQuery);
-
-              // Re-insert in the specified order
-              if (newArr.length) {
-                const insertValues = newArr.map((foreignRecordId) => ({
+              const addData = toAdd.map((foreignRecordId) => ({
+                id: foreignRecordId,
+                values: {
                   [selfKeyName]: recordId,
-                  [foreignKeyName]: foreignRecordId,
-                }));
-                const insertQuery = this.knex(fkHostTableName).insert(insertValues).toQuery();
-                await this.prismaService.txClient().$executeRawUnsafe(insertQuery);
-              }
+                },
+              }));
+
+              await this.batchService.batchUpdateDB(
+                fkHostTableName,
+                foreignKeyName,
+                dbFields,
+                addData
+              );
             }
           }
         }
@@ -1683,14 +1679,54 @@ export class LinkService {
 
     const referenceFieldIds = references.map((ref) => ref.toFieldId);
 
-    return await this.prismaService.txClient().field.findMany({
-      where: {
-        id: { in: referenceFieldIds },
-        type: FieldType.Link,
-        isLookup: null,
-        deletedTime: null,
-      },
+    const relatedFieldsByReference = referenceFieldIds.length
+      ? await this.prismaService.txClient().field.findMany({
+          where: {
+            id: { in: referenceFieldIds },
+            type: FieldType.Link,
+            isLookup: null,
+            deletedTime: null,
+          },
+        })
+      : [];
+
+    // Fallback: reference graph might be missing for legacy data, so look for link fields whose
+    // options still point to this table as their foreign target.
+    const knownFieldIds = new Set(relatedFieldsByReference.map((field) => field.id));
+
+    const relatedFieldsByForeignTable = (
+      await this.prismaService.txClient().field.findMany({
+        where: {
+          type: FieldType.Link,
+          isLookup: null,
+          deletedTime: null,
+        },
+      })
+    ).filter((field) => {
+      if (knownFieldIds.has(field.id)) {
+        return false;
+      }
+      if (!field.options) {
+        return false;
+      }
+      try {
+        const options = JSON.parse(field.options as string) as ILinkFieldOptions;
+        return options.foreignTableId === tableId;
+      } catch (error) {
+        this.logger.warn(
+          `Failed to parse link field options for ${field.id} while resolving delete context: ${String(
+            error
+          )}`
+        );
+        return false;
+      }
     });
+
+    const merged = new Map<string, Field>();
+    relatedFieldsByReference.forEach((field) => merged.set(field.id, field));
+    relatedFieldsByForeignTable.forEach((field) => merged.set(field.id, field));
+
+    return Array.from(merged.values());
   }
 
   async getDeleteRecordUpdateContext(tableId: string, records: IRecord[]) {

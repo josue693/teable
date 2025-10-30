@@ -22,7 +22,10 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
     timeZone,
   });
 
-  const sanitizeTimestampInput = (expr: string) => `NULLIF(BTRIM((${expr})::text), '')`;
+  const sanitizeTimestampInput = (expr: string) => {
+    const trimmed = `NULLIF(BTRIM((${expr})::text), '')`;
+    return `CASE WHEN ${trimmed} IS NULL THEN NULL WHEN LOWER(${trimmed}) IN ('null', 'undefined') THEN NULL ELSE ${trimmed} END`;
+  };
   const tzWrap = (expr: string, timeZone: string) => {
     const safeTz = timeZone.replace(/'/g, "''");
     return `(${sanitizeTimestampInput(expr)})::timestamptz AT TIME ZONE '${safeTz}'`;

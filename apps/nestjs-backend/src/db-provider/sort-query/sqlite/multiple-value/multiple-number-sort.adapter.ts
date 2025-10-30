@@ -4,6 +4,9 @@ import { SortFunctionSqlite } from '../sort-query.function';
 
 export class MultipleNumberSortAdapter extends SortFunctionSqlite {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { options } = this.field;
     const { precision } = (options as INumberFieldOptions).formatting;
     const orderByColumn = this.knex.raw(
@@ -20,6 +23,9 @@ export class MultipleNumberSortAdapter extends SortFunctionSqlite {
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { options } = this.field;
     const { precision } = (options as INumberFieldOptions).formatting;
     const orderByColumn = this.knex.raw(
@@ -36,6 +42,9 @@ export class MultipleNumberSortAdapter extends SortFunctionSqlite {
   }
 
   getAscSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { options } = this.field;
     const { precision } = (options as INumberFieldOptions).formatting;
     return this.knex
@@ -52,6 +61,9 @@ export class MultipleNumberSortAdapter extends SortFunctionSqlite {
   }
 
   getDescSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { options } = this.field;
     const { precision } = (options as INumberFieldOptions).formatting;
     return this.knex

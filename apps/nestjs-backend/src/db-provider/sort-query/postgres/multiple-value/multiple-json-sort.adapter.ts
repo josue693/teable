@@ -4,6 +4,9 @@ import { SortFunctionPostgres } from '../sort-query.function';
 
 export class MultipleJsonSortAdapter extends SortFunctionPostgres {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { type } = this.field;
 
     if (isUserOrLink(type)) {
@@ -19,6 +22,9 @@ export class MultipleJsonSortAdapter extends SortFunctionPostgres {
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { type } = this.field;
 
     if (isUserOrLink(type)) {
@@ -34,6 +40,9 @@ export class MultipleJsonSortAdapter extends SortFunctionPostgres {
   }
 
   getAscSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { type } = this.field;
 
     if (isUserOrLink(type)) {
@@ -52,6 +61,9 @@ export class MultipleJsonSortAdapter extends SortFunctionPostgres {
   }
 
   getDescSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { type } = this.field;
 
     if (isUserOrLink(type)) {

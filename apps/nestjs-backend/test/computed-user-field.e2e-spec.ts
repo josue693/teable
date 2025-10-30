@@ -221,6 +221,46 @@ describe('Computed user field (e2e)', () => {
         updatedRecord.data.lastModifiedTime
       );
     });
+
+    it('should persist multi-user formula values via computed updates', async () => {
+      const userField = await createField(table1.id, {
+        type: FieldType.User,
+        options: {
+          isMultiple: true,
+          shouldNotify: false,
+        },
+      });
+
+      const formulaField = await createField(table1.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${userField.id}}`,
+        },
+      });
+
+      expect(formulaField.isMultipleCellValue).toBe(true);
+
+      const recordId = table1.records[0].id;
+
+      await updateRecord(table1.id, recordId, {
+        record: {
+          fields: {
+            [userField.id]: [globalThis.testConfig.userId],
+          },
+        },
+        fieldKeyType: FieldKeyType.Id,
+        typecast: true,
+      });
+
+      const updatedRecord = await getRecord(table1.id, recordId, {
+        fieldKeyType: FieldKeyType.Id,
+      });
+
+      expect(updatedRecord.data.fields[userField.id]).toEqual([
+        expect.objectContaining({ title: globalThis.testConfig.userName }),
+      ]);
+      expect(updatedRecord.data.fields[formulaField.id]).toContain(globalThis.testConfig.userName);
+    });
   });
 
   describe('rename', () => {

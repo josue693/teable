@@ -4,6 +4,9 @@ import { SortFunctionSqlite } from '../sort-query.function';
 
 export class JsonSortAdapter extends SortFunctionSqlite {
   asc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { type } = this.field;
 
     if (isUserOrLink(type)) {
@@ -15,6 +18,9 @@ export class JsonSortAdapter extends SortFunctionSqlite {
   }
 
   desc(builderClient: Knex.QueryBuilder): Knex.QueryBuilder {
+    if (!this.columnName) {
+      return builderClient;
+    }
     const { type } = this.field;
 
     if (isUserOrLink(type)) {
@@ -26,6 +32,9 @@ export class JsonSortAdapter extends SortFunctionSqlite {
   }
 
   getAscSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { type } = this.field;
 
     if (isUserOrLink(type)) {
@@ -36,6 +45,9 @@ export class JsonSortAdapter extends SortFunctionSqlite {
   }
 
   getDescSQL() {
+    if (!this.columnName) {
+      return undefined;
+    }
     const { type } = this.field;
 
     if (isUserOrLink(type)) {
