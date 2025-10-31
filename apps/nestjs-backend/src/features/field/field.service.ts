@@ -307,6 +307,7 @@ export class FieldService implements IReadonlyAdapterService {
 
       // Execute all queries (main table alteration + any additional queries like junction tables)
       for (const query of alterTableQueries) {
+        this.logger.debug(`Executing alter table query: ${query}`);
         await this.prismaService.txClient().$executeRawUnsafe(query);
       }
 

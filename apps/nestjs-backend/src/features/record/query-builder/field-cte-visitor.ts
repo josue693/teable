@@ -469,13 +469,14 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
       }
     } else {
       const targetFieldResult = targetLookupField.accept(selectVisitor);
-      expression =
-        typeof targetFieldResult === 'string' ? targetFieldResult : targetFieldResult.toSQL().sql;
-      // Self-join: ensure expression uses the foreign alias override
       const defaultForeignAlias = getTableAliasFromTable(this.foreignTable);
-      if (defaultForeignAlias !== foreignAlias) {
-        expression = expression.replaceAll(`"${defaultForeignAlias}"`, `"${foreignAlias}"`);
-      }
+      const baseExpression =
+        typeof targetFieldResult === 'string' ? targetFieldResult : targetFieldResult.toSQL().sql;
+      const normalizedBaseExpression =
+        defaultForeignAlias !== foreignAlias
+          ? baseExpression.replaceAll(`"${defaultForeignAlias}"`, `"${foreignAlias}"`)
+          : baseExpression;
+      expression = normalizedBaseExpression;
 
       // For Postgres multi-value lookups targeting datetime-like fields, normalize the
       // element expression to an ISO8601 UTC string so downstream JSON comparisons using
@@ -486,8 +487,9 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
         field.isMultipleCellValue &&
         isDateLikeField(targetLookupField)
       ) {
-        // Format: 2020-01-10T16:00:00.000Z
-        expression = `to_char(${expression} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+        // Format: 2020-01-10T16:00:00.000Z, wrap as jsonb so downstream aggregation remains valid JSON.
+        const isoUtcExpr = `to_char(${normalizedBaseExpression} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+        expression = `to_jsonb(${isoUtcExpr})`;
       }
     }
     // Build deterministic order-by for multi-value lookups using the link field configuration

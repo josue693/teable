@@ -1321,6 +1321,9 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
           columnRef = adjusted;
         }
         if (fieldInfo.isLookup && isLinkLookupOptions(fieldInfo.lookupOptions)) {
+          if (preferRaw) {
+            return columnRef;
+          }
           if (fieldInfo.dbFieldType !== DbFieldType.Json) {
             return columnRef;
           }
@@ -1427,6 +1430,9 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
     }
 
     const preferRaw = !!selectContext.preferRawFieldReferences;
+    if (preferRaw) {
+      return expr;
+    }
     if (preferRaw && selectContext.targetDbFieldType === DbFieldType.Json) {
       return expr;
     }
