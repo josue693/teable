@@ -16,7 +16,6 @@ import type {
   IGroup,
   ILinkCellValue,
   IRecord,
-  ISelectFieldOptions,
   ISnapshotBase,
   ISortItem,
 } from '@teable/core';
@@ -37,7 +36,6 @@ import {
   or,
   parseGroup,
   Relationship,
-  SortFunc,
   StatisticsFunc,
 } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
@@ -1908,151 +1906,6 @@ export class RecordService {
     return difference(recordIds, ids);
   }
 
-  private sortGroupRawResult(
-    groupResult: { [key: string]: unknown; __c: number }[],
-    groupFields: IFieldInstance[],
-    groupBy?: IGroup
-  ) {
-    if (!groupResult.length || !groupBy?.length) {
-      return groupResult;
-    }
-
-    const comparators = groupBy
-      .map((groupItem, index) => {
-        const field = groupFields[index];
-
-        if (!field) {
-          return undefined;
-        }
-
-        const { dbFieldName } = field;
-        const order = groupItem.order ?? SortFunc.Asc;
-        const selectOrderMap =
-          field.type === FieldType.SingleSelect
-            ? new Map(
-                ((field.options as ISelectFieldOptions | undefined)?.choices ?? []).map(
-                  (choice, idx) => [choice.name, idx]
-                )
-              )
-            : null;
-
-        return (
-          left: { [key: string]: unknown; __c: number },
-          right: { [key: string]: unknown; __c: number }
-        ) => {
-          const leftValue = convertValueToStringify(left[dbFieldName]);
-          const rightValue = convertValueToStringify(right[dbFieldName]);
-
-          if (selectOrderMap) {
-            return this.compareSelectGroupValues(selectOrderMap, leftValue, rightValue, order);
-          }
-
-          return this.compareGroupValues(leftValue, rightValue, order);
-        };
-      })
-      .filter(Boolean) as ((
-      left: { [key: string]: unknown; __c: number },
-      right: { [key: string]: unknown; __c: number }
-    ) => number)[];
-
-    if (!comparators.length) {
-      return groupResult;
-    }
-
-    return [...groupResult].sort((left, right) => {
-      for (const comparator of comparators) {
-        const result = comparator(left, right);
-        if (result !== 0) {
-          return result;
-        }
-      }
-      return 0;
-    });
-  }
-
-  // eslint-disable-next-line sonarjs/cognitive-complexity
-  private compareGroupValues(
-    left: number | string | null,
-    right: number | string | null,
-    order: SortFunc
-  ): number {
-    if (left === right) {
-      return 0;
-    }
-
-    const isDesc = order === SortFunc.Desc;
-    const leftIsNull = left == null;
-    const rightIsNull = right == null;
-
-    if (leftIsNull || rightIsNull) {
-      if (leftIsNull && rightIsNull) {
-        return 0;
-      }
-
-      if (leftIsNull) {
-        return isDesc ? 1 : -1;
-      }
-
-      return isDesc ? -1 : 1;
-    }
-
-    if (typeof left === 'number' && typeof right === 'number') {
-      const diff = left - right;
-      if (diff === 0) {
-        return 0;
-      }
-      return isDesc ? -diff : diff;
-    }
-
-    const leftString = String(left);
-    const rightString = String(right);
-
-    if (leftString === rightString) {
-      return 0;
-    }
-
-    if (leftString < rightString) {
-      return isDesc ? 1 : -1;
-    }
-
-    return isDesc ? -1 : 1;
-  }
-
-  private compareSelectGroupValues(
-    orderMap: Map<string, number>,
-    left: number | string | null,
-    right: number | string | null,
-    order: SortFunc
-  ): number {
-    if (left === right) {
-      return 0;
-    }
-
-    if (left == null || right == null) {
-      return this.compareGroupValues(left, right, order);
-    }
-
-    const getRank = (value: number | string): number => {
-      if (typeof value === 'string') {
-        const index = orderMap.get(value);
-        if (index != null) {
-          return index + 1;
-        }
-      }
-      return -1;
-    };
-
-    const leftRank = getRank(left);
-    const rightRank = getRank(right);
-
-    if (leftRank === rightRank) {
-      return this.compareGroupValues(left, right, order);
-    }
-
-    const diff = leftRank - rightRank;
-    return order === SortFunc.Desc ? -diff : diff;
-  }
-
   @Timing()
   // eslint-disable-next-line sonarjs/cognitive-complexity
   private async groupDbCollection2GroupPoints(
@@ -2069,10 +1922,8 @@ export class RecordService {
     let curRowCount = 0;
     let collapsedDepth = Number.MAX_SAFE_INTEGER;
 
-    const sortedGroupResult = this.sortGroupRawResult(groupResult, groupFields, groupBy);
-
-    for (let i = 0; i < sortedGroupResult.length; i++) {
-      const item = sortedGroupResult[i];
+    for (let i = 0; i < groupResult.length; i++) {
+      const item = groupResult[i];
       const { __c: count } = item;
 
       for (let index = 0; index < groupFields.length; index++) {
@@ -2270,7 +2121,7 @@ export class RecordService {
 
     const viewId = ignoreViewQuery ? undefined : query?.viewId;
     const viewRaw = await this.getTinyView(tableId, viewId);
-    const { viewCte, builder, enabledFieldIds } = await this.recordPermissionService.wrapView(
+    const { viewCte, enabledFieldIds } = await this.recordPermissionService.wrapView(
       tableId,
       this.knex.queryBuilder(),
       {
