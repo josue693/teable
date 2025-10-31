@@ -818,7 +818,7 @@ abstract class BaseSqlConversionVisitor<
         if (driver === DriverClient.Sqlite) {
           return `(COALESCE((${valueSql}), 0) != 0)`;
         }
-        return `(COALESCE((${valueSql}), FALSE))`;
+        return `(COALESCE(${this.normalizeBooleanFieldReference(valueSql, exprCtx) ?? valueSql}, FALSE))`;
       case 'number': {
         if (driver === DriverClient.Sqlite) {
           const numericExpr = this.safeCastToNumeric(valueSql);
@@ -846,6 +846,30 @@ abstract class BaseSqlConversionVisitor<
       default:
         return `((${valueSql}) IS NOT NULL)`;
     }
+  }
+
+  /**
+   * Coerce direct field references carrying boolean semantics into a proper boolean scalar.
+   * This keeps the SQL maintainable by leveraging schema metadata rather than runtime pg_typeof checks.
+   */
+  private normalizeBooleanFieldReference(valueSql: string, exprCtx: ExprContext): string | null {
+    if (!(exprCtx instanceof FieldReferenceCurlyContext)) {
+      return null;
+    }
+
+    const fieldId = exprCtx.text.slice(1, -1);
+    const fieldInfo = this.context.table?.getField(fieldId);
+    if (!fieldInfo) {
+      return null;
+    }
+
+    const isBooleanField =
+      fieldInfo.dbFieldType === DbFieldType.Boolean || fieldInfo.cellValueType === 'boolean';
+    if (!isBooleanField) {
+      return null;
+    }
+
+    return `((${valueSql}))::boolean`;
   }
 
   private isBlankLikeExpression(ctx: ExprContext): boolean {

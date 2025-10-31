@@ -1323,6 +1323,60 @@ describe('OpenAPI formula (e2e)', () => {
       expect(values.not).toBe(true);
     });
 
+    it('should evaluate logical formulas referencing boolean checkbox fields', async () => {
+      const checkboxField = await createField(table1Id, {
+        name: 'logical-checkbox',
+        type: FieldType.Checkbox,
+        options: {},
+      });
+
+      const booleanFormulaField = await createField(table1Id, {
+        name: 'logical-checkbox-formula',
+        type: FieldType.Formula,
+        options: {
+          expression: `AND({${checkboxField.id}}, {${numberFieldRo.id}} > 0)`,
+        },
+      });
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [checkboxField.name]: true,
+              [numberFieldRo.name]: 5,
+              [textFieldRo.name]: 'flagged',
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+      const initialValue = records[0].fields[booleanFormulaField.name];
+      expect(typeof initialValue).toBe('boolean');
+      expect(initialValue).toBe(true);
+
+      const uncheckedRecord = await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [checkboxField.name]: null,
+          },
+        },
+      });
+      expect(uncheckedRecord.fields[booleanFormulaField.name]).toBe(false);
+
+      const recheckedRecord = await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [checkboxField.name]: true,
+          },
+        },
+      });
+      expect(recheckedRecord.fields[booleanFormulaField.name]).toBe(true);
+    });
+
     it('should treat numeric IF fallbacks with blank branches as nulls', async () => {
       const numericCondition = await createField(table1Id, {
         name: 'numeric-condition',
