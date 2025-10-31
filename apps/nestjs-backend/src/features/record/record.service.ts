@@ -687,7 +687,7 @@ export class RecordService {
   ): Promise<IRecordsVo> {
     const recordSnapshot = await this[
       withPermission ? 'getSnapshotBulkWithPermission' : 'getSnapshotBulk'
-    ](tableId, recordIds, undefined, FieldKeyType.Id);
+    ](tableId, recordIds, undefined, FieldKeyType.Id, undefined, true);
 
     if (!recordSnapshot.length) {
       throw new NotFoundException('Can not get records');
