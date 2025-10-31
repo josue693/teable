@@ -9,6 +9,7 @@ import { ID_FIELD_NAME, preservedDbFieldNames } from '../../field/constant';
 import { TableDomainQueryService } from '../../table-domain/table-domain-query.service';
 import { FieldCteVisitor } from './field-cte-visitor';
 import { FieldSelectVisitor } from './field-select-visitor';
+import type { IFieldSelectName } from './field-select.type';
 import type {
   ICreateRecordAggregateBuilderOptions,
   ICreateRecordQueryBuilderOptions,
@@ -261,9 +262,24 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
 
     // Apply grouping if specified
     if (groupBy && groupBy.length > 0) {
-      this.dbProvider
+      const groupingBuilder = this.dbProvider
         .groupQuery(qb, fieldMap, groupByFieldIds, undefined, { selectionMap })
         .appendGroupBuilder();
+
+      // After grouping, the select list aliases each grouped column to its dbFieldName.
+      // Normalize the selectionMap accordingly so subsequent sort builders reference the
+      // projected alias instead of the original table-qualified column, avoiding
+      // "must appear in GROUP BY" errors when ordering grouped aggregates.
+      const mutableSelectionMap = selectionMap as Map<string, IFieldSelectName>;
+      groupBy.forEach(({ fieldId }) => {
+        const groupedField = fieldMap[fieldId];
+        if (!groupedField) {
+          return;
+        }
+        const quotedAlias = `"${groupedField.dbFieldName.replace(/"/g, '""')}"`;
+        mutableSelectionMap.set(fieldId, quotedAlias);
+      });
+
       const groupSortItems: ISortItem[] = groupBy.map((item) => ({
         fieldId: item.fieldId,
         order: item.order ?? SortFunc.Asc,
