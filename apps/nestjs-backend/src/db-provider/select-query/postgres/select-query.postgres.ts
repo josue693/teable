@@ -448,7 +448,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
   datetimeDiff(startDate: string, endDate: string, unit: string): string {
     const diffUnit = this.normalizeDiffUnit(unit.replace(/^'|'$/g, ''));
-    const diffSeconds = `EXTRACT(EPOCH FROM (${this.tzWrap(endDate)} - ${this.tzWrap(startDate)}))`;
+    const diffSeconds = `EXTRACT(EPOCH FROM (${this.tzWrap(startDate)} - ${this.tzWrap(endDate)}))`;
     switch (diffUnit) {
       case 'millisecond':
         return `(${diffSeconds}) * 1000`;

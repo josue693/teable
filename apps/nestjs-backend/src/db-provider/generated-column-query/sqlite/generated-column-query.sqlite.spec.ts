@@ -56,74 +56,74 @@ describe('GeneratedColumnQuerySqlite unit-aware helpers', () => {
   const datetimeDiffCases: Array<{ literal: string; expected: string }> = [
     {
       literal: 'millisecond',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60 * 60 * 1000',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60 * 60 * 1000',
     },
     {
       literal: 'milliseconds',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60 * 60 * 1000',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60 * 60 * 1000',
     },
     {
       literal: 'ms',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60 * 60 * 1000',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60 * 60 * 1000',
     },
     {
       literal: 'second',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60 * 60',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60 * 60',
     },
     {
       literal: 'seconds',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60 * 60',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60 * 60',
     },
     {
       literal: 'sec',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60 * 60',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60 * 60',
     },
     {
       literal: 'secs',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60 * 60',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60 * 60',
     },
     {
       literal: 'minute',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60',
     },
     {
       literal: 'minutes',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60',
     },
     {
       literal: 'min',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60',
     },
     {
       literal: 'mins',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0 * 60',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0 * 60',
     },
     {
       literal: 'hour',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0',
     },
     {
       literal: 'hours',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0',
     },
     {
       literal: 'hr',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0',
     },
     {
       literal: 'hrs',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) * 24.0',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) * 24.0',
     },
     {
       literal: 'week',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) / 7.0',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) / 7.0',
     },
     {
       literal: 'weeks',
-      expected: '((JULIANDAY(date_end) - JULIANDAY(date_start))) / 7.0',
+      expected: '((JULIANDAY(date_start) - JULIANDAY(date_end))) / 7.0',
     },
-    { literal: 'day', expected: '(JULIANDAY(date_end) - JULIANDAY(date_start))' },
-    { literal: 'days', expected: '(JULIANDAY(date_end) - JULIANDAY(date_start))' },
+    { literal: 'day', expected: '(JULIANDAY(date_start) - JULIANDAY(date_end))' },
+    { literal: 'days', expected: '(JULIANDAY(date_start) - JULIANDAY(date_end))' },
   ];
 
   it.each(datetimeDiffCases)('datetimeDiff normalizes unit "%s"', ({ literal, expected }) => {

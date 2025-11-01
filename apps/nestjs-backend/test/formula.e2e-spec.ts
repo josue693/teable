@@ -2506,7 +2506,7 @@ describe('OpenAPI formula (e2e)', () => {
           name: `datetime-diff-${literal}`,
           type: FieldType.Formula,
           options: {
-            expression: `DATETIME_DIFF(DATETIME_PARSE("${datetimeDiffStartIso}"), DATETIME_PARSE("${datetimeDiffEndIso}"), '${literal}')`,
+            expression: `DATETIME_DIFF(DATETIME_PARSE("${datetimeDiffEndIso}"), DATETIME_PARSE("${datetimeDiffStartIso}"), '${literal}')`,
           },
         });
 
@@ -2521,6 +2521,38 @@ describe('OpenAPI formula (e2e)', () => {
         }
       }
     );
+
+    it('should evaluate DATETIME_DIFF default unit when end precedes start', async () => {
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: 1,
+            },
+          },
+        ],
+      });
+      const recordId = records[0].id;
+
+      const diffField = await createField(table1Id, {
+        name: `datetime-diff-default-order`,
+        type: FieldType.Formula,
+        options: {
+          expression: `DATETIME_DIFF(DATETIME_PARSE("${datetimeDiffEndIso}"), DATETIME_PARSE("${datetimeDiffStartIso}"))`,
+        },
+      });
+
+      const recordAfterFormula = await getRecord(table1Id, recordId);
+      const rawValue = recordAfterFormula.data.fields[diffField.name];
+      if (typeof rawValue === 'number') {
+        expect(rawValue).toBeCloseTo(diffDays, 6);
+      } else {
+        const numericValue = Number(rawValue);
+        expect(Number.isFinite(numericValue)).toBe(true);
+        expect(numericValue).toBeCloseTo(diffDays, 6);
+      }
+    });
 
     it.each(isSameCases)(
       'should evaluate IS_SAME for unit "%s"',

@@ -468,9 +468,10 @@ abstract class BaseSqlConversionVisitor<
           this.formulaQuery.dateAdd(params[0], params[1], params[2])
         )
         .with(FunctionName.Datestr, () => this.formulaQuery.datestr(params[0]))
-        .with(FunctionName.DatetimeDiff, () =>
-          this.formulaQuery.datetimeDiff(params[0], params[1], params[2])
-        )
+        .with(FunctionName.DatetimeDiff, () => {
+          const unitExpr = params[2] ?? `'day'`;
+          return this.formulaQuery.datetimeDiff(params[0], params[1], unitExpr);
+        })
         .with(FunctionName.DatetimeFormat, () =>
           this.formulaQuery.datetimeFormat(params[0], params[1])
         )

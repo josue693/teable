@@ -136,9 +136,9 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
       );
     });
 
-    it('datetimeDiff subtracts timezone-normalized expressions', () => {
-      expect(tzQuery.datetimeDiff('start_col', 'end_col', `'day'`)).toBe(
-        `(EXTRACT(EPOCH FROM (${tz('end_col')} - ${tz('start_col')}))) / 86400`
+    it('datetimeDiff subtracts the second argument from the first after timezone normalization', () => {
+      expect(tzQuery.datetimeDiff('first_col', 'second_col', `'day'`)).toBe(
+        `(EXTRACT(EPOCH FROM (${tz('first_col')} - ${tz('second_col')}))) / 86400`
       );
     });
 
@@ -192,7 +192,7 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
     expect(sql).toBe(`${localWrap('date_col')} + (${scaled}) * INTERVAL '1 ${unit}'`);
   });
 
-  const localDiffBase = `(EXTRACT(EPOCH FROM (${localWrap('date_end')} - ${localWrap('date_start')})))`;
+  const localDiffBase = `(EXTRACT(EPOCH FROM (${localWrap('date_start')} - ${localWrap('date_end')})))`;
   const datetimeDiffCases: Array<{ literal: string; expected: string }> = [
     { literal: 'millisecond', expected: `${localDiffBase} * 1000` },
     { literal: 'milliseconds', expected: `${localDiffBase} * 1000` },
