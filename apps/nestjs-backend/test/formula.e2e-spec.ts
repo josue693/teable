@@ -986,6 +986,76 @@ describe('OpenAPI formula (e2e)', () => {
       }
     });
 
+    it('should flatten multi-value lookup formulas returning scalar text', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'formula-lookup-flatten-foreign',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Scheduled', type: FieldType.Date } as IFieldRo,
+        ],
+        records: [
+          { fields: { Title: 'Task A', Scheduled: '2025-10-31T08:10:24.894Z' } },
+          { fields: { Title: 'Task B', Scheduled: '2025-11-05T10:00:00.000Z' } },
+        ],
+      });
+      let host: ITableFullVo | undefined;
+      try {
+        const scheduledFieldId = foreign.fields.find((field) => field.name === 'Scheduled')!.id;
+        const taggedFormula = await createField(foreign.id, {
+          name: 'Schedule Tag',
+          type: FieldType.Formula,
+          options: {
+            expression: `CONCATENATE(DATETIME_FORMAT({${scheduledFieldId}}, 'YYYY-MM-DD'), "-tag")`,
+          },
+        });
+
+        host = await createTable(baseId, {
+          name: 'formula-lookup-flatten-host',
+          fields: [{ name: 'Project', type: FieldType.SingleLineText } as IFieldRo],
+          records: [{ fields: { Project: 'Main' } }],
+        });
+
+        const linkField = await createField(host.id, {
+          name: 'Related Tasks',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: foreign.id,
+          } as ILinkFieldOptionsRo,
+        } as IFieldRo);
+
+        const lookupField = await createField(host.id, {
+          name: 'Tagged Schedules',
+          type: FieldType.Formula,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: taggedFormula.id,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const hostRecordId = host.records[0].id;
+        await updateRecordByApi(
+          host.id,
+          hostRecordId,
+          linkField.id,
+          foreign.records.map((record) => ({ id: record.id }))
+        );
+
+        const updatedRecord = await getRecord(host.id, hostRecordId);
+        expect(updatedRecord.data.fields[lookupField.name]).toEqual([
+          '2025-10-31-tag',
+          '2025-11-05-tag',
+        ]);
+      } finally {
+        if (host) {
+          await permanentDeleteTable(baseId, host.id);
+        }
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
     it('should calculate numeric formulas using lookup fields', async () => {
       const foreign = await createTable(baseId, {
         name: 'formula-lookup-numeric-foreign',
@@ -1321,6 +1391,60 @@ describe('OpenAPI formula (e2e)', () => {
       expect(values.and).toBe(false);
       expect(values.or).toBe(true);
       expect(values.not).toBe(true);
+    });
+
+    it('should evaluate logical formulas referencing boolean checkbox fields', async () => {
+      const checkboxField = await createField(table1Id, {
+        name: 'logical-checkbox',
+        type: FieldType.Checkbox,
+        options: {},
+      });
+
+      const booleanFormulaField = await createField(table1Id, {
+        name: 'logical-checkbox-formula',
+        type: FieldType.Formula,
+        options: {
+          expression: `AND({${checkboxField.id}}, {${numberFieldRo.id}} > 0)`,
+        },
+      });
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [checkboxField.name]: true,
+              [numberFieldRo.name]: 5,
+              [textFieldRo.name]: 'flagged',
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+      const initialValue = records[0].fields[booleanFormulaField.name];
+      expect(typeof initialValue).toBe('boolean');
+      expect(initialValue).toBe(true);
+
+      const uncheckedRecord = await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [checkboxField.name]: null,
+          },
+        },
+      });
+      expect(uncheckedRecord.fields[booleanFormulaField.name]).toBe(false);
+
+      const recheckedRecord = await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [checkboxField.name]: true,
+          },
+        },
+      });
+      expect(recheckedRecord.fields[booleanFormulaField.name]).toBe(true);
     });
 
     it('should treat numeric IF fallbacks with blank branches as nulls', async () => {
@@ -2382,7 +2506,7 @@ describe('OpenAPI formula (e2e)', () => {
           name: `datetime-diff-${literal}`,
           type: FieldType.Formula,
           options: {
-            expression: `DATETIME_DIFF(DATETIME_PARSE("${datetimeDiffStartIso}"), DATETIME_PARSE("${datetimeDiffEndIso}"), '${literal}')`,
+            expression: `DATETIME_DIFF(DATETIME_PARSE("${datetimeDiffEndIso}"), DATETIME_PARSE("${datetimeDiffStartIso}"), '${literal}')`,
           },
         });
 
@@ -2397,6 +2521,38 @@ describe('OpenAPI formula (e2e)', () => {
         }
       }
     );
+
+    it('should evaluate DATETIME_DIFF default unit when end precedes start', async () => {
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: 1,
+            },
+          },
+        ],
+      });
+      const recordId = records[0].id;
+
+      const diffField = await createField(table1Id, {
+        name: `datetime-diff-default-order`,
+        type: FieldType.Formula,
+        options: {
+          expression: `DATETIME_DIFF(DATETIME_PARSE("${datetimeDiffEndIso}"), DATETIME_PARSE("${datetimeDiffStartIso}"))`,
+        },
+      });
+
+      const recordAfterFormula = await getRecord(table1Id, recordId);
+      const rawValue = recordAfterFormula.data.fields[diffField.name];
+      if (typeof rawValue === 'number') {
+        expect(rawValue).toBeCloseTo(diffDays, 6);
+      } else {
+        const numericValue = Number(rawValue);
+        expect(Number.isFinite(numericValue)).toBe(true);
+        expect(numericValue).toBeCloseTo(diffDays, 6);
+      }
+    });
 
     it.each(isSameCases)(
       'should evaluate IS_SAME for unit "%s"',

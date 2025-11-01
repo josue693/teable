@@ -474,7 +474,7 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
 
   datetimeDiff(startDate: string, endDate: string, unit: string): string {
     const diffUnit = this.normalizeDiffUnit(unit.replace(/^'|'$/g, ''));
-    const diffSeconds = `EXTRACT(EPOCH FROM ${endDate}::timestamp - ${startDate}::timestamp)`;
+    const diffSeconds = `EXTRACT(EPOCH FROM ${startDate}::timestamp - ${endDate}::timestamp)`;
     switch (diffUnit) {
       case 'millisecond':
         return `(${diffSeconds}) * 1000`;

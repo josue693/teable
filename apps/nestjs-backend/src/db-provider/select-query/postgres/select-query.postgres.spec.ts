@@ -1,9 +1,13 @@
 /* eslint-disable sonarjs/no-duplicate-string */
-import { TableDomain } from '@teable/core';
+import { CellValueType, DbFieldType, FieldType, TableDomain } from '@teable/core';
+import type { IFieldVo } from '@teable/core';
+import knex from 'knex';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { createFieldInstanceByVo } from '../../../features/field/model/factory';
 import type { IFieldSelectName } from '../../../features/record/query-builder/field-select.type';
 import type { ISelectFormulaConversionContext } from '../../../features/record/query-builder/sql-conversion.visitor';
+import { PostgresProvider } from '../../postgres.provider';
 import { SelectQueryPostgres } from './select-query.postgres';
 
 describe('SelectQueryPostgres unit-aware date helpers', () => {
@@ -132,9 +136,9 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
       );
     });
 
-    it('datetimeDiff subtracts timezone-normalized expressions', () => {
-      expect(tzQuery.datetimeDiff('start_col', 'end_col', `'day'`)).toBe(
-        `(EXTRACT(EPOCH FROM (${tz('end_col')} - ${tz('start_col')}))) / 86400`
+    it('datetimeDiff subtracts the second argument from the first after timezone normalization', () => {
+      expect(tzQuery.datetimeDiff('first_col', 'second_col', `'day'`)).toBe(
+        `(EXTRACT(EPOCH FROM (${tz('first_col')} - ${tz('second_col')}))) / 86400`
       );
     });
 
@@ -188,7 +192,7 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
     expect(sql).toBe(`${localWrap('date_col')} + (${scaled}) * INTERVAL '1 ${unit}'`);
   });
 
-  const localDiffBase = `(EXTRACT(EPOCH FROM (${localWrap('date_end')} - ${localWrap('date_start')})))`;
+  const localDiffBase = `(EXTRACT(EPOCH FROM (${localWrap('date_start')} - ${localWrap('date_end')})))`;
   const datetimeDiffCases: Array<{ literal: string; expected: string }> = [
     { literal: 'millisecond', expected: `${localDiffBase} * 1000` },
     { literal: 'milliseconds', expected: `${localDiffBase} * 1000` },
@@ -265,5 +269,71 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
         "((COALESCE(NULLIF(REGEXP_REPLACE((column_a)::text, '[^0-9.+-]', '', 'g'), '')::double precision, 0) + COALESCE(NULLIF(REGEXP_REPLACE((10)::text, '[^0-9.+-]', '', 'g'), '')::double precision, 0))) / 2"
       );
     });
+  });
+});
+
+describe('Select formula boolean normalization', () => {
+  const knexClient = knex({ client: 'pg' });
+  const provider = new PostgresProvider(knexClient);
+
+  const booleanFieldVo: IFieldVo = {
+    id: 'fldBoolean001',
+    name: 'Boolean Flag',
+    type: FieldType.Checkbox,
+    options: {},
+    dbFieldName: 'bool_col',
+    dbFieldType: DbFieldType.Boolean,
+    cellValueType: CellValueType.Boolean,
+    isLookup: false,
+    isComputed: false,
+    isMultipleCellValue: false,
+  };
+
+  const textFieldVo: IFieldVo = {
+    id: 'fldText001',
+    name: 'Text Field',
+    type: FieldType.SingleLineText,
+    options: {},
+    dbFieldName: 'text_col',
+    dbFieldType: DbFieldType.Text,
+    cellValueType: CellValueType.String,
+    isLookup: false,
+    isComputed: false,
+    isMultipleCellValue: false,
+  };
+
+  const booleanField = createFieldInstanceByVo(booleanFieldVo);
+  const textField = createFieldInstanceByVo(textFieldVo);
+
+  const table = new TableDomain({
+    id: 'tblBoolean',
+    name: 'Boolean Table',
+    dbTableName: 'boolean_table',
+    lastModifiedTime: '1970-01-01T00:00:00.000Z',
+    fields: [booleanField, textField],
+  });
+
+  const buildContext = (): ISelectFormulaConversionContext => ({
+    table,
+    tableAlias: 'main',
+    selectionMap: new Map<string, IFieldSelectName>([
+      [booleanField.id, '"main"."bool_col"'],
+      [textField.id, '"main"."text_col"'],
+    ]),
+    timeZone: 'UTC',
+    preferRawFieldReferences: true,
+  });
+
+  it('casts boolean field references before PostgreSQL COALESCE', () => {
+    const sql = provider.convertFormulaToSelectQuery('AND({fldBoolean001})', buildContext());
+
+    expect(sql).toContain('(("main"."bool_col"))::boolean');
+    expect(sql).toContain('COALESCE');
+  });
+
+  it('does not cast non-boolean field references', () => {
+    const sql = provider.convertFormulaToSelectQuery('AND({fldText001})', buildContext());
+
+    expect(sql).not.toContain('::boolean');
   });
 });

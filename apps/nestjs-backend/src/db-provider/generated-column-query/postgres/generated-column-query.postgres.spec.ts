@@ -70,79 +70,79 @@ describe('GeneratedColumnQueryPostgres unit-aware helpers', () => {
   const datetimeDiffCases: Array<{ literal: string; expected: string }> = [
     {
       literal: 'millisecond',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) * 1000',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) * 1000',
     },
     {
       literal: 'milliseconds',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) * 1000',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) * 1000',
     },
     {
       literal: 'ms',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) * 1000',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) * 1000',
     },
     {
       literal: 'second',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp))',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp))',
     },
     {
       literal: 'seconds',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp))',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp))',
     },
     {
       literal: 'sec',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp))',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp))',
     },
     {
       literal: 'secs',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp))',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp))',
     },
     {
       literal: 'minute',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 60',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 60',
     },
     {
       literal: 'minutes',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 60',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 60',
     },
     {
       literal: 'min',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 60',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 60',
     },
     {
       literal: 'mins',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 60',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 60',
     },
     {
       literal: 'hour',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 3600',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 3600',
     },
     {
       literal: 'hours',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 3600',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 3600',
     },
     {
       literal: 'hr',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 3600',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 3600',
     },
     {
       literal: 'hrs',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 3600',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 3600',
     },
     {
       literal: 'week',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / (86400 * 7)',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / (86400 * 7)',
     },
     {
       literal: 'weeks',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / (86400 * 7)',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / (86400 * 7)',
     },
     {
       literal: 'day',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 86400',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 86400',
     },
     {
       literal: 'days',
-      expected: '(EXTRACT(EPOCH FROM date_end::timestamp - date_start::timestamp)) / 86400',
+      expected: '(EXTRACT(EPOCH FROM date_start::timestamp - date_end::timestamp)) / 86400',
     },
   ];
 

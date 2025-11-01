@@ -365,7 +365,7 @@ export class SelectQuerySqlite extends SelectQueryAbstract {
   }
 
   datetimeDiff(startDate: string, endDate: string, unit: string): string {
-    const baseDiffDays = `(JULIANDAY(${endDate}) - JULIANDAY(${startDate}))`;
+    const baseDiffDays = `(JULIANDAY(${startDate}) - JULIANDAY(${endDate}))`;
     switch (this.normalizeDiffUnit(unit)) {
       case 'millisecond':
         return `(${baseDiffDays}) * 24.0 * 60 * 60 * 1000`;

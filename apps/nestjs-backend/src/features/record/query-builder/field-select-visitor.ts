@@ -23,7 +23,7 @@ import type {
   ButtonFieldCore,
   TableDomain,
 } from '@teable/core';
-import { FieldType, isLinkLookupOptions } from '@teable/core';
+import { DbFieldType, FieldType, isLinkLookupOptions } from '@teable/core';
 // no driver-specific logic here; use dialect for differences
 import type { Knex } from 'knex';
 import type { IDbProvider } from '../../../db-provider/db.provider.interface';
@@ -174,7 +174,8 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
           const flattenedExpr = this.dialect.flattenLookupCteValue(
             cteName,
             field.id,
-            !!field.isMultipleCellValue
+            !!field.isMultipleCellValue,
+            field.dbFieldType
           );
           if (flattenedExpr) {
             this.state.setSelection(field.id, flattenedExpr);
@@ -226,7 +227,7 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
       // always emit the computed expression which degrades to NULL when references
       // are unresolved.
       if (this.rawProjection) {
-        return this.dbProvider.convertFormulaToSelectQuery(expression, {
+        const formulaSql = this.dbProvider.convertFormulaToSelectQuery(expression, {
           table: this.table,
           tableAlias: this.tableAlias,
           selectionMap: this.getSelectionMap(),
@@ -235,6 +236,10 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
           preferRawFieldReferences: this.preferRawFieldReferences,
           targetDbFieldType: field.dbFieldType,
         });
+        const normalized =
+          field.dbFieldType === DbFieldType.Json ? `to_jsonb(${formulaSql})` : formulaSql;
+        this.state.setSelection(field.id, normalized);
+        return normalized;
       }
 
       // For non-raw contexts where the generated column exists, select it directly

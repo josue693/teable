@@ -468,9 +468,10 @@ abstract class BaseSqlConversionVisitor<
           this.formulaQuery.dateAdd(params[0], params[1], params[2])
         )
         .with(FunctionName.Datestr, () => this.formulaQuery.datestr(params[0]))
-        .with(FunctionName.DatetimeDiff, () =>
-          this.formulaQuery.datetimeDiff(params[0], params[1], params[2])
-        )
+        .with(FunctionName.DatetimeDiff, () => {
+          const unitExpr = params[2] ?? `'day'`;
+          return this.formulaQuery.datetimeDiff(params[0], params[1], unitExpr);
+        })
         .with(FunctionName.DatetimeFormat, () =>
           this.formulaQuery.datetimeFormat(params[0], params[1])
         )
@@ -818,7 +819,7 @@ abstract class BaseSqlConversionVisitor<
         if (driver === DriverClient.Sqlite) {
           return `(COALESCE((${valueSql}), 0) != 0)`;
         }
-        return `(COALESCE((${valueSql}), FALSE))`;
+        return `(COALESCE(${this.normalizeBooleanFieldReference(valueSql, exprCtx) ?? valueSql}, FALSE))`;
       case 'number': {
         if (driver === DriverClient.Sqlite) {
           const numericExpr = this.safeCastToNumeric(valueSql);
@@ -846,6 +847,30 @@ abstract class BaseSqlConversionVisitor<
       default:
         return `((${valueSql}) IS NOT NULL)`;
     }
+  }
+
+  /**
+   * Coerce direct field references carrying boolean semantics into a proper boolean scalar.
+   * This keeps the SQL maintainable by leveraging schema metadata rather than runtime pg_typeof checks.
+   */
+  private normalizeBooleanFieldReference(valueSql: string, exprCtx: ExprContext): string | null {
+    if (!(exprCtx instanceof FieldReferenceCurlyContext)) {
+      return null;
+    }
+
+    const fieldId = exprCtx.text.slice(1, -1);
+    const fieldInfo = this.context.table?.getField(fieldId);
+    if (!fieldInfo) {
+      return null;
+    }
+
+    const isBooleanField =
+      fieldInfo.dbFieldType === DbFieldType.Boolean || fieldInfo.cellValueType === 'boolean';
+    if (!isBooleanField) {
+      return null;
+    }
+
+    return `((${valueSql}))::boolean`;
   }
 
   private isBlankLikeExpression(ctx: ExprContext): boolean {
@@ -1321,6 +1346,9 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
           columnRef = adjusted;
         }
         if (fieldInfo.isLookup && isLinkLookupOptions(fieldInfo.lookupOptions)) {
+          if (preferRaw) {
+            return columnRef;
+          }
           if (fieldInfo.dbFieldType !== DbFieldType.Json) {
             return columnRef;
           }
@@ -1427,6 +1455,9 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
     }
 
     const preferRaw = !!selectContext.preferRawFieldReferences;
+    if (preferRaw) {
+      return expr;
+    }
     if (preferRaw && selectContext.targetDbFieldType === DbFieldType.Json) {
       return expr;
     }

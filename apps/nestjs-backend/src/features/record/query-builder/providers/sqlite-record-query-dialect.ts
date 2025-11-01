@@ -100,7 +100,12 @@ export class SqliteRecordQueryDialect implements IRecordQueryDialectProvider {
       )`;
   }
 
-  flattenLookupCteValue(_cteName: string, _fieldId: string, _isMultiple: boolean): string | null {
+  flattenLookupCteValue(
+    _cteName: string,
+    _fieldId: string,
+    _isMultiple: boolean,
+    _dbFieldType: DbFieldType
+  ): string | null {
     return null;
   }
 

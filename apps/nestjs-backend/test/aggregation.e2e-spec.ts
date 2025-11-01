@@ -154,6 +154,75 @@ describe('OpenAPI AggregationController (e2e)', () => {
           expect(Object.keys(group ?? []).length).toBe(expectGroupedCount);
         }
       );
+
+      function resolveTextFieldGroupingExpectations(): {
+        textField: IFieldVo;
+        expectedValues: (string | null)[];
+        expectedDescendingValues: (string | null)[];
+      } {
+        const textFieldIndex = TEXT_FIELD_CASES[0].fieldIndex;
+        const textField = table.fields[textFieldIndex];
+        const collator = new Intl.Collator();
+        const rawValues: (string | null)[] = table.records.map((record) => {
+          const value = record.fields[textField.name];
+          if (value == null) {
+            return null;
+          }
+          return typeof value === 'string' ? value : String(value);
+        });
+
+        const uniqueValues = Array.from(new Set<string | null>(rawValues));
+        const expectedValues = [...uniqueValues].sort((left, right) => {
+          if (left === right) return 0;
+          if (left == null) return -1;
+          if (right == null) return 1;
+          return collator.compare(left, right);
+        });
+
+        const expectedDescendingValues = [...expectedValues].reverse();
+
+        return { textField, expectedValues, expectedDescendingValues };
+      }
+
+      it('should return group points for text field in ascending order', async () => {
+        const { textField, expectedValues } = resolveTextFieldGroupingExpectations();
+        const groupPoints = (
+          await getGroupPoints(table.id, {
+            groupBy: [{ fieldId: textField.id, order: SortFunc.Asc }],
+          })
+        ).data;
+
+        expect(groupPoints).toBeDefined();
+
+        const headerValues = groupPoints!
+          .filter(
+            (point): point is IGroupHeaderPoint =>
+              point.type === GroupPointType.Header && point.depth === 0
+          )
+          .map((point) => (point.value ?? null) as string | null);
+
+        expect(headerValues).toEqual(expectedValues);
+      });
+
+      it('should return group points for text field in descending order', async () => {
+        const { textField, expectedDescendingValues } = resolveTextFieldGroupingExpectations();
+        const groupPoints = (
+          await getGroupPoints(table.id, {
+            groupBy: [{ fieldId: textField.id, order: SortFunc.Desc }],
+          })
+        ).data;
+
+        expect(groupPoints).toBeDefined();
+
+        const headerValues = groupPoints!
+          .filter(
+            (point): point is IGroupHeaderPoint =>
+              point.type === GroupPointType.Header && point.depth === 0
+          )
+          .map((point) => (point.value ?? null) as string | null);
+
+        expect(headerValues).toEqual(expectedDescendingValues);
+      });
     });
 
     describe('simple aggregation number field record', () => {

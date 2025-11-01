@@ -7,6 +7,7 @@ import type {
   IConditionalRollupFieldOptions,
   IConditionalLookupOptions,
   IFilter,
+  IFieldRo,
 } from '@teable/core';
 import {
   FieldType,
@@ -793,7 +794,8 @@ export class FieldDuplicateService {
           targetTableId,
           curField,
           tableIdMap,
-          fieldMap
+          fieldMap,
+          scope
         );
         continue;
       }
@@ -806,6 +808,7 @@ export class FieldDuplicateService {
             curField,
             tableIdMap,
             fieldMap,
+            scope,
             true
           );
         } else if (!countMap[curField.id] || countMap[curField.id] < maxCount) {
@@ -840,13 +843,23 @@ export class FieldDuplicateService {
     field: IFieldWithTableIdJson,
     tableIdMap: Record<string, string>,
     sourceToTargetFieldMap: Record<string, string>,
+    scope: 'base' | 'table' = 'base',
     hasError = false
   ) {
+    const hasFieldError = Boolean(field.hasError);
     const isAiConfig = field.aiConfig && !field.isLookup;
     const isLookup = field.isLookup;
     const isRollup = field.type === FieldType.Rollup && !field.isLookup;
     const isConditionalRollup = field.type === FieldType.ConditionalRollup;
     const isFormula = field.type === FieldType.Formula && !field.isLookup;
+    const shouldConvertErroredComputed =
+      scope === 'base' && hasFieldError && (isLookup || isRollup || isConditionalRollup);
+
+    if (shouldConvertErroredComputed) {
+      // During base import, persist errored computed fields as plain text so users keep the data.
+      await this.duplicateErroredComputedFieldAsText(targetTableId, field, sourceToTargetFieldMap);
+      return;
+    }
 
     switch (true) {
       case isLookup:
@@ -884,8 +897,42 @@ export class FieldDuplicateService {
         );
         break;
       case isFormula:
-        await this.duplicateFormulaField(targetTableId, field, sourceToTargetFieldMap, hasError);
+        await this.duplicateFormulaField(
+          targetTableId,
+          field,
+          sourceToTargetFieldMap,
+          hasError || hasFieldError
+        );
     }
+  }
+
+  private async duplicateErroredComputedFieldAsText(
+    targetTableId: string,
+    field: IFieldWithTableIdJson,
+    sourceToTargetFieldMap: Record<string, string>
+  ) {
+    const { id, name, description, dbFieldName, order, notNull, unique, isPrimary } = field;
+
+    const createFieldRo: IFieldRo = {
+      type: FieldType.SingleLineText,
+      name,
+      description,
+    };
+
+    if (dbFieldName) {
+      createFieldRo.dbFieldName = dbFieldName;
+    }
+
+    const newField = await this.fieldOpenApiService.createField(targetTableId, createFieldRo);
+
+    await this.replenishmentConstraint(newField.id, targetTableId, order, {
+      notNull,
+      unique,
+      dbFieldName: newField.dbFieldName,
+      isPrimary,
+    });
+
+    sourceToTargetFieldMap[id] = newField.id;
   }
 
   async duplicateLookupField(

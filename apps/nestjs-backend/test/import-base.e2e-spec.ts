@@ -44,6 +44,7 @@ import {
   permanentDeleteBase,
   getRecords,
   getRecord,
+  deleteField,
 } from './utils/init-app';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -372,6 +373,169 @@ describe('OpenAPI BaseController for base import (e2e)', () => {
       for (const tableId of Object.values(tableIdMap)) {
         await permanentDeleteTable(base.id, tableId);
       }
+    });
+  });
+
+  describe('errored computed field import', () => {
+    const lookupFieldName = 'Errored Lookup';
+    const rollupFieldName = 'Errored Rollup';
+    let erroredBaseId: string;
+    let importedBaseId: string | undefined;
+    let hostTable: ITableFullVo;
+    let lookupTable: ITableFullVo;
+    let awaitErroredExport: <T>(fn: () => Promise<T>) => Promise<{ previewUrl: string }>;
+
+    const waitForFieldHasError = async (tableId: string, fieldId: string) => {
+      const timeoutMs = 8000;
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        const fields = (await getFields(tableId)).data;
+        const field = fields.find((f) => f.id === fieldId);
+        if (field?.hasError) {
+          return field;
+        }
+        await sleep(200);
+      }
+      return undefined;
+    };
+
+    beforeAll(async () => {
+      const base = (
+        await createBase({
+          name: 'errored_computed_source',
+          spaceId,
+          icon: '📦',
+        })
+      ).data;
+      erroredBaseId = base.id;
+
+      hostTable = await createTable(erroredBaseId, {
+        name: 'Errored_Host',
+        fields: x_20.fields,
+        records: x_20.records,
+      });
+
+      const linkTemplate = x_20_link(hostTable);
+      lookupTable = await createTable(erroredBaseId, {
+        name: 'Errored_Lookup',
+        fields: linkTemplate.fields,
+        records: linkTemplate.records,
+      });
+
+      hostTable.fields = (await getFields(hostTable.id)).data;
+      lookupTable.fields = (await getFields(lookupTable.id)).data;
+
+      const linkField = lookupTable.fields.find((field) => field.type === FieldType.Link)!;
+      const hostNumberField = hostTable.fields.find((field) => field.type === FieldType.Number)!;
+
+      const lookupField = (
+        await createField(lookupTable.id, {
+          name: lookupFieldName,
+          type: hostNumberField.type,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: hostTable.id,
+            linkFieldId: linkField.id,
+            lookupFieldId: hostNumberField.id,
+          },
+        })
+      ).data;
+
+      const rollupField = (
+        await createField(lookupTable.id, {
+          name: rollupFieldName,
+          type: FieldType.Rollup,
+          options: {
+            expression: 'count({values})',
+          },
+          lookupOptions: {
+            foreignTableId: hostTable.id,
+            linkFieldId: linkField.id,
+            lookupFieldId: hostNumberField.id,
+          },
+        })
+      ).data;
+
+      await deleteField(hostTable.id, hostNumberField.id);
+
+      const erroredLookup = await waitForFieldHasError(lookupTable.id, lookupField.id);
+      const erroredRollup = await waitForFieldHasError(lookupTable.id, rollupField.id);
+      expect(erroredLookup?.hasError).toBe(true);
+      expect(erroredRollup?.hasError).toBe(true);
+
+      lookupTable.fields = (await getFields(lookupTable.id)).data;
+
+      awaitErroredExport = createAwaitWithEventWithResult<{ previewUrl: string }>(
+        app.get(EventEmitterService),
+        Events.BASE_EXPORT_COMPLETE
+      );
+    });
+
+    afterAll(async () => {
+      if (importedBaseId) {
+        await permanentDeleteBase(importedBaseId);
+      }
+      if (erroredBaseId) {
+        await permanentDeleteBase(erroredBaseId);
+      }
+    });
+
+    it('converts errored lookup and rollup fields to text on import', async () => {
+      const { previewUrl } = await awaitErroredExport(async () => {
+        await exportBase(erroredBaseId);
+      });
+
+      const attachmentService = getAttachmentService(app);
+      const clsService = app.get(ClsService);
+
+      const notify = await clsService.runWith<Promise<IAttachmentItem>>(
+        {
+          user: {
+            id: userId,
+            name: 'Test User',
+            email: 'test@example.com',
+            isAdmin: null,
+          },
+        } as unknown as ClsStore,
+        async () => {
+          return await attachmentService.uploadFromUrl(appUrl + previewUrl);
+        }
+      );
+
+      const { base: importedBase } = (
+        await importBase({
+          notify: notify as unknown as INotifyVo,
+          spaceId,
+        })
+      ).data;
+
+      importedBaseId = importedBase.id;
+
+      const tableList = (await getTableList(importedBase.id)).data;
+      expect(tableList.map(({ name }) => name).sort()).toEqual(
+        [hostTable.name, lookupTable.name].sort()
+      );
+
+      const importedLookupMeta = tableList.find(
+        (tableMeta) => tableMeta.name === lookupTable.name
+      )!;
+      const importedLookupTable = await getTable(importedBase.id, importedLookupMeta.id, {
+        includeContent: true,
+      });
+
+      const importedFields = importedLookupTable.fields ?? [];
+
+      const importedLookupField = importedFields.find((field) => field.name === lookupFieldName)!;
+      expect(importedLookupField.type).toBe(FieldType.SingleLineText);
+      expect(importedLookupField.isLookup).toBeFalsy();
+      expect(importedLookupField.lookupOptions).toBeFalsy();
+      expect(importedLookupField.hasError).toBeFalsy();
+
+      const importedRollupField = importedFields.find((field) => field.name === rollupFieldName)!;
+      expect(importedRollupField.type).toBe(FieldType.SingleLineText);
+      expect(importedRollupField.lookupOptions).toBeFalsy();
+      expect(importedRollupField.hasError).toBeFalsy();
+      expect(importedRollupField.isLookup).toBeFalsy();
     });
   });
 

@@ -175,10 +175,15 @@ export interface IRecordQueryDialectProvider {
    * Return null when no special handling is required.
    * @example
    * ```ts
-   * dialect.flattenLookupCteValue('CTE_main_link', 'fld_123', true) // => WITH RECURSIVE ... jsonb_array_elements ...
+   * dialect.flattenLookupCteValue('CTE_main_link', 'fld_123', true, DbFieldType.Json) // => WITH RECURSIVE ... jsonb_array_elements ...
    * ```
    */
-  flattenLookupCteValue(cteName: string, fieldId: string, isMultiple: boolean): string | null;
+  flattenLookupCteValue(
+    cteName: string,
+    fieldId: string,
+    isMultiple: boolean,
+    dbFieldType: DbFieldType
+  ): string | null;
 
   // JSON aggregation helpers
 

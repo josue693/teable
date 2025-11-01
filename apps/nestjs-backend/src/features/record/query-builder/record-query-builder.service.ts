@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { extractFieldIdsFromFilter, FieldType } from '@teable/core';
+import { extractFieldIdsFromFilter, FieldType, SortFunc } from '@teable/core';
 import type { FieldCore, IFilter, ISortItem, TableDomain, Tables } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
@@ -264,7 +264,15 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       this.dbProvider
         .groupQuery(qb, fieldMap, groupByFieldIds, undefined, { selectionMap })
         .appendGroupBuilder();
-      // Do not sort by original columns here to avoid ORDER BY columns not present in GROUP BY
+
+      for (const groupItem of groupBy) {
+        const groupedField = fieldMap[groupItem.fieldId];
+        if (!groupedField) continue;
+        const direction = groupItem.order === SortFunc.Desc ? 'DESC' : 'ASC';
+        const nullOrdering = direction === 'DESC' ? 'NULLS LAST' : 'NULLS FIRST';
+        const quotedAlias = `"${groupedField.dbFieldName.replace(/"/g, '""')}"`;
+        qb.orderByRaw(`${quotedAlias} ${direction} ${nullOrdering}`);
+      }
     }
 
     return { qb, alias, selectionMap };

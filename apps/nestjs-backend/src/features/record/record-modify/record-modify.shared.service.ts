@@ -63,7 +63,7 @@ export class RecordModifySharedService {
     return nonNoop.filter((c) => !sysSet.has(c.fieldId));
   }
 
-  async getEffectFieldInstances(
+  private async getEffectFieldInstances(
     tableId: string,
     recordsFields: Record<string, unknown>[],
     fieldKeyType: FieldKeyType = FieldKeyType.Name,
@@ -77,12 +77,8 @@ export class RecordModifySharedService {
 
     const usedFieldIdsOrNames = Array.from(fieldIdsOrNamesSet);
 
-    const usedFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        tableId,
-        [fieldKeyType]: { in: usedFieldIdsOrNames },
-        deletedTime: null,
-      },
+    const usedFields = await this.dataLoaderService.field.load(tableId, {
+      [fieldKeyType]: usedFieldIdsOrNames,
     });
 
     if (!ignoreMissingFields && usedFields.length !== usedFieldIdsOrNames.length) {
@@ -116,24 +112,30 @@ export class RecordModifySharedService {
 
     const newRecordsFields: Record<string, unknown>[] = recordsFields.map(() => ({}));
     for (const field of effectFieldInstance) {
-      if (field.isComputed) continue;
+      // skip computed field
+      if (field.isComputed) {
+        continue;
+      }
       const typeCastAndValidate = new TypeCastAndValidate({
         services: {
-          dataLoaderService: this.dataLoaderService,
           prismaService: this.prismaService,
           fieldConvertingService: this.fieldConvertingService,
           recordService: this.recordService,
           attachmentsStorageService: this.attachmentsStorageService,
           collaboratorService: this.collaboratorService,
+          dataLoaderService: this.dataLoaderService,
         },
         field,
         tableId,
         typecast,
       });
       const fieldIdOrName = field[fieldKeyType];
+
       const cellValues = recordsFields.map((recordFields) => recordFields[fieldIdOrName]);
+
       const newCellValues = await typeCastAndValidate.typecastCellValuesWithField(cellValues);
       newRecordsFields.forEach((recordField, i) => {
+        // do not generate undefined field key
         if (newCellValues[i] !== undefined) {
           recordField[fieldIdOrName] = newCellValues[i];
         }
@@ -144,7 +146,6 @@ export class RecordModifySharedService {
       fields: newRecordsFields[i],
     }));
   }
-
   async generateCellContexts(
     tableId: string,
     fieldKeyType: FieldKeyType,
