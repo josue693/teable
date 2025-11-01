@@ -174,7 +174,8 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
           const flattenedExpr = this.dialect.flattenLookupCteValue(
             cteName,
             field.id,
-            !!field.isMultipleCellValue
+            !!field.isMultipleCellValue,
+            field.dbFieldType
           );
           if (flattenedExpr) {
             this.state.setSelection(field.id, flattenedExpr);

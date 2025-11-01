@@ -986,6 +986,76 @@ describe('OpenAPI formula (e2e)', () => {
       }
     });
 
+    it('should flatten multi-value lookup formulas returning scalar text', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'formula-lookup-flatten-foreign',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Scheduled', type: FieldType.Date } as IFieldRo,
+        ],
+        records: [
+          { fields: { Title: 'Task A', Scheduled: '2025-10-31T08:10:24.894Z' } },
+          { fields: { Title: 'Task B', Scheduled: '2025-11-05T10:00:00.000Z' } },
+        ],
+      });
+      let host: ITableFullVo | undefined;
+      try {
+        const scheduledFieldId = foreign.fields.find((field) => field.name === 'Scheduled')!.id;
+        const taggedFormula = await createField(foreign.id, {
+          name: 'Schedule Tag',
+          type: FieldType.Formula,
+          options: {
+            expression: `CONCATENATE(DATETIME_FORMAT({${scheduledFieldId}}, 'YYYY-MM-DD'), "-tag")`,
+          },
+        });
+
+        host = await createTable(baseId, {
+          name: 'formula-lookup-flatten-host',
+          fields: [{ name: 'Project', type: FieldType.SingleLineText } as IFieldRo],
+          records: [{ fields: { Project: 'Main' } }],
+        });
+
+        const linkField = await createField(host.id, {
+          name: 'Related Tasks',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: foreign.id,
+          } as ILinkFieldOptionsRo,
+        } as IFieldRo);
+
+        const lookupField = await createField(host.id, {
+          name: 'Tagged Schedules',
+          type: FieldType.Formula,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: taggedFormula.id,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const hostRecordId = host.records[0].id;
+        await updateRecordByApi(
+          host.id,
+          hostRecordId,
+          linkField.id,
+          foreign.records.map((record) => ({ id: record.id }))
+        );
+
+        const updatedRecord = await getRecord(host.id, hostRecordId);
+        expect(updatedRecord.data.fields[lookupField.name]).toEqual([
+          '2025-10-31-tag',
+          '2025-11-05-tag',
+        ]);
+      } finally {
+        if (host) {
+          await permanentDeleteTable(baseId, host.id);
+        }
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
     it('should calculate numeric formulas using lookup fields', async () => {
       const foreign = await createTable(baseId, {
         name: 'formula-lookup-numeric-foreign',
