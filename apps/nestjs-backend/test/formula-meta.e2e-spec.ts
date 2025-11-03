@@ -1,10 +1,37 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-duplicate-string */
 import type { INestApplication } from '@nestjs/common';
-import { FieldType } from '@teable/core';
+import { FieldKeyType, FieldType } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { ITableFullVo } from '@teable/openapi';
-import { createField, createTable, deleteTable, convertField, initApp } from './utils/init-app';
+import {
+  createField,
+  createTable,
+  deleteTable,
+  convertField,
+  initApp,
+  getRecords,
+} from './utils/init-app';
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitForFormulaValue(
+  tableId: string,
+  fieldId: string,
+  expectedValue: number,
+  timeoutMs = 8000
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const records = await getRecords(tableId, { fieldKeyType: FieldKeyType.Id });
+    const value = records.records?.[0]?.fields?.[fieldId];
+    if (value === expectedValue) {
+      return;
+    }
+    await sleep(200);
+  }
+  throw new Error(`Timed out waiting for formula value ${expectedValue}`);
+}
 
 describe('Formula meta persistedAsGeneratedColumn (e2e)', () => {
   let app: INestApplication;
@@ -98,6 +125,72 @@ describe('Formula meta persistedAsGeneratedColumn (e2e)', () => {
       const meta = fieldRaw.meta ? JSON.parse(fieldRaw.meta as unknown as string) : undefined;
       expect(meta).toBeDefined();
       expect(meta.persistedAsGeneratedColumn).toBe(true);
+    });
+  });
+
+  describe('numeric generated formulas', () => {
+    let table: ITableFullVo;
+
+    beforeEach(async () => {
+      table = await createTable(baseId, {
+        name: 'formula-meta-numeric',
+        fields: [{ name: 'Remaining Minutes', type: FieldType.Number }],
+        records: [{ fields: { 'Remaining Minutes': 120 } }],
+      });
+    });
+
+    afterEach(async () => {
+      if (table?.id) {
+        await deleteTable(baseId, table.id);
+      }
+    });
+
+    it('supports creating and updating generated numeric formulas', async () => {
+      const minutesFieldId = table.fields.find((f) => f.name === 'Remaining Minutes')!.id;
+
+      const created = await createField(table.id, {
+        name: 'Hours Remaining',
+        type: FieldType.Formula,
+        options: {
+          expression: `({${minutesFieldId}} * 45) / 60`,
+        },
+      });
+
+      expect(created.hasError).toBeFalsy();
+      await waitForFormulaValue(table.id, created.id, 90);
+
+      const createdRaw = await prisma.field.findUniqueOrThrow({
+        where: { id: created.id },
+        select: { meta: true },
+      });
+      const createdMeta = createdRaw.meta
+        ? (JSON.parse(createdRaw.meta as unknown as string) as {
+            persistedAsGeneratedColumn?: boolean;
+          })
+        : undefined;
+      expect(createdMeta?.persistedAsGeneratedColumn).toBe(true);
+
+      const updated = await convertField(table.id, created.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `({${minutesFieldId}} * 30) / 60`,
+        },
+      });
+
+      expect(updated.id).toBe(created.id);
+      expect(updated.hasError).toBeFalsy();
+      await waitForFormulaValue(table.id, created.id, 60);
+
+      const updatedRaw = await prisma.field.findUniqueOrThrow({
+        where: { id: created.id },
+        select: { meta: true },
+      });
+      const updatedMeta = updatedRaw.meta
+        ? (JSON.parse(updatedRaw.meta as unknown as string) as {
+            persistedAsGeneratedColumn?: boolean;
+          })
+        : undefined;
+      expect(updatedMeta?.persistedAsGeneratedColumn).toBe(true);
     });
   });
 });

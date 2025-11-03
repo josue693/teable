@@ -2856,6 +2856,152 @@ describe('OpenAPI link (e2e)', () => {
     });
   });
 
+  describe('single value link value shape', () => {
+    let table1: ITableFullVo | undefined;
+    let table2: ITableFullVo | undefined;
+
+    afterEach(async () => {
+      if (table1) {
+        await permanentDeleteTable(baseId, table1.id);
+        table1 = undefined;
+      }
+      if (table2) {
+        await permanentDeleteTable(baseId, table2.id);
+        table2 = undefined;
+      }
+    });
+
+    it('should return single object when many-one link uses formula lookup', async () => {
+      const expectedTitle = 'New Face - Stage';
+
+      table2 = await createTable(baseId, {
+        name: 'manyone-lookup-src',
+        fields: [
+          { name: 'Name', type: FieldType.SingleLineText },
+          { name: 'Stage', type: FieldType.SingleLineText },
+        ],
+        records: [
+          {
+            fields: {
+              Name: 'New Face',
+              Stage: 'Stage',
+            },
+          },
+        ],
+      });
+
+      const nameField = table2.fields.find((f) => f.name === 'Name')!;
+      const stageField = table2.fields.find((f) => f.name === 'Stage')!;
+      const formulaField = await createField(table2.id, {
+        name: 'Display Title',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${nameField.id}} & " - " & {${stageField.id}}`,
+        },
+      });
+
+      table1 = await createTable(baseId, {
+        name: 'manyone-host',
+        fields: [{ name: 'Label', type: FieldType.SingleLineText }],
+        records: [{ fields: { Label: 'Row 1' } }],
+      });
+
+      const linkField = await createField(table1.id, {
+        name: 'Studio',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: table2.id,
+          lookupFieldId: formulaField.id,
+        },
+      });
+
+      await updateRecordByApi(table1.id, table1.records[0].id, linkField.id, {
+        id: table2.records[0].id,
+      });
+
+      const { records: hostRecords } = await getRecords(table1.id, {
+        fieldKeyType: FieldKeyType.Id,
+      });
+
+      expect(hostRecords[0].fields[linkField.id]).toEqual({
+        id: table2.records[0].id,
+        title: expectedTitle,
+      });
+    });
+
+    it('should return single object when one-one link uses formula lookup', async () => {
+      const expectedTitle = 'New Face - Stage';
+
+      table2 = await createTable(baseId, {
+        name: 'oneone-lookup-src',
+        fields: [
+          { name: 'Name', type: FieldType.SingleLineText },
+          { name: 'Stage', type: FieldType.SingleLineText },
+        ],
+        records: [
+          {
+            fields: {
+              Name: 'New Face',
+              Stage: 'Stage',
+            },
+          },
+        ],
+      });
+
+      const nameField = table2.fields.find((f) => f.name === 'Name')!;
+      const stageField = table2.fields.find((f) => f.name === 'Stage')!;
+      const formulaField = await createField(table2.id, {
+        name: 'Display Title',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${nameField.id}} & " - " & {${stageField.id}}`,
+        },
+      });
+
+      table1 = await createTable(baseId, {
+        name: 'oneone-host',
+        fields: [{ name: 'Label', type: FieldType.SingleLineText }],
+        records: [{ fields: { Label: 'Row 1' } }],
+      });
+
+      const linkField = await createField(table1.id, {
+        name: 'Studio',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneOne,
+          foreignTableId: table2.id,
+          lookupFieldId: formulaField.id,
+        },
+      });
+
+      await updateRecordByApi(table1.id, table1.records[0].id, linkField.id, {
+        id: table2.records[0].id,
+      });
+
+      const { records: hostRecords } = await getRecords(table1.id, {
+        fieldKeyType: FieldKeyType.Id,
+      });
+
+      expect(hostRecords[0].fields[linkField.id]).toEqual({
+        id: table2.records[0].id,
+        title: expectedTitle,
+      });
+
+      const symmetricFieldId = (linkField.options as ILinkFieldOptions).symmetricFieldId;
+      if (symmetricFieldId) {
+        const { records: foreignRecords } = await getRecords(table2.id, {
+          fieldKeyType: FieldKeyType.Id,
+        });
+
+        expect(foreignRecords[0].fields[symmetricFieldId]).toEqual({
+          id: table1.records[0].id,
+          title: 'Row 1',
+        });
+      }
+    });
+  });
+
   describe('update link when delete record', () => {
     let table1: ITableFullVo;
     let table2: ITableFullVo;
@@ -3287,12 +3433,14 @@ describe('OpenAPI link (e2e)', () => {
       const rec1 = records.find((r) => r.fields['Title'] === '21')!;
       const rec2 = records.find((r) => r.fields['Title'] === '22')!;
       // Both should link back to table1 A1 with title using formatted decimals
-      expect(rec1.fields[t2LinkName]).toEqual([
-        { id: table1.records[0].id, title: '444.00, 555.00' },
-      ]);
-      expect(rec2.fields[t2LinkName]).toEqual([
-        { id: table1.records[0].id, title: '444.00, 555.00' },
-      ]);
+      expect(rec1.fields[t2LinkName]).toEqual({
+        id: table1.records[0].id,
+        title: '444.00, 555.00',
+      });
+      expect(rec2.fields[t2LinkName]).toEqual({
+        id: table1.records[0].id,
+        title: '444.00, 555.00',
+      });
     });
 
     it('formula referencing rollup is formatted and usable as link title', async () => {
@@ -3339,8 +3487,14 @@ describe('OpenAPI link (e2e)', () => {
       // For 21 and 22 both linked to table1.A1, sum is 444+555=999 => '999.00'
       const rec1 = records.find((r) => r.fields['Title'] === '21')!;
       const rec2 = records.find((r) => r.fields['Title'] === '22')!;
-      expect(rec1.fields[t2LinkName]).toEqual([{ id: table1.records[0].id, title: '999.00' }]);
-      expect(rec2.fields[t2LinkName]).toEqual([{ id: table1.records[0].id, title: '999.00' }]);
+      expect(rec1.fields[t2LinkName]).toEqual({
+        id: table1.records[0].id,
+        title: '999.00',
+      });
+      expect(rec2.fields[t2LinkName]).toEqual({
+        id: table1.records[0].id,
+        title: '999.00',
+      });
     });
 
     it('formula referencing text lookup renders comma-joined titles', async () => {
@@ -3382,8 +3536,14 @@ describe('OpenAPI link (e2e)', () => {
       const { records } = await getRecords(table2.id, { fieldKeyType: FieldKeyType.Name });
       const rec1 = records.find((r) => r.fields['Title'] === '21')!;
       const rec2 = records.find((r) => r.fields['Title'] === '22')!;
-      expect(rec1.fields[t2LinkName]).toEqual([{ id: table1.records[0].id, title: '21, 22' }]);
-      expect(rec2.fields[t2LinkName]).toEqual([{ id: table1.records[0].id, title: '21, 22' }]);
+      expect(rec1.fields[t2LinkName]).toEqual({
+        id: table1.records[0].id,
+        title: '21, 22',
+      });
+      expect(rec2.fields[t2LinkName]).toEqual({
+        id: table1.records[0].id,
+        title: '21, 22',
+      });
     });
   });
 

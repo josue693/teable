@@ -268,10 +268,9 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       for (const groupItem of groupBy) {
         const groupedField = fieldMap[groupItem.fieldId];
         if (!groupedField) continue;
-        const direction = groupItem.order === SortFunc.Desc ? 'DESC' : 'ASC';
-        const nullOrdering = direction === 'DESC' ? 'NULLS LAST' : 'NULLS FIRST';
-        const quotedAlias = `"${groupedField.dbFieldName.replace(/"/g, '""')}"`;
-        qb.orderByRaw(`${quotedAlias} ${direction} ${nullOrdering}`);
+        const direction: 'ASC' | 'DESC' = groupItem.order === SortFunc.Desc ? 'DESC' : 'ASC';
+
+        this.orderAggregateByGroup(qb, groupedField, direction);
       }
     }
 
@@ -296,6 +295,31 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       projection
     );
     visitor.build();
+  }
+
+  private orderAggregateByGroup(
+    qb: Knex.QueryBuilder,
+    field: FieldCore,
+    direction: 'ASC' | 'DESC'
+  ) {
+    const nullOrdering = direction === 'DESC' ? 'NULLS LAST' : 'NULLS FIRST';
+    const quotedAlias = `"${field.dbFieldName.replace(/"/g, '""')}"`;
+
+    if (field.type === FieldType.SingleSelect) {
+      const rawChoices = (field.options as { choices?: { name: string }[] } | undefined)?.choices;
+      const choices = Array.isArray(rawChoices) ? rawChoices : [];
+      if (choices.length) {
+        const placeholders = choices.map(() => '?').join(', ');
+        const arrayPositionExpr = `ARRAY_POSITION(ARRAY[${placeholders}], ${quotedAlias})`;
+        qb.orderByRaw(
+          `${arrayPositionExpr} ${direction} ${nullOrdering}`,
+          choices.map(({ name }) => name)
+        );
+        return;
+      }
+    }
+
+    qb.orderByRaw(`${quotedAlias} ${direction} ${nullOrdering}`);
   }
 
   // eslint-disable-next-line sonarjs/cognitive-complexity

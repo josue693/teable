@@ -216,6 +216,9 @@ export class FieldDuplicateService {
         );
 
         for (const alterTableQuery of modifyColumnSql) {
+          this.logger.debug(
+            "Executing SQL to modify primary formula field's column: " + alterTableQuery
+          );
           await this.prismaService.txClient().$executeRawUnsafe(alterTableQuery);
         }
         await this.prismaService.txClient().field.update({

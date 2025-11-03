@@ -62,9 +62,45 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
     return `CASE WHEN (${expr} = ROUND(${expr})) THEN ROUND(${expr})::TEXT ELSE (${expr})::TEXT END`;
   }
 
+  private hasWrappingParentheses(expr: string): boolean {
+    if (!expr.startsWith('(') || !expr.endsWith(')')) {
+      return false;
+    }
+    let depth = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const ch = expr[i];
+      if (ch === '(') {
+        depth++;
+      } else if (ch === ')') {
+        depth--;
+        if (depth === 0 && i < expr.length - 1) {
+          return false;
+        }
+        if (depth < 0) {
+          return false;
+        }
+      }
+    }
+    return depth === 0;
+  }
+
+  private isNumericLiteral(expr: string): boolean {
+    let trimmed = expr.trim();
+    while (trimmed.length > 0 && this.hasWrappingParentheses(trimmed)) {
+      trimmed = trimmed.slice(1, -1).trim();
+    }
+    // eslint-disable-next-line regexp/no-unused-capturing-group
+    return /^[-+]?\d+(\.\d+)?$/.test(trimmed);
+  }
+
   coerceToNumericForCompare(expr: string): string {
     // Same safe numeric coercion used for arithmetic
-    return `NULLIF(REGEXP_REPLACE((${expr})::text, '[^0-9.+-]', '', 'g'), '')::numeric`;
+    if (this.isNumericLiteral(expr)) {
+      return `(${expr})::numeric`;
+    }
+    const textExpr = `((${expr})::text COLLATE "C")`;
+    const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
+    return `NULLIF(${sanitized}, '' COLLATE "C")::numeric`;
   }
 
   linkHasAny(selectionSql: string): string {

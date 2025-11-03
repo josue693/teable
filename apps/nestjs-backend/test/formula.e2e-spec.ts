@@ -1,7 +1,13 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-duplicate-string */
 import type { INestApplication } from '@nestjs/common';
-import type { IFieldRo, IFilter, ILinkFieldOptionsRo, ILookupOptionsRo } from '@teable/core';
+import type {
+  IFieldRo,
+  IFilter,
+  ILinkFieldOptionsRo,
+  ILookupOptionsRo,
+  ISelectFieldOptionsRo,
+} from '@teable/core';
 import {
   DateFormattingPreset,
   FieldKeyType,
@@ -32,6 +38,8 @@ describe('OpenAPI formula (e2e)', () => {
   let numberFieldRo: IFieldRo & { id: string; name: string };
   let textFieldRo: IFieldRo & { id: string; name: string };
   let formulaFieldRo: IFieldRo & { id: string; name: string };
+  let userFieldRo: IFieldRo & { id: string; name: string };
+  let multiSelectFieldRo: IFieldRo & { id: string; name: string };
   const baseId = globalThis.testConfig.baseId;
   const baseDate = new Date(Date.UTC(2025, 0, 3, 0, 0, 0, 0));
   const dateAddMultiplier = 7;
@@ -290,6 +298,30 @@ describe('OpenAPI formula (e2e)', () => {
       type: FieldType.SingleLineText,
     };
 
+    userFieldRo = {
+      id: generateFieldId(),
+      name: 'assignee',
+      description: 'the user field',
+      type: FieldType.User,
+      options: {
+        isMultiple: false,
+        shouldNotify: false,
+      },
+    };
+
+    multiSelectFieldRo = {
+      id: generateFieldId(),
+      name: 'tags',
+      description: 'the multi select field',
+      type: FieldType.MultipleSelect,
+      options: {
+        choices: [
+          { id: 'tag-alpha', name: 'Alpha' },
+          { id: 'tag-beta', name: 'Beta' },
+        ],
+      } as ISelectFieldOptionsRo,
+    };
+
     formulaFieldRo = {
       id: generateFieldId(),
       name: 'New field',
@@ -302,7 +334,7 @@ describe('OpenAPI formula (e2e)', () => {
 
     table1 = await createTable(baseId, {
       name: 'table1',
-      fields: [numberFieldRo, textFieldRo, formulaFieldRo],
+      fields: [numberFieldRo, textFieldRo, userFieldRo, multiSelectFieldRo, formulaFieldRo],
     });
     table1Id = table1.id;
   });
@@ -522,6 +554,400 @@ describe('OpenAPI formula (e2e)', () => {
     });
 
     expect(records[0].fields[urlFormulaField.name]).toEqual('https://example.com/?id=abc');
+  });
+
+  describe('binary operator coercion', () => {
+    type OperatorTestContext = {
+      tableId: string;
+      numberField: typeof numberFieldRo;
+      textField: typeof textFieldRo;
+      userField: typeof userFieldRo;
+      multiSelectField: typeof multiSelectFieldRo;
+    };
+
+    type ExtendedOperatorTestContext = OperatorTestContext & Record<string, unknown>;
+
+    type OperatorCase = {
+      name: string;
+      setup?: (
+        ctx: OperatorTestContext
+      ) => Promise<Record<string, unknown>> | Record<string, unknown>;
+      expression: (ctx: ExtendedOperatorTestContext) => string;
+      initialFields: (ctx: ExtendedOperatorTestContext) => Record<string, unknown>;
+      updatedFields: (ctx: ExtendedOperatorTestContext) => Record<string, unknown>;
+      assertInitial: (value: unknown, ctx: ExtendedOperatorTestContext) => void;
+      assertUpdated: (value: unknown, ctx: ExtendedOperatorTestContext) => void;
+    };
+
+    const sanitizeLabel = (label: string) => label.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+
+    const operatorCases: OperatorCase[] = [
+      {
+        name: 'text equals numeric literal',
+        expression: (ctx) => `{${ctx.textField.id}} = 0`,
+        initialFields: (ctx) => ({
+          [ctx.textField.name]: '0',
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.textField.name]: '5',
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(true);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(false);
+        },
+      },
+      {
+        name: 'text greater than numeric literal',
+        expression: (ctx) => `{${ctx.textField.id}} > 2`,
+        initialFields: (ctx) => ({
+          [ctx.textField.name]: '10',
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.textField.name]: '1',
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(true);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(false);
+        },
+      },
+      {
+        name: 'number less than string literal',
+        expression: (ctx) => `{${ctx.numberField.id}} < "10"`,
+        initialFields: (ctx) => ({
+          [ctx.numberField.name]: 3,
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.numberField.name]: 20,
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(true);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(false);
+        },
+      },
+      {
+        name: 'text minus numeric literal',
+        expression: (ctx) => `{${ctx.textField.id}} - 2`,
+        initialFields: (ctx) => ({
+          [ctx.textField.name]: '5',
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.textField.name]: '1',
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBe(3);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBe(-1);
+        },
+      },
+      {
+        name: 'number plus numeric literal',
+        expression: (ctx) => `{${ctx.numberField.id}} + 3`,
+        initialFields: (ctx) => ({
+          [ctx.numberField.name]: 4,
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.numberField.name]: 10,
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBe(7);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBe(13);
+        },
+      },
+      {
+        name: 'text divided by numeric literal',
+        expression: (ctx) => `{${ctx.textField.id}} / 2`,
+        initialFields: (ctx) => ({
+          [ctx.textField.name]: '8',
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.textField.name]: '3',
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBe(4);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBeCloseTo(1.5, 9);
+        },
+      },
+      {
+        name: 'text multiplied by numeric literal',
+        expression: (ctx) => `{${ctx.textField.id}} * 4`,
+        initialFields: (ctx) => ({
+          [ctx.textField.name]: '3',
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.textField.name]: '5',
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBe(12);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('number');
+          expect(value).toBe(20);
+        },
+      },
+      {
+        name: 'user equality against text',
+        expression: (ctx) => `TEXT_ALL({${ctx.userField.id}}) = {${ctx.textField.id}}`,
+        initialFields: (ctx) => ({
+          [ctx.userField.name]: {
+            id: globalThis.testConfig.userId,
+            title: globalThis.testConfig.userName,
+            email: globalThis.testConfig.email,
+          },
+          [ctx.textField.name]: globalThis.testConfig.userName,
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.userField.name]: {
+            id: globalThis.testConfig.userId,
+            title: globalThis.testConfig.userName,
+            email: globalThis.testConfig.email,
+          },
+          [ctx.textField.name]: 'someone else',
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(true);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(false);
+        },
+      },
+      {
+        name: 'multi select equality against text',
+        expression: (ctx) => `ARRAY_JOIN({${ctx.multiSelectField.id}}, '') = {${ctx.textField.id}}`,
+        initialFields: (ctx) => ({
+          [ctx.textField.name]: 'Alpha',
+          [ctx.multiSelectField.name]: ['Alpha'],
+        }),
+        updatedFields: (ctx) => ({
+          [ctx.textField.name]: 'Alpha',
+          [ctx.multiSelectField.name]: ['Beta'],
+        }),
+        assertInitial: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(true);
+        },
+        assertUpdated: (value) => {
+          expect(typeof value).toBe('boolean');
+          expect(value).toBe(false);
+        },
+      },
+    ];
+
+    it.each(operatorCases)(
+      'should evaluate $name without type coercion errors',
+      async (testCase) => {
+        const baseContext: OperatorTestContext = {
+          tableId: table1Id,
+          numberField: numberFieldRo,
+          textField: textFieldRo,
+          userField: userFieldRo,
+          multiSelectField: multiSelectFieldRo,
+        };
+
+        const extraContext = (await testCase.setup?.(baseContext)) ?? {};
+        const context = { ...baseContext, ...extraContext } as ExtendedOperatorTestContext;
+
+        const { records } = await createRecords(table1Id, {
+          fieldKeyType: FieldKeyType.Name,
+          records: [
+            {
+              fields: testCase.initialFields(context),
+            },
+          ],
+        });
+        const recordId = records[0].id;
+
+        const formulaField = await createField(table1Id, {
+          name: `binary-op-${sanitizeLabel(testCase.name)}`,
+          type: FieldType.Formula,
+          options: {
+            expression: testCase.expression(context),
+          },
+        });
+
+        const readFormulaValue = async () => {
+          const record = await getRecord(table1Id, recordId);
+          return record.data.fields[formulaField.name];
+        };
+
+        const initialValue = await readFormulaValue();
+        testCase.assertInitial(initialValue, context);
+
+        await updateRecord(table1Id, recordId, {
+          fieldKeyType: FieldKeyType.Name,
+          record: {
+            fields: testCase.updatedFields(context),
+          },
+        });
+
+        const updatedValue = await readFormulaValue();
+        testCase.assertUpdated(updatedValue, context);
+      }
+    );
+  });
+
+  describe('boolean operator combinations', () => {
+    it('should evaluate nested AND/OR across heterogeneous fields', async () => {
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: 3,
+              [textFieldRo.name]: 'Alpha announcement',
+              [multiSelectFieldRo.name]: ['Alpha'],
+              [userFieldRo.name]: {
+                id: globalThis.testConfig.userId,
+                title: globalThis.testConfig.userName,
+                email: globalThis.testConfig.email,
+              },
+            },
+          },
+        ],
+      });
+      const recordId = records[0].id;
+
+      const booleanField = await createField(table1Id, {
+        name: 'boolean-nested-and-or',
+        type: FieldType.Formula,
+        options: {
+          expression:
+            `AND({${numberFieldRo.id}} > 0, ` +
+            `OR({${textFieldRo.id}} != "", ARRAY_JOIN({${multiSelectFieldRo.id}}, '') = "Alpha"), ` +
+            `LOWER({${userFieldRo.id}}) != "")`,
+        },
+      });
+
+      const initialRecord = await getRecord(table1Id, recordId);
+      expect(initialRecord.data.fields[booleanField.name]).toBe(true);
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [numberFieldRo.name]: 0,
+            [textFieldRo.name]: '',
+            [multiSelectFieldRo.name]: null,
+            [userFieldRo.name]: null,
+          },
+        },
+      });
+
+      const updatedRecord = await getRecord(table1Id, recordId);
+      expect(updatedRecord.data.fields[booleanField.name]).toBe(false);
+    });
+
+    it('should evaluate OR with nested NOT and date comparison', async () => {
+      const reviewDateField = await createField(table1Id, {
+        name: 'review-date',
+        type: FieldType.Date,
+      } as IFieldRo);
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: -2,
+              [textFieldRo.name]: '',
+              [multiSelectFieldRo.name]: null,
+              [reviewDateField.name]: '2025-05-01T00:00:00.000Z',
+            },
+          },
+        ],
+      });
+      const recordId = records[0].id;
+
+      const numberBranchField = await createField(table1Id, {
+        name: 'boolean-branch-number',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${numberFieldRo.id}} < 0`,
+        },
+      });
+
+      const emptyStringBranchField = await createField(table1Id, {
+        name: 'boolean-branch-empty-text',
+        type: FieldType.Formula,
+        options: {
+          expression: `AND({${textFieldRo.id}} = "", NOT(ARRAY_JOIN({${multiSelectFieldRo.id}}, '') != ""))`,
+        },
+      });
+
+      const dateBranchField = await createField(table1Id, {
+        name: 'boolean-branch-date',
+        type: FieldType.Formula,
+        options: {
+          expression: `AND(IS_BEFORE({${reviewDateField.id}}, '2026-01-01'), {${numberFieldRo.id}} <= 5)`,
+        },
+      });
+
+      const complexBooleanField = await createField(table1Id, {
+        name: 'boolean-nested-or',
+        type: FieldType.Formula,
+        options: {
+          expression:
+            `OR(` +
+            `{${numberFieldRo.id}} < 0, ` +
+            `AND({${textFieldRo.id}} = "", NOT(ARRAY_JOIN({${multiSelectFieldRo.id}}, '') != "")), ` +
+            `AND(IS_BEFORE({${reviewDateField.id}}, '2026-01-01'), {${numberFieldRo.id}} <= 5)` +
+            `)`,
+        },
+      });
+
+      const initialRecord = await getRecord(table1Id, recordId);
+      expect(initialRecord.data.fields[numberBranchField.name]).toBe(true);
+      expect(initialRecord.data.fields[emptyStringBranchField.name]).toBe(true);
+      expect(initialRecord.data.fields[dateBranchField.name]).toBe(true);
+      expect(initialRecord.data.fields[complexBooleanField.name]).toBe(true);
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [numberFieldRo.name]: 12,
+            [textFieldRo.name]: 'Busy',
+            [multiSelectFieldRo.name]: ['Alpha'],
+            [reviewDateField.name]: '2026-02-01T00:00:00.000Z',
+          },
+        },
+      });
+
+      const updatedRecord = await getRecord(table1Id, recordId);
+      expect(updatedRecord.data.fields[numberFieldRo.name]).toEqual(12);
+      expect(updatedRecord.data.fields[textFieldRo.name]).toEqual('Busy');
+      expect(updatedRecord.data.fields[multiSelectFieldRo.name]).toEqual(['Alpha']);
+      expect(updatedRecord.data.fields[reviewDateField.name]).toEqual('2026-02-01T00:00:00.000Z');
+      expect(updatedRecord.data.fields[numberBranchField.name]).toBe(false);
+      expect(updatedRecord.data.fields[emptyStringBranchField.name]).toBe(false);
+      expect(updatedRecord.data.fields[dateBranchField.name]).toBe(false);
+      expect(updatedRecord.data.fields[complexBooleanField.name]).toBe(false);
+    });
   });
 
   describe('numeric formula functions', () => {
@@ -1309,6 +1735,39 @@ describe('OpenAPI formula (e2e)', () => {
         }
       }
     );
+
+    it('should populate RECORD_ID formula for newly created records', async () => {
+      const formulaField = await createField(table1Id, {
+        name: 'logic-record-id-create',
+        type: FieldType.Formula,
+        options: {
+          expression: 'RECORD_ID()',
+        },
+      });
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: numericInput,
+              [textFieldRo.name]: textInput,
+            },
+          },
+        ],
+      });
+
+      const createdRecord = records[0];
+      expect(typeof createdRecord.id).toBe('string');
+      expect(createdRecord.id.length).toBeGreaterThan(0);
+
+      const formulaValue = createdRecord.fields?.[formulaField.name] as string | null;
+      expect(formulaValue).toBe(createdRecord.id);
+
+      const recordAfterCreate = await getRecord(table1Id, createdRecord.id);
+      const persistedValue = recordAfterCreate.data.fields?.[formulaField.name] as string | null;
+      expect(persistedValue).toBe(createdRecord.id);
+    });
 
     it('should normalize truthiness for non-boolean logical inputs', async () => {
       const { records } = await createRecords(table1Id, {

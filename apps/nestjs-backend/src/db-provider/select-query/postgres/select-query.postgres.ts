@@ -20,12 +20,48 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     return alias ? `"${alias}".${quoted}` : quoted;
   }
 
+  private hasWrappingParentheses(expr: string): boolean {
+    if (!expr.startsWith('(') || !expr.endsWith(')')) {
+      return false;
+    }
+    let depth = 0;
+    for (let i = 0; i < expr.length; i++) {
+      const ch = expr[i];
+      if (ch === '(') {
+        depth++;
+      } else if (ch === ')') {
+        depth--;
+        if (depth === 0 && i < expr.length - 1) {
+          return false;
+        }
+        if (depth < 0) {
+          return false;
+        }
+      }
+    }
+    return depth === 0;
+  }
+
+  private isNumericLiteral(expr: string): boolean {
+    let trimmed = expr.trim();
+    while (trimmed.length > 0 && this.hasWrappingParentheses(trimmed)) {
+      trimmed = trimmed.slice(1, -1).trim();
+    }
+    // eslint-disable-next-line regexp/no-unused-capturing-group
+    return /^[-+]?\d+(\.\d+)?$/.test(trimmed);
+  }
+
   private toNumericSafe(expr: string): string {
     // Safely coerce any scalar to a floating-point number:
     // - Strip everything except digits, sign, decimal point
     // - Map empty string to NULL to avoid casting errors
     // Cast to DOUBLE PRECISION so pg driver returns JS numbers (not strings as with NUMERIC)
-    return `NULLIF(REGEXP_REPLACE((${expr})::text, '[^0-9.+-]', '', 'g'), '')::double precision`;
+    if (this.isNumericLiteral(expr)) {
+      return `(${expr})::double precision`;
+    }
+    const textExpr = `((${expr})::text COLLATE "C")`;
+    const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
+    return `NULLIF(${sanitized}, '' COLLATE "C")::double precision`;
   }
 
   private coalesceNumeric(expr: string): string {
@@ -38,6 +74,10 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
   private normalizeBlankComparable(value: string): string {
     return `COALESCE(NULLIF((${value})::text, ''), '')`;
+  }
+
+  private ensureTextCollation(expr: string): string {
+    return `(${expr})::text COLLATE "C"`;
   }
 
   private isTextLikeExpression(value: string): boolean {
@@ -383,7 +423,10 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   regexpReplace(text: string, pattern: string, replacement: string): string {
-    return `REGEXP_REPLACE(${text}, ${pattern}, ${replacement}, 'g')`;
+    const source = this.ensureTextCollation(text);
+    const regex = this.ensureTextCollation(pattern);
+    const replacementText = this.ensureTextCollation(replacement);
+    return `REGEXP_REPLACE(${source}, ${regex}, ${replacementText}, 'g')`;
   }
 
   substitute(text: string, oldText: string, newText: string, instanceNum?: string): string {

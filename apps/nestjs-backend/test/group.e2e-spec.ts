@@ -1,8 +1,8 @@
 import type { INestApplication } from '@nestjs/common';
 import type { IFieldRo, IGroup, IGroupItem, IViewGroupRo } from '@teable/core';
-import { CellValueType, FieldKeyType, FieldType, SortFunc } from '@teable/core';
-import type { ITableFullVo, IGetRecordsRo } from '@teable/openapi';
-import { updateViewGroup, updateViewSort } from '@teable/openapi';
+import { CellValueType, Colors, FieldKeyType, FieldType, SortFunc } from '@teable/core';
+import type { ITableFullVo, IGetRecordsRo, IGroupHeaderPoint } from '@teable/openapi';
+import { GroupPointType, updateViewGroup, updateViewSort } from '@teable/openapi';
 import { isEmpty, orderBy } from 'lodash';
 import { x_20 } from './data-helpers/20x';
 import {
@@ -109,6 +109,89 @@ describe('OpenAPI ViewController view group (e2e)', () => {
     };
 
     await expect(updateViewGroup(tableId, viewId, assertGroup)).rejects.toThrow();
+  });
+});
+
+describe('Single select grouping respects choice order', () => {
+  const choiceOrder = ['无库存', '有库存', '缺货'] as const;
+  const choiceDefinitions = choiceOrder.map((name, index) => ({
+    id: `choice-${index}`,
+    name,
+    color: index === 0 ? Colors.Red : index === 1 ? Colors.Green : Colors.Blue,
+  }));
+  const statusFieldName = '库存状态';
+  const quantityFieldName = '商品';
+  const recordDefinitions: Record<(typeof choiceOrder)[number], string[]> = {
+    无库存: ['record-库存-1', 'record-库存-2'],
+    有库存: ['record-有货-1'],
+    缺货: ['record-缺货-1'],
+  };
+
+  let table: ITableFullVo;
+  let statusField: IFieldRo;
+
+  beforeAll(async () => {
+    table = await createTable(baseId, {
+      name: 'group_single_select_order',
+      fields: [
+        {
+          name: quantityFieldName,
+          type: FieldType.SingleLineText,
+        },
+        {
+          name: statusFieldName,
+          type: FieldType.SingleSelect,
+          options: {
+            choices: choiceDefinitions,
+          },
+        },
+      ],
+      records: choiceOrder.flatMap((status) =>
+        recordDefinitions[status].map((recordName) => ({
+          fields: {
+            [quantityFieldName]: recordName,
+            [statusFieldName]: status,
+          },
+        }))
+      ),
+    });
+    statusField = table.fields!.find(
+      ({ name, type }) => name === statusFieldName && type === FieldType.SingleSelect
+    ) as IFieldRo;
+  });
+
+  afterAll(async () => {
+    await permanentDeleteTable(baseId, table.id);
+  });
+
+  const assertGroupingOrder = async (
+    order: SortFunc,
+    expectedGroupOrder: (typeof choiceOrder)[number][]
+  ) => {
+    const query: IGetRecordsRo = {
+      fieldKeyType: FieldKeyType.Id,
+      groupBy: [{ fieldId: statusField.id!, order }],
+    };
+    const { records, extra } = await getRecords(table.id, query);
+    const headerValues =
+      extra?.groupPoints
+        ?.filter((point): point is IGroupHeaderPoint => point.type === GroupPointType.Header)
+        .map((point) => point.value as string) ?? [];
+    expect(headerValues).toEqual(expectedGroupOrder);
+
+    const statusSequence = records.map((record) => record.fields?.[statusField.id!] as string);
+    const expectedStatusSequence = expectedGroupOrder.flatMap((status) =>
+      recordDefinitions[status].map(() => status)
+    );
+    expect(statusSequence).toEqual(expectedStatusSequence);
+  };
+
+  it('orders groups by choice order when ascending', async () => {
+    await assertGroupingOrder(SortFunc.Asc, [...choiceOrder]);
+  });
+
+  it('orders groups by choice order when descending', async () => {
+    await assertGroupingOrder(SortFunc.Desc, [...choiceOrder].reverse());
   });
 });
 
