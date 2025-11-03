@@ -855,16 +855,10 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
           const sanitizedExpression = this.normalizeJsonAggregateExpression(conditionalJsonObject);
           return `json_agg(${sanitizedExpression} ORDER BY ${orderByClause}) FILTER (WHERE ${appliedFilter})`;
         } else {
-          // For single value relationships (ManyOne, OneOne)
-          // If lookup field is a Formula, return array-of-one to keep API consistent with tests
-          const isFormulaLookup = targetLookupField.type === FieldType.Formula;
+          // For single value relationships (ManyOne, OneOne) always return a single object or null
           const cond = linkFilterSub
             ? `${recordIdRef} IS NOT NULL AND EXISTS ${linkFilterSub}`
             : `${recordIdRef} IS NOT NULL`;
-          if (isFormulaLookup) {
-            return `CASE WHEN ${cond} THEN jsonb_build_array(${conditionalJsonObject})::jsonb ELSE '[]'::jsonb END`;
-          }
-          // Otherwise, return single object or null
           return `CASE WHEN ${cond} THEN ${conditionalJsonObject} ELSE NULL END`;
         }
       })
@@ -917,13 +911,10 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
             }) || this.getJsonAggregationFunction(conditionalJsonObject)
           );
         } else {
-          // For single value relationships
-          // If lookup field is a Formula, keep array-of-one when present, but return NULL when empty
-          const isFormulaLookup = targetLookupField.type === FieldType.Formula;
-          if (isFormulaLookup) {
-            return `CASE WHEN ${recordIdRef} IS NOT NULL THEN json_array(${conditionalJsonObject}) ELSE NULL END`;
-          }
-          return `CASE WHEN ${recordIdRef} IS NOT NULL THEN ${conditionalJsonObject} ELSE NULL END`;
+          const cond = linkFilterSub
+            ? `${recordIdRef} IS NOT NULL AND EXISTS ${linkFilterSub}`
+            : `${recordIdRef} IS NOT NULL`;
+          return `CASE WHEN ${cond} THEN ${conditionalJsonObject} ELSE NULL END`;
         }
       })
       .otherwise(() => {

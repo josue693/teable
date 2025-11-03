@@ -170,7 +170,7 @@ describe('Single select grouping respects choice order', () => {
   ) => {
     const query: IGetRecordsRo = {
       fieldKeyType: FieldKeyType.Id,
-      groupBy: [{ fieldId: statusField.id, order }],
+      groupBy: [{ fieldId: statusField.id!, order }],
     };
     const { records, extra } = await getRecords(table.id, query);
     const headerValues =
@@ -179,7 +179,7 @@ describe('Single select grouping respects choice order', () => {
         .map((point) => point.value as string) ?? [];
     expect(headerValues).toEqual(expectedGroupOrder);
 
-    const statusSequence = records.map((record) => record.fields?.[statusField.id] as string);
+    const statusSequence = records.map((record) => record.fields?.[statusField.id!] as string);
     const expectedStatusSequence = expectedGroupOrder.flatMap((status) =>
       recordDefinitions[status].map(() => status)
     );
