@@ -4,6 +4,7 @@
 import type { INestApplication } from '@nestjs/common';
 import type { IAttachmentItem, IConditionalRollupFieldOptions, IFilter } from '@teable/core';
 import { FieldKeyType, FieldType, SortFunc, ViewType } from '@teable/core';
+import { PrismaService } from '@teable/db-main-prisma';
 import type { INotifyVo, ITableFullVo } from '@teable/openapi';
 import {
   createField,
@@ -45,6 +46,7 @@ import {
   getRecords,
   getRecord,
   deleteField,
+  convertField,
 } from './utils/init-app';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -721,6 +723,123 @@ describe('OpenAPI BaseController for base import (e2e)', () => {
       expect(inactiveRecord.fields?.[importedRollupField.id]).toBe('Beta');
       expect(activeRecord.fields?.[importedLookupField.id]).toEqual(['Alpha']);
       expect(inactiveRecord.fields?.[importedLookupField.id]).toEqual(['Beta']);
+    });
+  });
+
+  describe('primary formula import', () => {
+    let sourceBaseId: string | undefined;
+    let importedBaseId: string | undefined;
+
+    afterEach(async () => {
+      if (importedBaseId) {
+        await permanentDeleteBase(importedBaseId);
+        importedBaseId = undefined;
+      }
+      if (sourceBaseId) {
+        await permanentDeleteBase(sourceBaseId);
+        sourceBaseId = undefined;
+      }
+    });
+
+    it('imports base with primary formula numeric expression using generated columns', async () => {
+      const sourceBase = (
+        await createBase({
+          name: 'primary_formula_source',
+          spaceId,
+          icon: '🧮',
+        })
+      ).data;
+      sourceBaseId = sourceBase.id;
+
+      const table = await createTable(sourceBase.id, {
+        name: 'Primary Formula Table',
+        fields: [
+          { name: 'Primary Field', type: FieldType.SingleLineText },
+          { name: 'Remaining Minutes', type: FieldType.Number },
+        ],
+      });
+
+      const primaryFieldId = table.fields.find((field) => field.isPrimary)!.id;
+      const remainingMinutesId = table.fields.find(
+        (field) => field.name === 'Remaining Minutes'
+      )!.id;
+
+      await convertField(table.id, primaryFieldId, {
+        type: FieldType.Formula,
+        options: {
+          expression: `({${remainingMinutesId}} * 45) / 60`,
+        },
+      });
+
+      const awaitExportWithPreview = createAwaitWithEventWithResult<{ previewUrl: string }>(
+        app.get(EventEmitterService),
+        Events.BASE_EXPORT_COMPLETE
+      );
+
+      const { previewUrl } = await awaitExportWithPreview(async () => {
+        await exportBase(sourceBaseId!);
+      });
+
+      const attachmentService = getAttachmentService(app);
+      const clsService = app.get(ClsService);
+
+      const notify = await clsService.runWith<Promise<IAttachmentItem>>(
+        {
+          user: {
+            id: userId,
+            name: 'Test User',
+            email: 'test@example.com',
+            isAdmin: null,
+          },
+        } as unknown as ClsStore,
+        async () => {
+          return await attachmentService.uploadFromUrl(appUrl + previewUrl);
+        }
+      );
+
+      const { base: importedBase } = (
+        await importBase({
+          notify: notify as unknown as INotifyVo,
+          spaceId,
+        })
+      ).data;
+      importedBaseId = importedBase.id;
+
+      const tableList = (await getTableList(importedBaseId)).data;
+      expect(tableList).toHaveLength(1);
+
+      const importedTableMeta = tableList[0];
+      const importedTable = await getTable(importedBaseId, importedTableMeta.id, {
+        includeContent: true,
+      });
+
+      const importedPrimaryField = importedTable.fields?.find((field) => field.isPrimary);
+      expect(importedPrimaryField?.type).toBe(FieldType.Formula);
+
+      const importedRemainingField = importedTable.fields?.find(
+        (field) => field.name === 'Remaining Minutes'
+      );
+      expect(importedRemainingField).toBeDefined();
+
+      const primaryOptions =
+        typeof importedPrimaryField?.options === 'string'
+          ? (JSON.parse(importedPrimaryField.options) as { expression?: string })
+          : (importedPrimaryField?.options as { expression?: string }) ?? {};
+
+      expect(primaryOptions.expression).toBeDefined();
+      expect(primaryOptions.expression).toContain(`{${importedRemainingField!.id}}`);
+      expect(importedPrimaryField?.hasError).toBeFalsy();
+
+      const prisma = app.get(PrismaService);
+      const primaryFieldRaw = await prisma.field.findUniqueOrThrow({
+        where: { id: importedPrimaryField!.id },
+        select: { meta: true },
+      });
+      const persistedMeta =
+        typeof primaryFieldRaw.meta === 'string'
+          ? (JSON.parse(primaryFieldRaw.meta) as { persistedAsGeneratedColumn?: boolean })
+          : primaryFieldRaw.meta ?? {};
+      expect(persistedMeta?.persistedAsGeneratedColumn).toBe(true);
     });
   });
 });

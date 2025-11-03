@@ -1,7 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import type { IFieldRo, IGroup, IGroupItem, IViewGroupRo } from '@teable/core';
 import { CellValueType, Colors, FieldKeyType, FieldType, SortFunc } from '@teable/core';
-import type { ITableFullVo, IGetRecordsRo } from '@teable/openapi';
+import type { ITableFullVo, IGetRecordsRo, IGroupHeaderPoint } from '@teable/openapi';
 import { GroupPointType, updateViewGroup, updateViewSort } from '@teable/openapi';
 import { isEmpty, orderBy } from 'lodash';
 import { x_20 } from './data-helpers/20x';
@@ -176,7 +176,7 @@ describe('Single select grouping respects choice order', () => {
     const headerValues =
       extra?.groupPoints
         ?.filter((point) => point.type === GroupPointType.Header)
-        .map((point) => point.value as string) ?? [];
+        .map((point: IGroupHeaderPoint) => point.value as string) ?? [];
     expect(headerValues).toEqual(expectedGroupOrder);
 
     const statusSequence = records.map((record) => record.fields?.[statusField.id!] as string);

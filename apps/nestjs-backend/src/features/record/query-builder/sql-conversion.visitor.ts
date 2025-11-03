@@ -825,7 +825,7 @@ abstract class BaseSqlConversionVisitor<
           const numericExpr = this.safeCastToNumeric(valueSql);
           return `(COALESCE(${numericExpr}, 0) <> 0)`;
         }
-        const sanitized = `REGEXP_REPLACE((${valueSql})::text, '[^0-9.+-]', '', 'g')`;
+        const sanitized = `REGEXP_REPLACE(((${valueSql})::text COLLATE "C"), '[^0-9.+-]', '', 'g')`;
         const numericCandidate = `(CASE
           WHEN ${sanitized} ~ '^[-+]{0,1}(\\d+\\.\\d+|\\d+|\\.\\d+)$' THEN ${sanitized}::double precision
           ELSE NULL
