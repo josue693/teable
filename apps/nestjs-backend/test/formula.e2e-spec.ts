@@ -1736,6 +1736,39 @@ describe('OpenAPI formula (e2e)', () => {
       }
     );
 
+    it('should populate RECORD_ID formula for newly created records', async () => {
+      const formulaField = await createField(table1Id, {
+        name: 'logic-record-id-create',
+        type: FieldType.Formula,
+        options: {
+          expression: 'RECORD_ID()',
+        },
+      });
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: numericInput,
+              [textFieldRo.name]: textInput,
+            },
+          },
+        ],
+      });
+
+      const createdRecord = records[0];
+      expect(typeof createdRecord.id).toBe('string');
+      expect(createdRecord.id.length).toBeGreaterThan(0);
+
+      const formulaValue = createdRecord.fields?.[formulaField.name] as string | null;
+      expect(formulaValue).toBe(createdRecord.id);
+
+      const recordAfterCreate = await getRecord(table1Id, createdRecord.id);
+      const persistedValue = recordAfterCreate.data.fields?.[formulaField.name] as string | null;
+      expect(persistedValue).toBe(createdRecord.id);
+    });
+
     it('should normalize truthiness for non-boolean logical inputs', async () => {
       const { records } = await createRecords(table1Id, {
         fieldKeyType: FieldKeyType.Name,

@@ -1008,6 +1008,48 @@ export class ComputedDependencyCollectorService {
     return impact;
   }
 
+  private async getFormulaFieldsWithoutDependencies(
+    tableId: string,
+    excludeFieldIds?: string[]
+  ): Promise<string[]> {
+    const query = this.knex
+      .select({ id: 'f.id' })
+      .from({ f: 'field' })
+      .leftJoin({ r: 'reference' }, 'r.to_field_id', 'f.id')
+      .where('f.table_id', tableId)
+      .whereNull('f.deleted_time')
+      .where('f.type', FieldType.Formula)
+      .andWhere((qb) => {
+        qb.whereNull('f.is_lookup').orWhere('f.is_lookup', false);
+      })
+      .andWhereRaw('COALESCE(f.has_error, false) = false')
+      .groupBy('f.id')
+      .havingRaw('COUNT(r.from_field_id) = 0');
+
+    if (excludeFieldIds?.length) {
+      query.whereNotIn('f.id', excludeFieldIds);
+    }
+
+    const sql = query.toQuery();
+    const rows = await this.prismaService.txClient().$queryRawUnsafe<{ id: string }[]>(sql);
+    return rows.map((row) => row.id).filter(Boolean);
+  }
+
+  private addContextFreeFormulasToImpact(
+    impact: IComputedImpactByTable,
+    tableId: string,
+    formulaIds: string[]
+  ): void {
+    if (!formulaIds.length) return;
+    const target = (impact[tableId] ||= {
+      fieldIds: new Set<string>(),
+      recordIds: new Set<string>(),
+    });
+    for (const id of formulaIds) {
+      target.fieldIds.add(id);
+    }
+  }
+
   /**
    * Collect impacted computed fields grouped by table, and the associated recordIds to re-evaluate.
    * - Same-table computed fields: impacted recordIds are the updated records themselves.
@@ -1131,6 +1173,12 @@ export class ComputedDependencyCollectorService {
         }
       }
     }
+    const contextFreeFormulaIds = await this.getFormulaFieldsWithoutDependencies(
+      tableId,
+      excludeFieldIds
+    );
+    this.addContextFreeFormulasToImpact(impact, tableId, contextFreeFormulaIds);
+
     if (!Object.keys(impact).length) return {};
 
     // 3) Compute impacted recordIds per table with multi-hop propagation
