@@ -47,6 +47,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     while (trimmed.length > 0 && this.hasWrappingParentheses(trimmed)) {
       trimmed = trimmed.slice(1, -1).trim();
     }
+    // eslint-disable-next-line regexp/no-unused-capturing-group
     return /^[-+]?\d+(\.\d+)?$/.test(trimmed);
   }
 

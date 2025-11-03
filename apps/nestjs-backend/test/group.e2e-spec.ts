@@ -175,8 +175,8 @@ describe('Single select grouping respects choice order', () => {
     const { records, extra } = await getRecords(table.id, query);
     const headerValues =
       extra?.groupPoints
-        ?.filter((point) => point.type === GroupPointType.Header)
-        .map((point: IGroupHeaderPoint) => point.value as string) ?? [];
+        ?.filter((point): point is IGroupHeaderPoint => point.type === GroupPointType.Header)
+        .map((point) => point.value as string) ?? [];
     expect(headerValues).toEqual(expectedGroupOrder);
 
     const statusSequence = records.map((record) => record.fields?.[statusField.id!] as string);

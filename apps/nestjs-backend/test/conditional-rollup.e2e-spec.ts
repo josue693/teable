@@ -24,6 +24,9 @@ import {
   SortFunc,
 } from '@teable/core';
 import type { ITableFullVo } from '@teable/openapi';
+import { EventEmitterService } from '../src/event-emitter/event-emitter.service';
+import { Events } from '../src/event-emitter/events';
+import { createAwaitWithEventWithResult } from './utils/event-promise';
 import {
   createBase,
   createField,
@@ -44,11 +47,13 @@ import {
 
 describe('OpenAPI Conditional Rollup field (e2e)', () => {
   let app: INestApplication;
+  let eventEmitterService: EventEmitterService;
   const baseId = globalThis.testConfig.baseId;
 
   beforeAll(async () => {
     const appCtx = await initApp();
     app = appCtx.app;
+    eventEmitterService = app.get(EventEmitterService);
   });
 
   afterAll(async () => {
@@ -3477,6 +3482,87 @@ describe('OpenAPI Conditional Rollup field (e2e)', () => {
 
       const emptyRecord = await getRecord(host.id, emptyRecordId);
       expect((emptyRecord.fields[rollupField.id] as number | null | undefined) ?? 0).toBe(0);
+    });
+
+    it('should delete conditional rollup filtered by matching text and user fields on the host table', async () => {
+      const { userId, userName, email } = globalThis.testConfig;
+      const userCell = { id: userId, title: userName, email };
+
+      const table = await createTable(baseId, {
+        name: 'ConditionalRollup_User_Delete',
+        fields: [
+          { name: 'Course', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Instructor', type: FieldType.User } as IFieldRo,
+        ],
+        records: [
+          { fields: { Course: 'Math', Instructor: userCell } },
+          { fields: { Course: 'Math', Instructor: userCell } },
+          { fields: { Course: 'Physics', Instructor: userCell } },
+        ],
+      });
+
+      const courseFieldId = table.fields.find((field) => field.name === 'Course')!.id;
+      const instructorFieldId = table.fields.find((field) => field.name === 'Instructor')!.id;
+
+      const filter: IFilter = {
+        conjunction: 'and',
+        filterSet: [
+          {
+            fieldId: courseFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: courseFieldId },
+          },
+          {
+            fieldId: instructorFieldId,
+            operator: 'is',
+            value: { type: 'field', fieldId: instructorFieldId },
+          },
+        ],
+      };
+
+      const conditionalRollup = await createField(table.id, {
+        name: 'Instructor Count',
+        type: FieldType.ConditionalRollup,
+        options: {
+          foreignTableId: table.id,
+          lookupFieldId: instructorFieldId,
+          expression: 'countall({values})',
+          filter,
+        } as IConditionalRollupFieldOptions,
+      } as IFieldRo);
+
+      const awaitFieldDeleteEvent = createAwaitWithEventWithResult<{
+        records?: unknown[];
+        fields: Array<
+          IFieldVo & {
+            columnMeta?: unknown;
+            references?: string[];
+          }
+        >;
+      }>(eventEmitterService, Events.OPERATION_FIELDS_DELETE);
+
+      type TDeleteEventPayload = {
+        records?: unknown[];
+        fields: Array<
+          IFieldVo & {
+            columnMeta?: unknown;
+            references?: string[];
+          }
+        >;
+      };
+
+      let deleteEventPayload: TDeleteEventPayload | undefined;
+
+      try {
+        deleteEventPayload = await awaitFieldDeleteEvent(() =>
+          deleteField(table.id, conditionalRollup.id)
+        );
+      } finally {
+        await permanentDeleteTable(baseId, table.id);
+      }
+
+      expect(deleteEventPayload).toBeDefined();
+      expect(deleteEventPayload?.records).toBeUndefined();
     });
   });
 
