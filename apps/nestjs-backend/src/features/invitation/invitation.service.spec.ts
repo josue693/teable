@@ -2,7 +2,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
-import { getPermissions, Role } from '@teable/core';
+import { getPermissions, getRandomString, Role } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { CollaboratorType, PrincipalType } from '@teable/openapi';
 import { ClsService } from 'nestjs-cls';
@@ -27,9 +27,19 @@ describe('InvitationService', () => {
   let invitationService: InvitationService;
   let clsService: ClsService<IClsStore>;
 
-  const mockUser = { id: 'usr1', name: 'John', email: 'john@example.com' };
+  const mockUser = {
+    id: 'usr1',
+    name: 'John',
+    email: 'john@example.com',
+    accountName: getRandomString(10),
+  };
   const mockSpace = { id: 'spcxxxxxxxx', name: 'Test Space' };
-  const mockInvitedUser = { id: 'usr2', name: 'Bob', email: 'bob@example.com' };
+  const mockInvitedUser = {
+    id: 'usr2',
+    name: 'Bob',
+    email: 'bob@example.com',
+    accountName: getRandomString(10),
+  };
   const defaultCls = {
     user: mockUser,
     tx: {},

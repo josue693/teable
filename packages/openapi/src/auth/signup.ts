@@ -18,6 +18,18 @@ export type IRefMeta = z.infer<typeof refMetaSchema>;
 
 export const signupSchema = signinSchema.merge(
   z.object({
+    accountName: z
+      .string()
+      .min(3)
+      .max(30)
+      .trim()
+      .toLowerCase()
+      .refine((val: string) => !val.includes('@'), {
+        message: 'Account name cannot contain @',
+        path: ['accountName'],
+      })
+      .optional(),
+    email: z.string().email().trim().toLowerCase().optional(),
     defaultSpaceName: z.string().optional(),
     refMeta: refMetaSchema.optional(),
     password: signupPasswordSchema,

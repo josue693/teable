@@ -150,6 +150,7 @@ export const SettingPage = (props: ISettingPageProps) => {
     disallowSpaceInvitation,
     enableEmailVerification,
     enableWaitlist,
+    enableAccountNameRegistration,
     brandName,
     brandLogo,
   } = setting;
@@ -223,6 +224,25 @@ export const SettingPage = (props: ISettingPageProps) => {
                   onCheckedChange={(checked) => onValueChange('enableEmailVerification', checked)}
                 />
               </div>
+              {isEE && (
+                <div className="flex items-center justify-between space-x-2 rounded-lg border p-4 shadow-sm">
+                  <div className="space-y-1">
+                    <Label htmlFor="enable-account-name-registration">
+                      {t('admin.setting.enableAccountNameRegistration')}
+                    </Label>
+                    <div className="text-xs text-zinc-500">
+                      {t('admin.setting.enableAccountNameRegistrationDescription')}
+                    </div>
+                  </div>
+                  <Switch
+                    id="enable-account-name-registration"
+                    checked={Boolean(enableAccountNameRegistration)}
+                    onCheckedChange={(checked) =>
+                      onValueChange('enableAccountNameRegistration', checked)
+                    }
+                  />
+                </div>
+              )}
             </div>
           </div>
 

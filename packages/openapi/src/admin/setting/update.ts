@@ -89,6 +89,7 @@ export const updateSettingRoSchema = z.object({
   disallowSpaceCreation: z.boolean().optional(),
   disallowSpaceInvitation: z.boolean().optional(),
   enableEmailVerification: z.boolean().optional(),
+  enableAccountNameRegistration: z.boolean().optional(),
   aiConfig: aiConfigVoSchema.optional(),
   enableWaitlist: z.boolean().optional(),
   appConfig: appConfigSchema.optional(),

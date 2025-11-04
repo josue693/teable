@@ -413,12 +413,13 @@ export class ShareService {
     this.dbProvider.filterQuery(queryBuilder, fieldMap, filter).appendQueryBuilder();
 
     const resQuery = this.knex('users')
-      .select('id', 'email', 'name', 'avatar')
+      .select('id', 'account_name', 'email', 'name', 'avatar')
       .from(this.knex.raw(`(${queryBuilder.toQuery()}) AS coll`))
       .leftJoin('users', 'users.id', '=', 'coll.user_id');
     if (search) {
       this.dbProvider.searchBuilder(resQuery, [
         ['users.name', search],
+        ['users.account_name', search],
         ['users.email', search],
       ]);
     }

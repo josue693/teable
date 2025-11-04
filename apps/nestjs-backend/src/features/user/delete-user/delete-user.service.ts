@@ -50,6 +50,7 @@ export class DeleteUserService {
       where: { id: userId, permanentDeletedTime: null },
       data: {
         email: `deleted-${getRandomString(10)}@teable.ai`,
+        accountName: `deleted-${getRandomString(10).toLowerCase()}`,
         name: 'Deleted User',
         permanentDeletedTime: new Date().toISOString(),
         deletedTime: new Date().toISOString(),

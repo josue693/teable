@@ -144,6 +144,7 @@ const Container = (props: IPageProps & { uiConfig?: IUIConfig }) => {
                 user={{
                   id: ANONYMOUS_USER_ID,
                   name: ANONYMOUS_USER_ID,
+                  accountName: ANONYMOUS_USER_ID,
                   email: '',
                   notifyMeta: {},
                   hasPassword: false,

@@ -73,6 +73,7 @@ export interface IOAuthCodeState {
     id: string;
     name: string;
     email: string;
+    accountName: string;
   };
 }
 

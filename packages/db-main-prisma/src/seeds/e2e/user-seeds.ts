@@ -20,6 +20,7 @@ const createUser = (
   const id = index === undefined ? baseId : `${baseId}_${index}`;
   return {
     id,
+    accountName: index === undefined ? baseName : `${baseName}_${index}`,
     name: index === undefined ? baseName : `${baseName}_${index}`,
     email: index === undefined ? `${baseName}@e2e.com` : `${baseName}_${index}@e2e.com`,
     salt: pas.salt,
@@ -47,7 +48,7 @@ export class UserSeeds extends AbstractSeed {
     for (const u of userSets) {
       const { id, name, email, ...userNonUnique } = u;
       const user = await this.prisma.user.upsert({
-        where: { email },
+        where: { id },
         update: userNonUnique,
         create: u,
       });

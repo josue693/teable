@@ -1,3 +1,4 @@
+import { getRandomString } from '@teable/core';
 import { noop } from 'lodash';
 import { SessionContext, type ISessionContext } from '../session';
 
@@ -9,6 +10,7 @@ export const createSessionContext = (context: Partial<ISessionContext> = {}) => 
       id: 'usrxxxxxx',
       name: 'teable',
       email: 'example@teable.ai',
+      accountName: getRandomString(10),
       notifyMeta: {},
       hasPassword: true,
     },

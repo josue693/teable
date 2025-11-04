@@ -35,6 +35,7 @@ export const publicSettingVoSchema = settingVoSchema
     disallowSpaceInvitation: true,
     enableEmailVerification: true,
     enableWaitlist: true,
+    enableAccountNameRegistration: true,
     createdTime: true,
   })
   .merge(

@@ -85,7 +85,7 @@ export class SystemFieldService {
         pre[field[fieldKeyType]] = field.convertDBValue2CellValue({
           id: user.id,
           title: user.name,
-          email: user.email,
+          email: user.email ?? '',
         });
       }
       return pre;

@@ -8,7 +8,7 @@ import { UserAvatar } from '../cell-value';
 
 export type ICollaboratorUser = Omit<
   IUser,
-  'phone' | 'notifyMeta' | 'hasPassword' | 'isAdmin' | 'avatar'
+  'phone' | 'notifyMeta' | 'hasPassword' | 'isAdmin' | 'avatar' | 'accountName'
 > & {
   borderColor?: string;
   avatar?: ReactNode;

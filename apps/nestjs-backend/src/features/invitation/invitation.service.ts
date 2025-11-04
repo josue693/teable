@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -32,6 +33,7 @@ import { UserService } from '../user/user.service';
 
 @Injectable()
 export class InvitationService {
+  private readonly logger = new Logger(InvitationService.name);
   constructor(
     private readonly prismaService: PrismaService,
     private readonly settingOpenApiService: SettingOpenApiService,
@@ -48,10 +50,10 @@ export class InvitationService {
   }
 
   private async createNotExistedUser(emails: string[]) {
-    const users: { email: string; name: string; id: string }[] = [];
+    const users: { email: string; name: string; id: string; accountName: string }[] = [];
     for (const email of emails) {
       const user = await this.userService.createUser({ email });
-      users.push(pick(user, 'id', 'name', 'email'));
+      users.push(pick(user, 'id', 'accountName', 'name', 'email'));
     }
     return users;
   }
@@ -102,7 +104,7 @@ export class InvitationService {
     });
 
     const noExistEmails = invitationEmails.filter(
-      (email) => !sendUsers.find((u) => u.email.toLowerCase() === email.toLowerCase())
+      (email) => !sendUsers.find((u) => u.email?.toLowerCase() === email.toLowerCase())
     );
 
     return this.prismaService.$tx(async () => {
@@ -112,6 +114,11 @@ export class InvitationService {
 
       const result: EmailInvitationVo = {};
       for (const sendUser of sendUsers) {
+        const sendUserEmail = sendUser.email ?? '';
+        if (!sendUserEmail) {
+          this.logger.warn(`Email is empty for user ${sendUser.id}, skipping invitation`);
+          continue;
+        }
         // create collaborator link
         if (resourceType === CollaboratorType.Space) {
           await this.collaboratorService.createSpaceCollaborator({
@@ -161,14 +168,14 @@ export class InvitationService {
         const inviteEmailOptions = await this.mailSenderService.inviteEmailOptions({
           brandName,
           name: user.name,
-          email: user.email,
+          email: user.email ?? '',
           resourceName,
           resourceType,
           inviteUrl: this.generateInviteUrl(id, invitationCode),
         });
         this.mailSenderService.sendMail(
           {
-            to: sendUser.email,
+            to: sendUserEmail,
             ...inviteEmailOptions,
           },
           {
@@ -176,7 +183,7 @@ export class InvitationService {
             transporterName: MailTransporterType.Notify,
           }
         );
-        result[sendUser.email] = { invitationId: id };
+        result[sendUserEmail] = { invitationId: id };
       }
       return result;
     });

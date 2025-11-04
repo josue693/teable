@@ -143,7 +143,7 @@ describe('Auth Controller (e2e) api/auth waitlist', () => {
 
     expect(signupRes.data.email).toBe(demoEmail);
     await prismaService.user.delete({
-      where: { email: signupRes.data.email },
+      where: { email: demoEmail },
     });
   });
 });

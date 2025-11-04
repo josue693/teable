@@ -7,6 +7,7 @@ export const USER_INFO = '/auth/user';
 
 export const userInfoVoSchema = z.object({
   id: z.string(),
+  accountName: z.string().optional(),
   name: z.string(),
   avatar: z.string().optional().nullable(),
   email: z.string().email().optional(),

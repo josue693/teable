@@ -59,6 +59,7 @@ export const ShareViewPage = (props: IShareViewPageProps) => {
             user={{
               id: ANONYMOUS_USER_ID,
               name: ANONYMOUS_USER_ID,
+              accountName: ANONYMOUS_USER_ID,
               email: '',
               notifyMeta: {},
               hasPassword: false,

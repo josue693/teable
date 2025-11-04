@@ -1,4 +1,5 @@
 import { LOCALES } from '@teable/core';
+import { userInfoVoSchema } from '../auth/user';
 import { z } from '../zod';
 
 export type IPlugin18nJsonType = {
@@ -38,21 +39,9 @@ export enum PluginStatus {
   Published = 'published',
 }
 
-export const pluginUserSchema = z
-  .object({
-    id: z.string(),
-    name: z.string(),
-    email: z.string().email(),
-    avatar: z.string().optional(),
-  })
-  .optional();
+export const pluginUserSchema = userInfoVoSchema.optional();
 
-export const pluginCreatedBySchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  email: z.string().email(),
-  avatar: z.string().optional(),
-});
+export const pluginCreatedBySchema = userInfoVoSchema;
 
 export const pluginConfigSchema = z
   .object({

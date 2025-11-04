@@ -254,7 +254,7 @@ export class OAuthServerService {
         clientId,
         redirectUri: client.redirectUri,
         scopes: client.scopes,
-        user: pick(user, ['id', 'email', 'name']),
+        user: pick(user, ['id', 'email', 'name', 'accountName']),
       },
       this.oauth2Config.codeExpireIn
     );

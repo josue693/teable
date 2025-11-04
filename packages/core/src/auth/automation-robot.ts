@@ -5,4 +5,5 @@ export const AUTOMATION_ROBOT_USER = {
   id: AUTOMATION_ROBOT_ID,
   name: 'Automation Robot',
   email: 'automationRobot@system.teable.ai',
+  accountName: AUTOMATION_ROBOT_ID,
 };

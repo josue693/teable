@@ -77,10 +77,10 @@ export class LocalAuthService {
     return user;
   }
 
-  async validateUserByEmail(email: string, pass: string) {
-    const user = await this.userService.getUserByEmail(email);
+  async validateUserByEmail(emailOrAccountName: string, pass: string) {
+    const user = await this.userService.getUserByEmailOrAccountName(emailOrAccountName);
     if (!user || (user.accounts.length === 0 && user.password == null)) {
-      throw new BadRequestException(`${email} not registered`);
+      throw new BadRequestException(`User ${emailOrAccountName} not registered`);
     }
 
     if (!user.password) {
@@ -126,11 +126,20 @@ export class LocalAuthService {
 
   private async verifySignup(body: ISignup) {
     const setting = await this.settingService.getSetting();
+    const { email, verification, accountName } = body;
+
+    if (setting?.enableAccountNameRegistration && !accountName) {
+      throw new BadRequestException('Account name is required');
+    }
+
     if (!setting?.enableEmailVerification) {
       return;
     }
-    const { email, verification } = body;
+
     if (!verification) {
+      if (!email) {
+        throw new BadRequestException('Email is required');
+      }
       const { token, expiresTime } = await this.sendSignupVerificationCode(email);
       throw new CustomHttpException(
         'Verification is required',
@@ -147,12 +156,20 @@ export class LocalAuthService {
     }
   }
 
-  private isRegisteredValidate(user: Awaited<ReturnType<typeof this.userService.getUserByEmail>>) {
+  private isRegisteredValidate(
+    user: Awaited<ReturnType<typeof this.userService.getUserByEmailOrAccountName>>
+  ) {
     if (user && (user.password !== null || user.accounts.length > 0)) {
-      throw new HttpException(`User ${user.email} is already registered`, HttpStatus.CONFLICT);
+      throw new HttpException(
+        `User ${user.email || user.accountName} is already registered`,
+        HttpStatus.CONFLICT
+      );
     }
     if (user && user.isSystem) {
-      throw new HttpException(`User ${user.email} is system user`, HttpStatus.BAD_REQUEST);
+      throw new HttpException(
+        `User ${user.email || user.accountName} is system user`,
+        HttpStatus.BAD_REQUEST
+      );
     }
   }
 
@@ -216,18 +233,27 @@ export class LocalAuthService {
   }
 
   async signup(body: ISignup, remoteIp?: string) {
-    const { email, password, defaultSpaceName, refMeta, inviteCode, turnstileToken } = body;
+    const { accountName, email, password, defaultSpaceName, refMeta, inviteCode, turnstileToken } =
+      body;
 
     this.logger.log(
-      `Signup attempt - email: ${email}, hasPassword: ${!!password}, hasTurnstileToken: ${!!turnstileToken}, tokenLength: ${turnstileToken?.length}, hasVerification: ${!!body.verification}, remoteIp: ${remoteIp}`
+      `Signup attempt - accountName: ${accountName}, email: ${email}, hasPassword: ${!!password}, hasTurnstileToken: ${!!turnstileToken}, tokenLength: ${turnstileToken?.length}, hasVerification: ${!!body.verification}, remoteIp: ${remoteIp}`
     );
 
     await this.validateTurnstileIfEnabled(turnstileToken, remoteIp);
 
     await this.verifySignup(body);
 
-    const user = await this.userService.getUserByEmail(email);
-    this.isRegisteredValidate(user);
+    let user = null;
+    if (email) {
+      user = await this.userService.getUserByEmail(email);
+      this.isRegisteredValidate(user);
+    }
+    if (accountName) {
+      user = await this.userService.getUserByAccountName(accountName);
+      this.isRegisteredValidate(user);
+    }
+
     const { salt, hashPassword } = await this.encodePassword(password);
     const res = await this.prismaService.$tx(async (prisma) => {
       if (user) {
@@ -244,8 +270,8 @@ export class LocalAuthService {
       return await this.userService.createUserWithSettingCheck(
         {
           id: generateUserId(),
-          name: email.split('@')[0],
-          email,
+          accountName: accountName ?? '',
+          email: email ?? '',
           salt,
           password: hashPassword,
           lastSignTime: new Date().toISOString(),
@@ -361,12 +387,12 @@ export class LocalAuthService {
         const url = `${this.mailConfig.origin}/auth/reset-password?code=${resetPasswordCode}`;
         const resetPasswordEmailOptions = await this.mailSenderService.resetPasswordEmailOptions({
           name: user.name,
-          email: user.email,
+          email: user.email ?? '',
           resetPasswordUrl: url,
         });
         await this.mailSenderService.sendMail(
           {
-            to: user.email,
+            to: user.email ?? '',
             ...resetPasswordEmailOptions,
           },
           {

@@ -164,6 +164,7 @@ export async function runWithTestUser<T>(
     id: globalThis.testConfig.userId,
     name: globalThis.testConfig.userName,
     email: globalThis.testConfig.email,
+    accountName: globalThis.testConfig.accountName,
     isAdmin: false,
     ...userOverrides,
   };

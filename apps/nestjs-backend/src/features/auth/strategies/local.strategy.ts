@@ -26,6 +26,9 @@ export class LocalStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  /**
+   * email field is email or accountName
+   */
   async validate(req: Request, email: string, password: string) {
     try {
       const turnstileToken = req.body?.turnstileToken;

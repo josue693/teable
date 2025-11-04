@@ -1,6 +1,6 @@
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
-import { Role, getPermissions } from '@teable/core';
+import { Role, getPermissions, getRandomString } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { CollaboratorType, PrincipalType } from '@teable/openapi';
 import { ClsService } from 'nestjs-cls';
@@ -11,7 +11,12 @@ import { CollaboratorModule } from './collaborator.module';
 import { CollaboratorService } from './collaborator.service';
 
 describe('CollaboratorService', () => {
-  const mockUser = { id: 'usr1', name: 'John', email: 'john@example.com' };
+  const mockUser = {
+    id: 'usr1',
+    name: 'John',
+    email: 'john@example.com',
+    accountName: getRandomString(10),
+  };
   const mockSpace = { id: 'spcxxxxxxxx', name: 'Test Space' };
   const prismaService = mockDeep<PrismaService>();
 

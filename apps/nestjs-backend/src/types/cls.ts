@@ -10,6 +10,7 @@ export interface IClsStore extends ClsStore {
     id: string;
     name: string;
     email: string;
+    accountName: string;
     isAdmin?: boolean | null;
   };
   accessTokenId?: string;

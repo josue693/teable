@@ -66,6 +66,7 @@ export class SettingOpenApiController {
       SettingKey.DISALLOW_SPACE_INVITATION,
       SettingKey.ENABLE_EMAIL_VERIFICATION,
       SettingKey.ENABLE_WAITLIST,
+      SettingKey.ENABLE_ACCOUNT_NAME_REGISTRATION,
       SettingKey.AI_CONFIG,
       SettingKey.APP_CONFIG,
       SettingKey.WEB_SEARCH_CONFIG,

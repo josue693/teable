@@ -9,7 +9,7 @@ import { userMeVoSchema } from './user-me';
 export const SIGN_IN = '/auth/signin';
 
 export const signinSchema = z.object({
-  email: z.string().email().toLowerCase(),
+  email: z.string().min(1).toLowerCase(), // Can be email or accountName
   password: passwordSchema,
   turnstileToken: z.string().optional(),
 });

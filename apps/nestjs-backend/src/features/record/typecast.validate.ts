@@ -330,7 +330,7 @@ export class TypeCastAndValidate {
       this.tableId,
       {
         containsIn: {
-          keys: ['id', 'name', 'email', 'phone'],
+          keys: ['id', 'accountName', 'name', 'email', 'phone'],
           values: userStrArray.flat(),
         },
       }

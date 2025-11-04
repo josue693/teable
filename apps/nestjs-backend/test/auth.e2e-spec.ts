@@ -1,7 +1,7 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 import type { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { DriverClient, generateAccountId, HttpErrorCode } from '@teable/core';
+import { DriverClient, generateAccountId, HttpErrorCode, getRandomString } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type {
   CreateAccessTokenVo,
@@ -54,6 +54,7 @@ import { initApp, runWithTestUser } from './utils/init-app';
 
 describe('Auth Controller (e2e)', () => {
   let app: INestApplication;
+  let appUrl: string;
   let prismaService: PrismaService;
   let settingService: SettingService;
   let clsService: ClsService<IClsStore>;
@@ -66,6 +67,7 @@ describe('Auth Controller (e2e)', () => {
 
     const appCtx = await initApp();
     app = appCtx.app;
+    appUrl = appCtx.appUrl;
     clsService = app.get(ClsService);
     prismaService = app.get(PrismaService);
     settingService = app.get(SettingService);
@@ -124,6 +126,7 @@ describe('Auth Controller (e2e)', () => {
       data: {
         email: 'invite@test-invite-signup.com',
         name: 'Invite',
+        accountName: getRandomString(10).toLowerCase(),
       },
     });
     const res = await signup({
@@ -227,12 +230,264 @@ describe('Auth Controller (e2e)', () => {
       data: {
         email: inviteEmail,
         name: 'Invite',
+        accountName: getRandomString(10),
       },
     });
     const res = await sendSignupVerificationCode(inviteEmail);
     expect(res.status).toBe(200);
     await prismaService.user.delete({
       where: { email: inviteEmail },
+    });
+  });
+
+  describe('signup with accountName', () => {
+    let userId: string;
+    let preEnableAccountNameRegistration: boolean | null | undefined;
+
+    const changeAccountNameRegistration = async (enable: boolean) => {
+      await runWithTestUser(clsService, async () => {
+        await settingService.updateSetting({
+          enableAccountNameRegistration: enable,
+        });
+      });
+    };
+
+    beforeAll(async () => {
+      await runWithTestUser(clsService, async () => {
+        const setting = await settingService.getSetting();
+        preEnableAccountNameRegistration = setting.enableAccountNameRegistration;
+      });
+    });
+
+    afterEach(async () => {
+      if (userId) {
+        await prismaService.user.delete({
+          where: {
+            id: userId,
+          },
+        });
+        userId = '';
+      }
+    });
+
+    it('api/auth/signup - only email (auto-generate accountName)', async () => {
+      await changeAccountNameRegistration(false);
+
+      const prefix = getRandomString(10).toLowerCase();
+      const testEmail = prefix + '@test.com';
+      const res = await signup({
+        email: testEmail,
+        password: '12345678a',
+      });
+      expect(res.status).toBe(201);
+      expect(res.data.email).toBe(testEmail);
+      expect(res.data.accountName).toBeDefined();
+      expect(res.data.accountName).not.toBe('');
+      expect(res.data.accountName?.length).toBeGreaterThanOrEqual(3);
+      userId = res.data.id;
+
+      const user = await prismaService.user.findUnique({
+        where: { email: testEmail },
+      });
+      expect(user?.accountName).toBeDefined();
+
+      await changeAccountNameRegistration(preEnableAccountNameRegistration ?? false);
+    });
+
+    it('api/auth/signup - only accountName (no email)', async () => {
+      const testAccountName = getRandomString(10).toLowerCase();
+      const res = await signup({
+        accountName: testAccountName,
+        password: '12345678a',
+      });
+      expect(res.status).toBe(201);
+      expect(res.data.accountName).toBe(testAccountName);
+      expect(res.data.email).toBe('');
+      userId = res.data.id;
+
+      // Verify user was created with accountName and no email
+      const user = await prismaService.user.findUnique({
+        where: { accountName: testAccountName },
+      });
+      expect(user).toBeDefined();
+      expect(user?.accountName).toBe(testAccountName);
+      expect(user?.email ?? '').toBe('');
+    });
+
+    it('api/auth/signup - both email and accountName', async () => {
+      const testEmail = getRandomString(10).toLowerCase() + '@test.com';
+      const testAccountName = getRandomString(10).toLowerCase();
+      const res = await signup({
+        email: testEmail,
+        accountName: testAccountName,
+        password: '12345678a',
+      });
+      expect(res.status).toBe(201);
+      expect(res.data.email).toBe(testEmail);
+      expect(res.data.accountName).toBe(testAccountName);
+      userId = res.data.id;
+
+      // Verify both fields are set
+      const user = await prismaService.user.findUnique({
+        where: { email: testEmail },
+      });
+      expect(user?.email).toBe(testEmail);
+      expect(user?.accountName).toBe(testAccountName);
+    });
+
+    it('api/auth/signup - accountName already taken', async () => {
+      const takenAccountName = getRandomString(10).toLowerCase();
+      const res = await signup({
+        accountName: takenAccountName,
+        password: '12345678a',
+      });
+      userId = res.data.id;
+
+      // Try to register with the same accountName
+      const error = await getError(() =>
+        signup({
+          accountName: takenAccountName,
+          password: '12345678a',
+        })
+      );
+      expect(error?.status).toBe(409);
+    });
+
+    it('api/auth/signup - accountName validation (too short)', async () => {
+      const error = await getError(() =>
+        signup({
+          accountName: 'ab',
+          password: '12345678a',
+        })
+      );
+      expect(error?.status).toBe(400);
+    });
+
+    it('api/auth/signup - accountName validation (invalid characters)', async () => {
+      const error = await getError(() =>
+        signup({
+          accountName: 'Test@Account',
+          password: '12345678a',
+        })
+      );
+      expect(error?.status).toBe(400);
+    });
+  });
+
+  describe('signin with accountName or email', () => {
+    const signInTestEmail = getRandomString(10).toLowerCase() + '@test.com';
+    const signInTestAccountName = getRandomString(10).toLowerCase();
+    const signInTestPassword = '12345678a';
+    let userId: string;
+    beforeAll(async () => {
+      // Create a test user with both email and accountName
+      const res = await signup({
+        email: signInTestEmail,
+        accountName: signInTestAccountName,
+        password: signInTestPassword,
+      });
+      userId = res.data.id;
+    });
+
+    afterAll(async () => {
+      if (userId) {
+        await prismaService.user.delete({
+          where: {
+            id: userId,
+          },
+        });
+        userId = '';
+      }
+    });
+
+    it('api/auth/signin - login with email', async () => {
+      const signInAxios = createAxios();
+      signInAxios.defaults.baseURL = appUrl + '/api';
+
+      const res = await signInAxios.post(SIGN_IN, {
+        email: signInTestEmail,
+        password: signInTestPassword,
+      });
+      expect(res.status).toBe(200);
+      expect(res.data.email).toBe(signInTestEmail);
+      expect(res.data.accountName).toBe(signInTestAccountName);
+    });
+
+    it('api/auth/signin - login with accountName', async () => {
+      const signInAxios = createAxios();
+      signInAxios.defaults.baseURL = appUrl + '/api';
+
+      const res = await signInAxios.post(SIGN_IN, {
+        email: signInTestAccountName, // The field is called 'email' but accepts accountName
+        password: signInTestPassword,
+      });
+      expect(res.status).toBe(200);
+      expect(res.data.email).toBe(signInTestEmail);
+      expect(res.data.accountName).toBe(signInTestAccountName);
+    });
+
+    it('api/auth/signin - login with accountName only user', async () => {
+      const onlyAccountName = getRandomString(10).toLowerCase();
+      const onlyAccountPassword = '12345678a';
+
+      // Create user with only accountName
+      const signupRes = await signup({
+        accountName: onlyAccountName,
+        password: onlyAccountPassword,
+      });
+      userId = signupRes.data.id;
+      const signInAxios = createAxios();
+      signInAxios.defaults.baseURL = appUrl + '/api';
+
+      const signinRes = await signInAxios.post(SIGN_IN, {
+        email: onlyAccountName,
+        password: onlyAccountPassword,
+      });
+      expect(signinRes.status).toBe(200);
+      expect(signinRes.data.accountName).toBe(onlyAccountName);
+      expect(signinRes.data.email).toBe('');
+    });
+
+    it('api/auth/signin - wrong password with email', async () => {
+      const signInAxios = createAxios();
+      signInAxios.defaults.baseURL = appUrl + '/api';
+
+      const error = await getError(() =>
+        signInAxios.post(SIGN_IN, {
+          email: signInTestEmail,
+          password: 'wrongpassword',
+        })
+      );
+      expect(error?.status).toBe(400);
+      expect(error?.message).toContain('Email or password is incorrect');
+    });
+
+    it('api/auth/signin - wrong password with accountName', async () => {
+      const signInAxios = createAxios();
+      signInAxios.defaults.baseURL = appUrl + '/api';
+
+      const error = await getError(() =>
+        signInAxios.post(SIGN_IN, {
+          email: signInTestAccountName,
+          password: 'wrongpassword',
+        })
+      );
+      expect(error?.status).toBe(400);
+      expect(error?.message).toContain('Email or password is incorrect');
+    });
+
+    it('api/auth/signin - non-existent accountName', async () => {
+      const signInAxios = createAxios();
+      signInAxios.defaults.baseURL = appUrl + '/api';
+
+      const error = await getError(() =>
+        signInAxios.post(SIGN_IN, {
+          email: 'nonexistentaccount',
+          password: signInTestPassword,
+        })
+      );
+      expect(error?.status).toBe(400);
+      expect(error?.message).toContain('Email or password is incorrect');
     });
   });
 
@@ -358,6 +613,11 @@ describe('Auth Controller (e2e)', () => {
     });
     const userRes = await newAxios.get<IUserMeVo>(USER_ME);
     expect(userRes.data.email).toBe('temp-token@test-temp-token.com');
+    await prismaService.user.delete({
+      where: {
+        email: 'temp-token@test-temp-token.com',
+      },
+    });
   });
 
   const createTestDataForDeleteUser = async (
@@ -556,8 +816,14 @@ describe('Auth Controller (e2e)', () => {
   it.skipIf(globalThis.testConfig.driver === DriverClient.Sqlite)(
     'api/auth/delete-user - need confirm',
     async () => {
+      // Clean up first to avoid accountName conflicts
+      await prismaService.user.deleteMany({
+        where: {
+          email: 'delete-user-confirm@test-delete-user.com',
+        },
+      });
       const userAxios = await createNewUserAxios({
-        email: 'delete-user@test-delete-user.com',
+        email: 'delete-user-confirm@test-delete-user.com',
         password: '12345678',
       });
       const error = await getError(() => userAxios.delete(DELETE_USER));
@@ -568,6 +834,13 @@ describe('Auth Controller (e2e)', () => {
       );
       expect(error2?.status).toBe(400);
       expect(error2?.message).toContain('Please enter DELETE to confirm');
+
+      // Clean up after test
+      await prismaService.user.deleteMany({
+        where: {
+          email: 'delete-user-confirm@test-delete-user.com',
+        },
+      });
     }
   );
 

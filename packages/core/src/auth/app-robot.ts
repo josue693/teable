@@ -5,4 +5,5 @@ export const APP_ROBOT_USER = {
   id: APP_ROBOT_ID,
   name: 'App Robot',
   email: 'appRobot@system.teable.ai',
+  accountName: APP_ROBOT_ID,
 };

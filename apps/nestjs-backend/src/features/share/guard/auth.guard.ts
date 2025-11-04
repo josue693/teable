@@ -55,6 +55,7 @@ export class ShareAuthGuard extends PassportAuthGuard([SHARE_JWT_STRATEGY]) {
       this.cls.set('user', {
         id: ANONYMOUS_USER_ID,
         name: ANONYMOUS_USER_ID,
+        accountName: ANONYMOUS_USER_ID,
         email: '',
       });
 

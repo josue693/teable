@@ -8,6 +8,7 @@ export const USER_ME = '/auth/user/me';
 
 export const userMeVoSchema = z.object({
   id: z.string(),
+  accountName: z.string(),
   name: z.string(),
   avatar: z.string().nullable().optional(),
   email: z.string().email(),

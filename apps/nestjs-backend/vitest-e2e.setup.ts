@@ -8,6 +8,7 @@ import { buildSync } from 'esbuild';
 interface ITestConfig {
   driver: string;
   email: string;
+  accountName: string;
   userName: string;
   userId: string;
   password: string;
@@ -31,6 +32,7 @@ declare global {
 
 // Set global variables (if needed)
 globalThis.testConfig = {
+  accountName: 'test_account_name',
   userName: 'test',
   email: 'test@e2e.com',
   password: '12345678',

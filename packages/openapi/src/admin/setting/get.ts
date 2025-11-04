@@ -14,6 +14,7 @@ export const settingVoSchema = z.object({
   disallowSpaceInvitation: z.boolean().nullable().optional(),
   enableEmailVerification: z.boolean().nullable().optional(),
   enableWaitlist: z.boolean().nullable().optional(),
+  enableAccountNameRegistration: z.boolean().nullable().optional(),
   aiConfig: aiConfigVoSchema.nullable().optional(),
   notifyMailTransportConfig: mailTransportConfigSchema.nullable().optional(),
   automationMailTransportConfig: mailTransportConfigSchema.nullable().optional(),

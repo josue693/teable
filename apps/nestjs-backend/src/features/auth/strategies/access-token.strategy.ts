@@ -38,6 +38,7 @@ export class AccessTokenStrategy extends PassportStrategy(PassportAccessTokenStr
     this.cls.set('user.id', user.id);
     this.cls.set('user.name', user.name);
     this.cls.set('user.email', user.email);
+    this.cls.set('user.accountName', user.accountName);
     this.cls.set('user.isAdmin', user.isAdmin);
     this.cls.set('accessTokenId', accessTokenId);
     return pickUserMe(user);

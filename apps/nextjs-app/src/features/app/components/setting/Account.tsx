@@ -106,6 +106,12 @@ export const Account: React.FC = () => {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
+              <Label>{t('settings.account.accountName')}</Label>
+              <div className="text-xs text-muted-foreground">{sessionUser.accountName}</div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
               <Label>{t('settings.account.email')}</Label>
               <div className="text-xs text-muted-foreground">{sessionUser.email}</div>
             </div>

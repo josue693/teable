@@ -18,6 +18,7 @@ export enum IdPrefix {
   WorkflowDecision = 'wde',
 
   User = 'usr',
+  AccountName = 'acn',
   Account = 'aco',
 
   Invitation = 'inv',
@@ -132,6 +133,10 @@ export function generateWorkflowDecisionId() {
 
 export function generateUserId() {
   return IdPrefix.User + getRandomString(16);
+}
+
+export function generateAccountName() {
+  return `${IdPrefix.AccountName}${getRandomString(16)}`.toLowerCase();
 }
 
 export function generateWindowId() {

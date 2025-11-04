@@ -20,6 +20,7 @@ import type {
   IUpdatePluginVo,
   PluginPosition,
   IPluginConfig,
+  IUserInfoVo,
 } from '@teable/openapi';
 import { omit } from 'lodash';
 import { ClsService } from 'nestjs-cls';
@@ -64,11 +65,12 @@ export class PluginService {
     });
   }
 
-  private async getUserMap(userIds: string[]) {
+  private async getUserMap(userIds: string[]): Promise<Record<string, IUserInfoVo>> {
     const users = await this.prismaService.txClient().user.findMany({
       where: { id: { in: userIds } },
       select: {
         id: true,
+        accountName: true,
         name: true,
         email: true,
         avatar: true,
@@ -77,6 +79,7 @@ export class PluginService {
     const systemUser = userIds.find((id) => id === 'system')
       ? {
           id: 'system',
+          accountName: 'system',
           name: 'Teable',
           email: 'support@teable.ai',
           avatar: undefined,
@@ -96,11 +99,13 @@ export class PluginService {
         }
         acc[user.id] = {
           ...user,
+          email: user.email ?? '',
+          accountName: user.accountName ?? '',
           avatar: user.avatar ? getPublicFullStorageUrl(user.avatar) : undefined,
         };
         return acc;
       },
-      {} as Record<string, { id: string; name: string; email: string; avatar?: string }>
+      {} as Record<string, IUserInfoVo>
     );
 
     return systemUser
@@ -176,7 +181,7 @@ export class PluginService {
           ? {
               id: user.id,
               name: user.name,
-              email: user.email,
+              email: user.email ?? '',
               avatar: user.avatar ? getPublicFullStorageUrl(user.avatar) : undefined,
             }
           : undefined,

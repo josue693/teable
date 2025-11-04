@@ -262,7 +262,7 @@ export class OAuthService {
     const userMap = users.reduce(
       (acc, u) => {
         acc[u.id] = {
-          email: u.email,
+          email: u.email ?? '',
           name: u.name,
         };
         return acc;

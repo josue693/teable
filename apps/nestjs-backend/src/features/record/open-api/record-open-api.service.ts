@@ -251,6 +251,7 @@ export class RecordOpenApiService {
       const { avatar } = user;
       return {
         ...user,
+        email: user.email ?? '',
         avatar: avatar && getPublicFullStorageUrl(avatar),
       };
     });

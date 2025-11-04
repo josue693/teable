@@ -50,6 +50,7 @@ export const SignForm: FC<ISignForm> = (props) => {
   const {
     enableWaitlist = false,
     disallowSignUp = false,
+    enableAccountNameRegistration = false,
     turnstileSiteKey,
     signupVerificationSendCodeMailRate = 0,
   } = setting ?? {};
@@ -74,18 +75,20 @@ export const SignForm: FC<ISignForm> = (props) => {
   // Countdown timer for send verification code button
 
   const { mutate: submitMutation } = useMutation({
-    mutationFn: ({ type, form }: { type: 'signin' | 'signup'; form: ISignin }) => {
+    mutationFn: ({ type, form }: { type: 'signin' | 'signup'; form: ISignin | ISignup }) => {
       if (type === 'signin') {
-        return signin(form);
+        return signin(form as ISignin);
       }
       if (type === 'signup') {
         return signup({
-          ...form,
+          ...(form as ISignup),
           refMeta: {
             query: window.location.search || undefined,
             referer: document.referrer || undefined,
           },
-          defaultSpaceName: t('space:initialSpaceName', { name: form.email.split('@')[0] }),
+          defaultSpaceName: t('space:initialSpaceName', {
+            name: form.email?.split('@')[0] || undefined,
+          }),
         });
       }
       throw new Error('Invalid type');
@@ -247,6 +250,8 @@ export const SignForm: FC<ISignForm> = (props) => {
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    const accountName = (event.currentTarget.elements.namedItem('accountName') as HTMLInputElement)
+      ?.value;
     const email = (event.currentTarget.elements.namedItem('email') as HTMLInputElement).value;
     const password = (event.currentTarget.elements.namedItem('password') as HTMLInputElement).value;
     const code = (event.currentTarget.elements.namedItem('verification-code') as HTMLInputElement)
@@ -255,9 +260,10 @@ export const SignForm: FC<ISignForm> = (props) => {
       ?.value;
 
     const form = {
-      email,
+      accountName: accountName || undefined,
+      email: email || undefined,
       password,
-      verification: code ? { code, token: signupVerificationToken } : undefined,
+      verification: code ? { code, token: signupVerificationToken ?? '' } : undefined,
       inviteCode: enableWaitlist ? inviteCode : undefined,
       turnstileToken: turnstileToken,
     };
@@ -307,11 +313,36 @@ export const SignForm: FC<ISignForm> = (props) => {
       </div>
       <form className="relative" onSubmit={onSubmit} onChange={() => setError(undefined)}>
         <div className="grid gap-3">
-          <div className="grid gap-3">
-            <Label htmlFor="email">{t('auth:label.email')}</Label>
+          {type === 'signup' && enableAccountNameRegistration && (
+            <div className="grid gap-3">
+              <Label htmlFor="accountName">{t('auth:label.accountName')}</Label>
+              <Input
+                id="accountName"
+                placeholder={t('auth:placeholder.accountName')}
+                type="text"
+                autoComplete="accountName"
+                disabled={isLoading}
+              />
+            </div>
+          )}
+
+          <div
+            className={cn('grid gap-3', {
+              hidden: type === 'signup' && enableAccountNameRegistration,
+            })}
+          >
+            <Label htmlFor="email">
+              {type === 'signin' && enableAccountNameRegistration
+                ? t('auth:label.accountName')
+                : t('auth:label.email')}
+            </Label>
             <Input
               id="email"
-              placeholder={t('auth:placeholder.email')}
+              placeholder={
+                type === 'signin' && enableAccountNameRegistration
+                  ? t('auth:placeholder.accountName')
+                  : t('auth:placeholder.email')
+              }
               type="text"
               autoComplete="username"
               ref={emailRef}
@@ -322,6 +353,7 @@ export const SignForm: FC<ISignForm> = (props) => {
               disabled={isLoading}
             />
           </div>
+
           <div className="grid gap-3">
             <div className="flex items-center justify-between">
               <Label htmlFor="password">{t('auth:label.password')}</Label>
