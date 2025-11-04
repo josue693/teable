@@ -142,6 +142,39 @@ export class LinkService {
     );
   }
 
+  private extractLinkTitle(value: unknown): string | undefined {
+    if (value == null) {
+      return undefined;
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      const titles = value
+        .map((item) => this.extractLinkTitle(item))
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+      return titles.length ? titles.join(', ') : undefined;
+    }
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      const candidateKeys = ['title', 'name', 'text', 'label', 'email'];
+      for (const key of candidateKeys) {
+        const candidate = record[key];
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return candidate;
+        }
+      }
+      const id = record.id;
+      if (typeof id === 'string' && id.trim()) {
+        return id;
+      }
+    }
+    return undefined;
+  }
+
   // eslint-disable-next-line sonarjs/cognitive-complexity
   private updateForeignCellForManyMany(params: {
     fkItem: IFkRecordItem;
@@ -186,9 +219,9 @@ export class LinkService {
 
     if (toAdd.length) {
       toAdd.forEach((foreignRecordId) => {
-        const sourceRecordTitle = sourceRecordMap[recordId][sourceLookedFieldId] as
-          | string
-          | undefined;
+        const sourceRecordTitle = this.extractLinkTitle(
+          sourceRecordMap[recordId][sourceLookedFieldId]
+        );
         const newForeignRecord = foreignRecordMap[foreignRecordId];
         if (!newForeignRecord) {
           throw new CustomHttpException(
@@ -261,9 +294,9 @@ export class LinkService {
     }
 
     if (newKey) {
-      const sourceRecordTitle = sourceRecordMap[recordId][sourceLookedFieldId] as
-        | string
-        | undefined;
+      const sourceRecordTitle = this.extractLinkTitle(
+        sourceRecordMap[recordId][sourceLookedFieldId]
+      );
       const newForeignRecord = foreignRecordMap[newKey];
       if (!newForeignRecord) {
         throw new CustomHttpException(
@@ -323,9 +356,9 @@ export class LinkService {
     }
 
     if (toAdd.length) {
-      const sourceRecordTitle = sourceRecordMap[recordId][sourceLookedFieldId] as
-        | string
-        | undefined;
+      const sourceRecordTitle = this.extractLinkTitle(
+        sourceRecordMap[recordId][sourceLookedFieldId]
+      );
 
       toAdd.forEach((foreignRecordId) => {
         foreignRecordMap[foreignRecordId][symmetricFieldId] = {
@@ -363,9 +396,9 @@ export class LinkService {
     }
 
     if (newKey) {
-      const sourceRecordTitle = sourceRecordMap[recordId][sourceLookedFieldId] as
-        | string
-        | undefined;
+      const sourceRecordTitle = this.extractLinkTitle(
+        sourceRecordMap[recordId][sourceLookedFieldId]
+      );
 
       foreignRecordMap[newKey][symmetricFieldId] = {
         id: recordId,
@@ -399,12 +432,14 @@ export class LinkService {
     if (Array.isArray(newKey)) {
       sourceRecordMap[recordId][linkFieldId] = newKey.map((key) => ({
         id: key,
-        title: foreignRecordMap[key][foreignLookedFieldId] as string | undefined,
+        title: this.extractLinkTitle(foreignRecordMap[key][foreignLookedFieldId]),
       }));
       return;
     }
 
-    const foreignRecordTitle = foreignRecordMap[newKey][foreignLookedFieldId] as string | undefined;
+    const foreignRecordTitle = this.extractLinkTitle(
+      foreignRecordMap[newKey][foreignLookedFieldId]
+    );
     sourceRecordMap[recordId][linkFieldId] = { id: newKey, title: foreignRecordTitle };
   }
 

@@ -2,7 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { INestApplication } from '@nestjs/common';
-import type { IFieldRo, IFieldVo, IFilter, IGroup } from '@teable/core';
+import type { IFieldRo, IFieldVo, IFilter, IGroup, ILinkFieldOptions } from '@teable/core';
 import {
   Colors,
   FieldKeyType,
@@ -45,6 +45,7 @@ import {
   createField,
   updateRecordByApi,
   getRecords,
+  getRecord,
 } from './utils/init-app';
 
 describe('OpenAPI AggregationController (e2e)', () => {
@@ -54,6 +55,79 @@ describe('OpenAPI AggregationController (e2e)', () => {
   beforeAll(async () => {
     const appCtx = await initApp();
     app = appCtx.app;
+  });
+
+  describe('link updates when primary field is user', () => {
+    let sourceTable: ITableFullVo;
+    let targetTable: ITableFullVo;
+    let linkField: IFieldVo;
+    let symmetricFieldId: string;
+    let sourceRecordId: string;
+    let targetRecordId: string;
+
+    beforeAll(async () => {
+      const assigneeField: IFieldRo = { name: 'Assignee', type: FieldType.User };
+      sourceTable = await createTable(baseId, {
+        name: 'agg_user_primary_source',
+        fields: [assigneeField],
+        records: [
+          {
+            fields: {
+              [assigneeField.name!]: {
+                id: globalThis.testConfig.userId,
+                title: globalThis.testConfig.userName,
+                email: globalThis.testConfig.email,
+              },
+            },
+          },
+        ],
+      });
+
+      targetTable = await createTable(baseId, {
+        name: 'agg_user_primary_target',
+        fields: [{ name: 'Project', type: FieldType.SingleLineText } as IFieldRo],
+        records: [
+          { fields: { Project: 'Project Alpha' } },
+          { fields: { Project: 'Project Beta' } },
+        ],
+      });
+
+      linkField = (await createField(sourceTable.id, {
+        name: 'Related Project',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyMany,
+          foreignTableId: targetTable.id,
+        },
+      })) as IFieldVo;
+
+      symmetricFieldId = (linkField.options as ILinkFieldOptions).symmetricFieldId as string;
+      expect(symmetricFieldId).toBeDefined();
+
+      sourceRecordId = sourceTable.records[0].id;
+      targetRecordId = targetTable.records[0].id;
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, sourceTable.id);
+      await permanentDeleteTable(baseId, targetTable.id);
+    });
+
+    it('propagates symmetric link titles from user primary field', async () => {
+      await updateRecordByApi(sourceTable.id, sourceRecordId, linkField.id, [
+        { id: targetRecordId },
+      ]);
+
+      const symmetricRecord = await getRecord(targetTable.id, targetRecordId);
+      const symmetricValue = symmetricRecord.fields[symmetricFieldId];
+      expect(symmetricValue).toBeDefined();
+      const normalizedValue = Array.isArray(symmetricValue) ? symmetricValue : [symmetricValue];
+      expect(normalizedValue).toHaveLength(1);
+      expect(normalizedValue[0]).toMatchObject({
+        id: sourceRecordId,
+        title: globalThis.testConfig.userName,
+      });
+    });
   });
 
   afterAll(async () => {

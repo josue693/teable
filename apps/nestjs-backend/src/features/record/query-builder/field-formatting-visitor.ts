@@ -185,8 +185,10 @@ export class FieldFormattingVisitor implements IFieldVisitor<string> {
   }
 
   visitUserField(_field: UserFieldCore): string {
-    // User fields are stored as strings, return as-is
-    return this.fieldExpression;
+    if (_field.isMultipleCellValue) {
+      return this.formatMultipleStringValues();
+    }
+    return this.dialect.jsonTitleFromExpr(this.fieldExpression);
   }
 
   visitCreatedByField(_field: CreatedByFieldCore): string {

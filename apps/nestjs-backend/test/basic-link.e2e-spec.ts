@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { INestApplication } from '@nestjs/common';
@@ -10,6 +11,7 @@ import {
   createTable,
   permanentDeleteTable,
   getRecords,
+  getRecord,
   initApp,
   updateRecordByApi,
   getField,
@@ -2521,6 +2523,242 @@ describe('Basic Link Field (e2e)', () => {
       expect(newSymmetricField.options).toMatchObject({
         relationship: Relationship.ManyMany,
       });
+    });
+  });
+
+  describe('User primary field link relationships', () => {
+    const OWNER_FIELD_NAME = 'Owner';
+    const LABEL_FIELD_NAME = 'Label';
+    const defaultUserTitle = globalThis.testConfig.userName || 'Test User';
+    const secondaryUserTitle = 'test';
+
+    const defaultUserFactory = () => ({
+      id: globalThis.testConfig.userId,
+      title: defaultUserTitle,
+      email: globalThis.testConfig.email,
+    });
+
+    const secondaryUserFactory = () => ({
+      id: 'usrTestUserId',
+      title: secondaryUserTitle,
+    });
+
+    const buildUserPrimaryTable = async (
+      name: string,
+      firstUserFactory: () => Record<string, unknown>,
+      secondUserFactory: () => Record<string, unknown>
+    ) => {
+      return createTable(baseId, {
+        name,
+        fields: [
+          { name: OWNER_FIELD_NAME, type: FieldType.User } as IFieldRo,
+          { name: LABEL_FIELD_NAME, type: FieldType.SingleLineText } as IFieldRo,
+        ],
+        records: [
+          {
+            fields: {
+              [OWNER_FIELD_NAME]: firstUserFactory(),
+              [LABEL_FIELD_NAME]: `${name}-1`,
+            },
+          },
+          {
+            fields: {
+              [OWNER_FIELD_NAME]: secondUserFactory(),
+              [LABEL_FIELD_NAME]: `${name}-2`,
+            },
+          },
+        ],
+      });
+    };
+
+    const expectLinkValueHasTitle = (value: unknown, expectedTitle: string) => {
+      const extractTitle = (input: unknown): string | undefined => {
+        if (input == null) return undefined;
+        if (typeof input === 'string') return input;
+        if (Array.isArray(input)) {
+          for (const item of input) {
+            const title = extractTitle(item);
+            if (title) return title;
+          }
+          return undefined;
+        }
+        if (typeof input === 'object') {
+          const record = input as Record<string, unknown>;
+          const title = extractTitle(record.title);
+          if (title) return title;
+          const name = extractTitle(record.name);
+          if (name) return name;
+        }
+        return undefined;
+      };
+
+      const title = extractTitle(value);
+      expect(typeof title).toBe('string');
+      expect(title?.length).toBeGreaterThan(0);
+    };
+
+    it('supports ManyMany linking when both tables use user primary fields', async () => {
+      const sourceTable = await buildUserPrimaryTable(
+        'user-mm-src',
+        defaultUserFactory,
+        secondaryUserFactory
+      );
+      const targetTable = await buildUserPrimaryTable(
+        'user-mm-target',
+        secondaryUserFactory,
+        defaultUserFactory
+      );
+
+      try {
+        const linkField = (await createField(sourceTable.id, {
+          name: 'Partners',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: targetTable.id,
+          },
+        })) as IFieldVo;
+
+        const symmetricFieldId = (linkField.options as ILinkFieldOptions)
+          .symmetricFieldId as string;
+        expect(symmetricFieldId).toBeDefined();
+
+        await updateRecordByApi(sourceTable.id, sourceTable.records[0].id, linkField.id, [
+          { id: targetTable.records[0].id },
+        ]);
+
+        const sourceRecord = await getRecord(sourceTable.id, sourceTable.records[0].id);
+        expectLinkValueHasTitle(sourceRecord.fields[linkField.id], secondaryUserTitle);
+
+        const targetRecord = await getRecord(targetTable.id, targetTable.records[0].id);
+        expectLinkValueHasTitle(targetRecord.fields[symmetricFieldId], defaultUserTitle);
+      } finally {
+        await permanentDeleteTable(baseId, sourceTable.id);
+        await permanentDeleteTable(baseId, targetTable.id);
+      }
+    });
+
+    it('supports ManyOne linking when both tables use user primary fields', async () => {
+      const sourceTable = await buildUserPrimaryTable(
+        'user-mn-src',
+        defaultUserFactory,
+        secondaryUserFactory
+      );
+      const targetTable = await buildUserPrimaryTable(
+        'user-mn-target',
+        secondaryUserFactory,
+        defaultUserFactory
+      );
+
+      try {
+        const linkField = (await createField(sourceTable.id, {
+          name: 'OwnerProject',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyOne,
+            foreignTableId: targetTable.id,
+          },
+        })) as IFieldVo;
+
+        const symmetricFieldId = (linkField.options as ILinkFieldOptions)
+          .symmetricFieldId as string;
+        expect(symmetricFieldId).toBeDefined();
+
+        await updateRecordByApi(sourceTable.id, sourceTable.records[0].id, linkField.id, {
+          id: targetTable.records[0].id,
+        });
+
+        const sourceRecord = await getRecord(sourceTable.id, sourceTable.records[0].id);
+        expectLinkValueHasTitle(sourceRecord.fields[linkField.id], secondaryUserTitle);
+
+        const targetRecord = await getRecord(targetTable.id, targetTable.records[0].id);
+        expectLinkValueHasTitle(targetRecord.fields[symmetricFieldId], defaultUserTitle);
+      } finally {
+        await permanentDeleteTable(baseId, sourceTable.id);
+        await permanentDeleteTable(baseId, targetTable.id);
+      }
+    });
+
+    it('supports OneMany linking when both tables use user primary fields', async () => {
+      const sourceTable = await buildUserPrimaryTable(
+        'user-om-src',
+        defaultUserFactory,
+        secondaryUserFactory
+      );
+      const targetTable = await buildUserPrimaryTable(
+        'user-om-target',
+        secondaryUserFactory,
+        defaultUserFactory
+      );
+
+      try {
+        const linkField = (await createField(sourceTable.id, {
+          name: 'TeamMembers',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.OneMany,
+            foreignTableId: targetTable.id,
+          },
+        })) as IFieldVo;
+
+        const symmetricFieldId = (linkField.options as ILinkFieldOptions)
+          .symmetricFieldId as string;
+        expect(symmetricFieldId).toBeDefined();
+
+        await updateRecordByApi(sourceTable.id, sourceTable.records[0].id, linkField.id, [
+          { id: targetTable.records[0].id },
+        ]);
+
+        const sourceRecord = await getRecord(sourceTable.id, sourceTable.records[0].id);
+        expectLinkValueHasTitle(sourceRecord.fields[linkField.id], secondaryUserTitle);
+
+        const targetRecord = await getRecord(targetTable.id, targetTable.records[0].id);
+        expectLinkValueHasTitle(targetRecord.fields[symmetricFieldId], defaultUserTitle);
+      } finally {
+        await permanentDeleteTable(baseId, sourceTable.id);
+        await permanentDeleteTable(baseId, targetTable.id);
+      }
+    });
+
+    it('supports OneOne linking when both tables use user primary fields', async () => {
+      const sourceTable = await buildUserPrimaryTable(
+        'user-oo-src',
+        defaultUserFactory,
+        secondaryUserFactory
+      );
+      const targetTable = await buildUserPrimaryTable(
+        'user-oo-target',
+        secondaryUserFactory,
+        defaultUserFactory
+      );
+
+      try {
+        const linkField = (await createField(sourceTable.id, {
+          name: 'ProfileOwner',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.OneOne,
+            foreignTableId: targetTable.id,
+          },
+        })) as IFieldVo;
+
+        const symmetricFieldId = (linkField.options as ILinkFieldOptions)
+          .symmetricFieldId as string;
+        expect(symmetricFieldId).toBeDefined();
+
+        await updateRecordByApi(sourceTable.id, sourceTable.records[0].id, linkField.id, {
+          id: targetTable.records[0].id,
+        });
+
+        const sourceRecord = await getRecord(sourceTable.id, sourceTable.records[0].id);
+        expectLinkValueHasTitle(sourceRecord.fields[linkField.id], secondaryUserTitle);
+
+        const targetRecord = await getRecord(targetTable.id, targetTable.records[0].id);
+        expectLinkValueHasTitle(targetRecord.fields[symmetricFieldId], defaultUserTitle);
+      } finally {
+        await permanentDeleteTable(baseId, sourceTable.id);
+        await permanentDeleteTable(baseId, targetTable.id);
+      }
     });
   });
 });
