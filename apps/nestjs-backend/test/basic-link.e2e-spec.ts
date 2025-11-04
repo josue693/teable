@@ -426,6 +426,104 @@ describe('Basic Link Field (e2e)', () => {
     });
   });
 
+  describe('Lookup formula text functions', () => {
+    let projectTable: ITableFullVo;
+    let taskTable: ITableFullVo;
+    let linkField: IFieldVo;
+    let lookupField: IFieldVo;
+    let formulaField: IFieldVo;
+
+    beforeEach(async () => {
+      const taskNameField: IFieldRo = {
+        name: 'Task',
+        type: FieldType.SingleLineText,
+      };
+      const taskDateField: IFieldRo = {
+        name: 'Due Date',
+        type: FieldType.Date,
+      };
+
+      taskTable = await createTable(baseId, {
+        name: 'Formula Tasks',
+        fields: [taskNameField, taskDateField],
+        records: [
+          {
+            fields: {
+              Task: 'Task Alpha',
+              'Due Date': '2024-10-31',
+            },
+          },
+        ],
+      });
+
+      const projectNameField: IFieldRo = {
+        name: 'Project',
+        type: FieldType.SingleLineText,
+      };
+
+      projectTable = await createTable(baseId, {
+        name: 'Formula Projects',
+        fields: [projectNameField],
+        records: [
+          {
+            fields: {
+              Project: 'Project One',
+            },
+          },
+        ],
+      });
+
+      linkField = await createField(projectTable.id, {
+        name: 'Linked Tasks',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: taskTable.id,
+        },
+      });
+
+      const dueDateFieldId = taskTable.fields.find((f) => f.name === 'Due Date')!.id;
+
+      lookupField = await createField(projectTable.id, {
+        name: 'Task Due Dates',
+        type: FieldType.Date,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: taskTable.id,
+          lookupFieldId: dueDateFieldId,
+          linkFieldId: linkField.id,
+        },
+      });
+
+      formulaField = await createField(projectTable.id, {
+        name: 'Due Year',
+        type: FieldType.Formula,
+        options: {
+          expression: `LEFT({${lookupField.id}}, 4)`,
+        },
+      });
+    });
+
+    afterEach(async () => {
+      await permanentDeleteTable(baseId, projectTable.id);
+      await permanentDeleteTable(baseId, taskTable.id);
+    });
+
+    it('should treat lookup arrays as comma-separated strings for text formulas', async () => {
+      await updateRecordByApi(projectTable.id, projectTable.records[0].id, linkField.id, [
+        { id: taskTable.records[0].id },
+      ]);
+
+      const record = await getRecord(projectTable.id, projectTable.records[0].id);
+      const lookupValue = record.fields[lookupField.id] as string[] | undefined;
+
+      expect(Array.isArray(lookupValue)).toBe(true);
+      expect(lookupValue).toHaveLength(1);
+      expect(lookupValue?.[0]).toMatch(/^2024-10-/);
+      expect(record.fields[formulaField.id]).toBe('2024');
+    });
+  });
+
   describe('ManyMany relationship with lookup and rollup', () => {
     let table1: ITableFullVo;
     let table2: ITableFullVo;

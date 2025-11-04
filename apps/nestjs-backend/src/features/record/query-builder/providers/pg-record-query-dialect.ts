@@ -44,6 +44,25 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
   }
 
   formatStringArray(expr: string): string {
+    const typeExpr = `pg_typeof(${expr})::text`;
+    const textExpr = `((${expr})::text COLLATE "C")`;
+    const trimmedExpr = `BTRIM(${textExpr})`;
+    const safeArrayExpr = `(CASE
+        WHEN ${expr} IS NULL THEN '[]'::jsonb
+        WHEN ${typeExpr} = 'jsonb' THEN COALESCE((${expr})::jsonb, '[]'::jsonb)
+        WHEN ${typeExpr} = 'json' THEN COALESCE((${expr})::jsonb, '[]'::jsonb)
+        WHEN ${typeExpr} IN ('text', 'varchar', 'bpchar', 'character varying', 'unknown') THEN
+          CASE
+            WHEN ${trimmedExpr} = '' COLLATE "C" THEN '[]'::jsonb
+            WHEN LEFT(${trimmedExpr}, 1) = '[' THEN COALESCE((${expr})::jsonb, '[]'::jsonb)
+            ELSE jsonb_build_array(to_jsonb(${expr}))
+          END
+        ELSE
+          CASE
+            WHEN jsonb_typeof(to_jsonb(${expr})) = 'array' THEN COALESCE(to_jsonb(${expr}), '[]'::jsonb)
+            ELSE jsonb_build_array(to_jsonb(${expr}))
+          END
+      END)`;
     return `(
         SELECT string_agg(
           CASE
@@ -54,7 +73,7 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
           ', '
           ORDER BY ord
         )
-        FROM jsonb_array_elements(COALESCE((${expr})::jsonb, '[]'::jsonb)) WITH ORDINALITY AS t(elem, ord)
+        FROM jsonb_array_elements(${safeArrayExpr}) WITH ORDINALITY AS t(elem, ord)
       )`;
   }
 

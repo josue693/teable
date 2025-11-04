@@ -768,20 +768,21 @@ abstract class BaseSqlConversionVisitor<
     exprCtx: ExprContext,
     inferredType?: 'string' | 'number' | 'boolean' | 'datetime' | 'unknown'
   ): string {
+    let normalizedValue = value;
     if (exprCtx instanceof FieldReferenceCurlyContext) {
       const fieldId = exprCtx.text.slice(1, -1);
       const fieldInfo = this.context.table.getField(fieldId);
-      if (fieldInfo?.isMultipleCellValue) {
-        // Multi-value references are projected as JSON arrays; keep the raw expression to avoid
-        // wrapping them with datetime casts which cannot handle array payloads.
-        return value;
+      if (fieldInfo?.isMultipleCellValue && this.dialect) {
+        // Normalize multi-value references (lookup, link, multi-select, etc.) into a deterministic
+        // comma-separated string so downstream text operations behave as expected.
+        normalizedValue = this.dialect.formatStringArray(value);
       }
     }
     const type = inferredType ?? this.inferExpressionType(exprCtx);
     if (type === 'datetime') {
-      return this.formulaQuery.datetimeFormat(value, "'YYYY-MM-DD'");
+      return this.formulaQuery.datetimeFormat(normalizedValue, "'YYYY-MM-DD'");
     }
-    return value;
+    return normalizedValue;
   }
 
   private normalizeTextSliceCount(valueSql?: string, exprCtx?: ExprContext): string {
