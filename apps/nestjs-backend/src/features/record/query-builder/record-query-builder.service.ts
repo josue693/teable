@@ -47,7 +47,8 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
 
   private async createQueryBuilderFromTable(
     from: string,
-    tableRaw: { id: string }
+    tableRaw: { id: string },
+    projection?: string[]
   ): Promise<{
     qb: Knex.QueryBuilder;
     alias: string;
@@ -55,7 +56,10 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     table: TableDomain;
     state: IMutableQueryBuilderState;
   }> {
-    const tables = await this.tableDomainQueryService.getAllRelatedTableDomains(tableRaw.id);
+    const tables = await this.tableDomainQueryService.getAllRelatedTableDomains(
+      tableRaw.id,
+      projection
+    );
     const table = tables.mustGetEntryTable();
     const mainTableAlias = getTableAliasFromTable(table);
     const qb = this.knex.from({ [mainTableAlias]: from });
@@ -135,10 +139,10 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
         builder = await this.createQueryBuilderFromTableCache(tableRaw as { id: string });
       } catch (error) {
         this.logger.error(`Failed to create query builder from view: ${error}, use table instead`);
-        builder = await this.createQueryBuilderFromTable(from, tableRaw);
+        builder = await this.createQueryBuilderFromTable(from, tableRaw, options.projection);
       }
     } else {
-      builder = await this.createQueryBuilderFromTable(from, tableRaw);
+      builder = await this.createQueryBuilderFromTable(from, tableRaw, options.projection);
     }
 
     const { qb, alias, table, state } = builder;

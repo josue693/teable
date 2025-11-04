@@ -997,7 +997,8 @@ export class LinkService {
         fieldMapByTableId,
         refreshedRecordMapStruct,
         cellContexts,
-        fromReset
+        fromReset,
+        true
       );
     } else {
       updatedRecordMapByTableId = await this.updateLinkRecord(

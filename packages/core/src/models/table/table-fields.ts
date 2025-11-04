@@ -324,10 +324,14 @@ export class TableFields {
    * Get all foreign table ids from link fields
    */
   // eslint-disable-next-line sonarjs/cognitive-complexity
-  getAllForeignTableIds(): Set<string> {
+  getAllForeignTableIds(fieldIds?: string[]): Set<string> {
     const foreignTableIds = new Set<string>();
+    const fieldIdSet = fieldIds ? new Set(fieldIds) : undefined;
 
     for (const field of this) {
+      if (fieldIdSet && !fieldIdSet.has(field.id)) {
+        continue;
+      }
       if (field.type === FieldType.ConditionalRollup) {
         const foreignTableId = (field as ConditionalRollupFieldCore).getForeignTableId?.();
         if (foreignTableId) {

@@ -109,17 +109,19 @@ export class TableDomainQueryService {
    * through link fields and formula fields that reference link fields
    *
    * @param tableId - The root table ID to start from
+   * @param fieldIds - Optional projection of field IDs to limit foreign table traversal on the entry table
    * @returns Promise<Tables> - Tables domain object containing all related table domains
    */
-  async getAllRelatedTableDomains(tableId: string) {
-    return this.#getAllRelatedTableDomains(tableId);
+  async getAllRelatedTableDomains(tableId: string, fieldIds?: string[]) {
+    return this.#getAllRelatedTableDomains(tableId, undefined, undefined, fieldIds);
   }
 
   // eslint-disable-next-line sonarjs/cognitive-complexity
   async #getAllRelatedTableDomains(
     tableId: string,
     tables: Tables = new Tables(tableId),
-    level = 1
+    level = 1,
+    projectionFieldIds?: string[]
   ): Promise<Tables> {
     // Prevent infinite recursion
     if (tables.isVisited(tableId)) {
@@ -131,7 +133,9 @@ export class TableDomainQueryService {
     // Mark as visited
     tables.markVisited(tableId);
 
-    const foreignTableIds = currentTableDomain.getAllForeignTableIds();
+    const foreignTableIds = currentTableDomain.getAllForeignTableIds(
+      level === 1 ? projectionFieldIds : undefined
+    );
     for (const foreignTableId of foreignTableIds) {
       try {
         await this.#getAllRelatedTableDomains(foreignTableId, tables, level + 1);
