@@ -246,6 +246,37 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
     }
   }
 
+  private sanitizeNumericTextExpression(expression: string): string {
+    const textExpr = `((${expression})::text COLLATE "C")`;
+    const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
+    return `NULLIF(${sanitized}, '' COLLATE "C")::double precision`;
+  }
+
+  private buildJsonNumericSumExpression(fieldExpression: string): string {
+    const expr = `(${fieldExpression})`;
+    const scalarValue = this.sanitizeNumericTextExpression(expr);
+    const arraySum = `(SELECT SUM(${this.sanitizeNumericTextExpression('elem.value')})
+        FROM jsonb_array_elements_text(${expr}::jsonb) AS elem(value))`;
+    return `(CASE
+      WHEN ${expr} IS NULL THEN 0
+      WHEN jsonb_typeof(${expr}::jsonb) = 'array' THEN COALESCE(${arraySum}, 0)
+      ELSE COALESCE(${scalarValue}, 0)
+    END)`;
+  }
+
+  private buildJsonNumericCountExpression(fieldExpression: string): string {
+    const expr = `(${fieldExpression})`;
+    const scalarValue = this.sanitizeNumericTextExpression(expr);
+    const scalarCount = `(CASE WHEN ${scalarValue} IS NULL THEN 0 ELSE 1 END)`;
+    const elementCount = `(SELECT SUM(CASE WHEN ${this.sanitizeNumericTextExpression('elem.value')} IS NULL THEN 0 ELSE 1 END)
+        FROM jsonb_array_elements_text(${expr}::jsonb) AS elem(value))`;
+    return `(CASE
+      WHEN ${expr} IS NULL THEN 0
+      WHEN jsonb_typeof(${expr}::jsonb) = 'array' THEN COALESCE(${elementCount}, 0)
+      ELSE ${scalarCount}
+    END)`;
+  }
+
   private castAgg(sql: string): string {
     // normalize to double precision for numeric rollups
     return `CAST(${sql} AS DOUBLE PRECISION)`;
@@ -263,26 +294,34 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
     }
   ): string {
     const { targetField, orderByField, rowPresenceExpr, flattenNestedArray } = opts;
+    const isNumericTarget =
+      targetField?.type === FieldType.Number ||
+      (targetField as unknown as { cellValueType?: CellValueType })?.cellValueType ===
+        CellValueType.Number;
+
     switch (fn) {
       case 'sum':
         // Prefer numeric targets: number field or formula resolving to number
-        if (
-          targetField?.type === FieldType.Number ||
-          // Some computed/lookup/rollup/ formula fields expose numeric cellValueType
-          // Use optional chaining to avoid issues on core field types without this prop
-          (targetField as unknown as { cellValueType?: CellValueType })?.cellValueType ===
-            CellValueType.Number
-        ) {
+        if (isNumericTarget) {
+          if (targetField?.isMultipleCellValue) {
+            const numericExpr = this.buildJsonNumericSumExpression(fieldExpression);
+            return this.castAgg(`COALESCE(SUM(${numericExpr}), 0)`);
+          }
           return this.castAgg(`COALESCE(SUM(${fieldExpression}), 0)`);
         }
         // Non-numeric target: avoid SUM() casting errors
         return this.castAgg('SUM(0)');
       case 'average':
-        if (
-          targetField?.type === FieldType.Number ||
-          (targetField as unknown as { cellValueType?: CellValueType })?.cellValueType ===
-            CellValueType.Number
-        ) {
+        if (isNumericTarget) {
+          if (targetField?.isMultipleCellValue) {
+            const sumExpr = this.buildJsonNumericSumExpression(fieldExpression);
+            const countExpr = this.buildJsonNumericCountExpression(fieldExpression);
+            const sumAgg = `COALESCE(SUM(${sumExpr}), 0)`;
+            const countAgg = `COALESCE(SUM(${countExpr}), 0)`;
+            return this.castAgg(
+              `CASE WHEN ${countAgg} = 0 THEN 0 ELSE ${sumAgg} / ${countAgg} END`
+            );
+          }
           return this.castAgg(`COALESCE(AVG(${fieldExpression}), 0)`);
         }
         return this.castAgg('AVG(0)');
