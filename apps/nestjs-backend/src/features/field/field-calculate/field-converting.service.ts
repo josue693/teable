@@ -1105,7 +1105,7 @@ export class FieldConvertingService {
       tableId,
       {
         containsIn: {
-          keys: ['id', 'accountName', 'name', 'email', 'phone'],
+          keys: ['id', 'account_name', 'name', 'email', 'phone'],
           values: uniq(oldCvUserStrArr),
         },
       }

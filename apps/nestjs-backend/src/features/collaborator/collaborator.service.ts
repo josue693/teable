@@ -223,7 +223,7 @@ export class CollaboratorService {
     tableId: string,
     query: {
       containsIn: {
-        keys: ('id' | 'accountName' | 'name' | 'email' | 'phone')[];
+        keys: ('id' | 'account_name' | 'name' | 'email' | 'phone')[];
         values: string[];
       };
     }
