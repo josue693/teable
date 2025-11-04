@@ -332,6 +332,100 @@ describe('Basic Link Field (e2e)', () => {
     });
   });
 
+  describe('Link formulas comparing text to lookup values', () => {
+    let orderTable: ITableFullVo | undefined;
+    let detailTable: ITableFullVo | undefined;
+
+    afterEach(async () => {
+      if (orderTable) {
+        await permanentDeleteTable(baseId, orderTable.id);
+        orderTable = undefined;
+      }
+      if (detailTable) {
+        await permanentDeleteTable(baseId, detailTable.id);
+        detailTable = undefined;
+      }
+    });
+
+    it('should update records without errors when formula compares text field to lookup result', async () => {
+      orderTable = await createTable(baseId, {
+        name: 'orders',
+        fields: [
+          {
+            name: 'Order Number',
+            type: FieldType.SingleLineText,
+          },
+        ],
+        records: [
+          { fields: { 'Order Number': 'ORD-001' } },
+          { fields: { 'Order Number': 'ORD-002' } },
+        ],
+      });
+
+      detailTable = await createTable(baseId, {
+        name: 'order details',
+        fields: [
+          {
+            name: 'External Number',
+            type: FieldType.SingleLineText,
+          },
+        ],
+        records: [
+          { fields: { 'External Number': 'ORD-001' } },
+          { fields: { 'External Number': 'ORD-002' } },
+        ],
+      });
+
+      const orderNumberField = orderTable.fields.find((f) => f.name === 'Order Number')!;
+      const externalNumberField = detailTable.fields.find((f) => f.name === 'External Number')!;
+
+      const linkField = await createField(orderTable.id, {
+        name: 'Detail Link',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: detailTable.id,
+        },
+      });
+
+      const lookupField = await createField(orderTable.id, {
+        name: 'External Number Lookup',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: detailTable.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: externalNumberField.id,
+        },
+      });
+
+      const formulaField = await createField(orderTable.id, {
+        name: 'Match Flag',
+        type: FieldType.Formula,
+        options: {
+          expression: `IF({${orderNumberField.id}} = {${lookupField.id}}, "match", "not-match")`,
+        },
+      });
+
+      await updateRecordByApi(orderTable.id, orderTable.records[0].id, linkField.id, {
+        id: detailTable.records[0].id,
+      });
+
+      const linkedRecord = await getRecord(orderTable.id, orderTable.records[0].id);
+      expect(linkedRecord.fields[formulaField.id]).toBe('match');
+
+      await updateRecordByApi(
+        orderTable.id,
+        orderTable.records[0].id,
+        orderNumberField.id,
+        'ORD-001-UPDATED'
+      );
+
+      const updatedRecord = await getRecord(orderTable.id, orderTable.records[0].id);
+      expect(updatedRecord.fields[formulaField.id]).toBe('not-match');
+    });
+  });
+
   describe('ManyMany relationship with lookup and rollup', () => {
     let table1: ITableFullVo;
     let table2: ITableFullVo;

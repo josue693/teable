@@ -1,4 +1,5 @@
 /* eslint-disable sonarjs/no-duplicate-string */
+import { DbFieldType } from '@teable/core';
 import type { TableDomain } from '@teable/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -184,5 +185,25 @@ describe('GeneratedColumnQueryPostgres unit-aware helpers', () => {
     expect(sql).toBe(
       `DATE_TRUNC('${expectedUnit}', date_a::timestamp) = DATE_TRUNC('${expectedUnit}', date_b::timestamp)`
     );
+  });
+
+  it('coerces JSON operands before comparing to text columns', () => {
+    const tableStub = {
+      fieldList: [
+        { dbFieldName: 'text_col', dbFieldType: DbFieldType.Text },
+        { dbFieldName: 'json_col', dbFieldType: DbFieldType.Json },
+      ],
+    } as unknown as TableDomain;
+
+    query.setContext({
+      table: tableStub,
+      isGeneratedColumn: true,
+    });
+
+    const sql = query.equal('"text_col"', '"json_col"');
+
+    expect(sql).toContain('pg_typeof(("json_col")) = ANY');
+    expect(sql).toContain('jsonb_typeof((("json_col"))::jsonb)');
+    expect(sql).toContain('("text_col")::text COLLATE "C"');
   });
 });

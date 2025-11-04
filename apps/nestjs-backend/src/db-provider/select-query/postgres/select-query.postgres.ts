@@ -42,11 +42,16 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     return depth === 0;
   }
 
-  private isNumericLiteral(expr: string): boolean {
+  private stripOuterParentheses(expr: string): string {
     let trimmed = expr.trim();
     while (trimmed.length > 0 && this.hasWrappingParentheses(trimmed)) {
       trimmed = trimmed.slice(1, -1).trim();
     }
+    return trimmed;
+  }
+
+  private isNumericLiteral(expr: string): boolean {
+    const trimmed = this.stripOuterParentheses(expr);
     // eslint-disable-next-line regexp/no-unused-capturing-group
     return /^[-+]?\d+(\.\d+)?$/.test(trimmed);
   }
@@ -73,7 +78,8 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   private normalizeBlankComparable(value: string): string {
-    return `COALESCE(NULLIF((${value})::text, ''), '')`;
+    const comparable = this.coerceToTextComparable(value);
+    return `COALESCE(NULLIF(${comparable}, ''), '')`;
   }
 
   private ensureTextCollation(expr: string): string {
@@ -81,13 +87,13 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   private isTextLikeExpression(value: string): boolean {
-    const trimmed = value.trim();
+    const trimmed = this.stripOuterParentheses(value);
     if (/^'.*'$/.test(trimmed)) {
       return true;
     }
 
-    const columnMatch = trimmed.match(/^"([^"]+)"$/);
-    if (!columnMatch) {
+    const columnMatch = trimmed.match(/^"([^"]+)"$/) ?? trimmed.match(/^"[^"]+"\."([^"]+)"$/);
+    if (!columnMatch || columnMatch.length < 2) {
       return false;
     }
 
@@ -101,6 +107,35 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     }
 
     return field.dbFieldType === DbFieldType.Text;
+  }
+
+  private coerceToTextComparable(value: string): string {
+    const trimmed = this.stripOuterParentheses(value);
+    if (!trimmed) {
+      return this.ensureTextCollation(value);
+    }
+    if (/^'.*'$/.test(trimmed)) {
+      return this.ensureTextCollation(trimmed);
+    }
+    if (trimmed.toUpperCase() === 'NULL') {
+      return 'NULL';
+    }
+
+    const wrapped = `(${value})`;
+    const coerced = `(CASE
+      WHEN ${wrapped} IS NULL THEN NULL
+      WHEN pg_typeof(${wrapped}) = ANY(ARRAY['jsonb'::regtype, 'json'::regtype]) THEN (
+        CASE jsonb_typeof((${wrapped})::jsonb)
+          WHEN 'string' THEN (${wrapped})::jsonb #>> '{}'
+          WHEN 'number' THEN (${wrapped})::jsonb #>> '{}'
+          WHEN 'boolean' THEN (${wrapped})::jsonb #>> '{}'
+          WHEN 'null' THEN NULL
+          ELSE (${wrapped})::jsonb::text
+        END
+      )
+      ELSE ${wrapped}::text
+    END)`;
+    return this.ensureTextCollation(coerced);
   }
 
   private countANonNullExpression(value: string): string {
@@ -249,7 +284,26 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   private buildBlankAwareComparison(operator: '=' | '<>', left: string, right: string): string {
     const shouldNormalize = this.isEmptyStringLiteral(left) || this.isEmptyStringLiteral(right);
     if (!shouldNormalize) {
-      return `(${left} ${operator} ${right})`;
+      const leftIsText = this.isTextLikeExpression(left);
+      const rightIsText = this.isTextLikeExpression(right);
+
+      let normalizedLeft = left;
+      let normalizedRight = right;
+
+      if (leftIsText) {
+        normalizedLeft = this.ensureTextCollation(left);
+      }
+      if (rightIsText) {
+        normalizedRight = this.ensureTextCollation(right);
+      }
+
+      if (leftIsText && !rightIsText) {
+        normalizedRight = this.coerceToTextComparable(right);
+      } else if (!leftIsText && rightIsText) {
+        normalizedLeft = this.coerceToTextComparable(left);
+      }
+
+      return `(${normalizedLeft} ${operator} ${normalizedRight})`;
     }
 
     const normalizedLeft = this.isEmptyStringLiteral(left)

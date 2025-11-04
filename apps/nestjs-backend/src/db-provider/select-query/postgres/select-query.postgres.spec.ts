@@ -337,3 +337,28 @@ describe('Select formula boolean normalization', () => {
     expect(sql).not.toContain('::boolean');
   });
 });
+
+describe('Select formula string comparisons', () => {
+  const query = new SelectQueryPostgres();
+  const tableStub = {
+    fieldList: [
+      { dbFieldName: 'text_col', dbFieldType: DbFieldType.Text },
+      { dbFieldName: 'json_col', dbFieldType: DbFieldType.Json },
+    ],
+  } as unknown as TableDomain;
+
+  const buildContext = (): ISelectFormulaConversionContext => ({
+    table: tableStub,
+    selectionMap: new Map<string, IFieldSelectName>(),
+  });
+
+  it('coerces JSON operands to text when compared with text columns', () => {
+    query.setContext(buildContext());
+    const sql = query.equal('"main"."text_col"', '"main"."json_col"');
+
+    expect(sql).toContain('pg_typeof(("main"."json_col")) = ANY');
+    expect(sql).toContain('jsonb_typeof((("main"."json_col"))::jsonb)');
+    expect(sql).toContain('("main"."text_col")::text COLLATE "C"');
+    expect(sql).not.toContain('= "main"."json_col"');
+  });
+});
