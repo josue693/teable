@@ -136,9 +136,11 @@ export class ViewService implements IReadonlyAdapterService {
     return this.createViewIndexField(dbTableName, viewId);
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   private async viewDataCompensation(tableId: string, viewRo: IViewRo) {
     // create view compensation data
     const innerViewRo = { ...viewRo };
+
     // primary field set visible default
     if ([ViewType.Kanban, ViewType.Gallery, ViewType.Calendar].includes(viewRo.type)) {
       const primaryField = await this.prismaService.txClient().field.findFirstOrThrow({
@@ -194,6 +196,31 @@ export class ViewService implements IReadonlyAdapterService {
           endDateFieldId,
         };
       }
+    }
+
+    if (viewRo.type === ViewType.Form) {
+      const fields = await this.prismaService.txClient().field.findMany({
+        where: { tableId, deletedTime: null },
+        select: {
+          id: true,
+          type: true,
+          isComputed: true,
+        },
+        orderBy: [{ order: 'asc' }, { createdTime: 'asc' }],
+      });
+
+      if (!fields?.length) return innerViewRo;
+
+      const columnMeta = innerViewRo.columnMeta ?? {};
+      for (const f of fields) {
+        const { id, type, isComputed } = f;
+
+        if (isComputed || type === FieldType.Button) continue;
+
+        const prev = columnMeta[id] ?? {};
+        columnMeta[id] = { ...prev, visible: true } as IColumn;
+      }
+      innerViewRo.columnMeta = columnMeta;
     }
     return innerViewRo;
   }

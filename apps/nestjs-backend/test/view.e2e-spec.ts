@@ -182,6 +182,25 @@ describe('OpenAPI ViewController (e2e)', () => {
     expect(fields.length).toEqual(Object.keys(columnMetaResponse).length);
   });
 
+  it('should set all eligible fields visible when creating form view', async () => {
+    const formView = await createView(table.id, {
+      name: 'Form view',
+      type: ViewType.Form,
+    });
+
+    const views = await getViews(table.id);
+    const createdForm = views.find(({ id }) => id === formView.id)!;
+    const formColumnMeta = createdForm.columnMeta as unknown as Record<string, IFormColumn>;
+
+    const eligibleFieldIds = table.fields
+      .filter((f) => !f.isComputed && !f.isLookup && f.type !== FieldType.Button)
+      .map((f) => f.id);
+
+    eligibleFieldIds.forEach((fieldId) => {
+      expect(formColumnMeta[fieldId]?.visible ?? false).toBe(true);
+    });
+  });
+
   it('should batch update view when create field', async () => {
     const initialColumnMeta = await viewService.generateViewOrderColumnMeta(table.id);
     const createData: Prisma.ViewCreateManyInput[] = [];
@@ -566,8 +585,10 @@ describe('OpenAPI ViewController (e2e)', () => {
             order: index,
           } as unknown as IFormColumnMeta;
           if (index === 0) {
-            (pre[cur.id] as unknown as IFormColumn).visible = false;
             (pre[cur.id] as unknown as IFormColumn).required = true;
+          }
+          if (!cur.isComputed && cur.type !== FieldType.Button) {
+            (pre[cur.id] as unknown as IFormColumn).visible = true;
           }
           return pre;
         },
