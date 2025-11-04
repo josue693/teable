@@ -37,6 +37,7 @@ import {
   createTable,
   permanentDeleteTable,
   permanentDeleteSpace,
+  updateRecordByApi,
 } from './utils/init-app';
 
 describe('OpenAPI SelectionController (e2e)', () => {
@@ -618,6 +619,101 @@ describe('OpenAPI SelectionController (e2e)', () => {
         expect(result.data.ids).toEqual([searchTable.records[3].id, searchTable.records[4].id]);
       } finally {
         await permanentDeleteTable(baseId, searchTable.id);
+      }
+    });
+
+    it('should delete selection when filter compares text field to lookup-backed formula', async () => {
+      await permanentDeleteTable(baseId, table.id);
+      table = await createTable(baseId, {
+        name: 'orders',
+        fields: [
+          {
+            name: 'Order Number',
+            type: FieldType.SingleLineText,
+          },
+        ],
+        records: [
+          { fields: { 'Order Number': 'ORD-001' } },
+          { fields: { 'Order Number': 'ORD-002' } },
+        ],
+      });
+
+      const detailTable = await createTable(baseId, {
+        name: 'order details',
+        fields: [
+          {
+            name: 'External Number',
+            type: FieldType.SingleLineText,
+          },
+        ],
+        records: [
+          { fields: { 'External Number': 'ORD-001' } },
+          { fields: { 'External Number': 'ORD-002' } },
+        ],
+      });
+
+      try {
+        const orderNumberField = table.fields.find((f) => f.name === 'Order Number')!;
+        const externalNumberField = detailTable.fields.find((f) => f.name === 'External Number')!;
+
+        const linkField = await createField(table.id, {
+          name: 'Detail Link',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyOne,
+            foreignTableId: detailTable.id,
+          },
+        });
+
+        const lookupField = await createField(table.id, {
+          name: 'External Number Lookup',
+          type: FieldType.SingleLineText,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: detailTable.id,
+            linkFieldId: linkField.id,
+            lookupFieldId: externalNumberField.id,
+          },
+        });
+
+        const formulaField = await createField(table.id, {
+          name: 'Match Flag',
+          type: FieldType.Formula,
+          options: {
+            expression: `IF({${orderNumberField.id}} = {${lookupField.id}}, "match", "not-match")`,
+          },
+        });
+
+        await updateRecordByApi(table.id, table.records[0].id, linkField.id, {
+          id: detailTable.records[0].id,
+        });
+
+        const record = await getRecord(table.id, table.records[0].id);
+        expect(record.fields[formulaField.id]).toBe('match');
+
+        const viewId = table.views[0].id;
+        const result = await deleteSelection(table.id, {
+          viewId,
+          ranges: [
+            [0, 0],
+            [0, 0],
+          ],
+          filter: {
+            conjunction: 'and',
+            filterSet: [
+              {
+                fieldId: formulaField.id,
+                value: 'match',
+                operator: 'is',
+              },
+            ],
+          },
+        });
+
+        expect(result.status).toBe(200);
+        expect(Array.isArray(result.data.ids)).toBe(true);
+      } finally {
+        await permanentDeleteTable(baseId, detailTable.id);
       }
     });
   });

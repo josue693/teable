@@ -1,5 +1,7 @@
 import type { IFieldMap } from '../../formula';
 import type { FieldCore } from '../field/field';
+import type { ILookupLinkOptions } from '../field/lookup-options-base.schema';
+import { isLinkLookupOptions } from '../field/lookup-options-base.schema';
 import { TableFields } from './table-fields';
 
 /**
@@ -217,8 +219,49 @@ export class TableDomain {
   /**
    * Get all foreign table IDs from link fields
    */
-  getAllForeignTableIds(): Set<string> {
-    return this._fields.getAllForeignTableIds();
+  getAllForeignTableIds(fieldIds?: string[]): Set<string> {
+    if (!fieldIds || fieldIds.length === 0) {
+      return this._fields.getAllForeignTableIds();
+    }
+
+    const expandedFieldIds = this.expandFieldIdsWithLinkDependencies(fieldIds);
+    return this._fields.getAllForeignTableIds([...expandedFieldIds]);
+  }
+
+  // eslint-disable-next-line sonarjs/cognitive-complexity
+  private expandFieldIdsWithLinkDependencies(fieldIds: Iterable<string>): Set<string> {
+    const visited = new Set<string>();
+    const stack = [...fieldIds];
+
+    while (stack.length) {
+      const fieldId = stack.pop();
+      if (!fieldId || visited.has(fieldId)) {
+        continue;
+      }
+      visited.add(fieldId);
+
+      const field = this.getField(fieldId);
+      if (!field) {
+        continue;
+      }
+
+      const linkFields = field.getLinkFields(this);
+      for (const linkField of linkFields) {
+        if (!visited.has(linkField.id)) {
+          stack.push(linkField.id);
+        }
+      }
+
+      const lookupOptions = (field as { lookupOptions?: ILookupLinkOptions }).lookupOptions;
+      if (lookupOptions && isLinkLookupOptions(lookupOptions)) {
+        const linkFieldId = lookupOptions.linkFieldId;
+        if (linkFieldId && !visited.has(linkFieldId)) {
+          stack.push(linkFieldId);
+        }
+      }
+    }
+
+    return visited;
   }
 
   /**

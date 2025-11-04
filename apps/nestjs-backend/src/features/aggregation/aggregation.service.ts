@@ -254,7 +254,7 @@ export class AggregationService implements IAggregationService {
 
     // Build aggregate query first, then attach permission CTE on the same builder
     const { qb, alias } = await this.recordQueryBuilder.createRecordAggregateBuilder(dbTableName, {
-      tableIdOrDbTableName: tableId,
+      tableId,
       viewId,
       filter,
       aggregationFields: statisticFields,
@@ -511,7 +511,7 @@ export class AggregationService implements IAggregationService {
     const { qb, alias, selectionMap } = await this.recordQueryBuilder.createRecordAggregateBuilder(
       dbTableName,
       {
-        tableIdOrDbTableName: tableId,
+        tableId,
         viewId,
         currentUserId: withUserId,
         filter,

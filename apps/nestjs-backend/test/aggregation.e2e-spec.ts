@@ -2,7 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { INestApplication } from '@nestjs/common';
-import type { IFieldVo, IFilter, IGroup } from '@teable/core';
+import type { IFieldRo, IFieldVo, IFilter, IGroup, ILinkFieldOptions } from '@teable/core';
 import {
   Colors,
   FieldKeyType,
@@ -13,6 +13,7 @@ import {
   SortFunc,
   StatisticsFunc,
   ViewType,
+  NumberFormattingType,
 } from '@teable/core';
 import type { IGroupHeaderPoint, ITableFullVo } from '@teable/openapi';
 import {
@@ -44,6 +45,7 @@ import {
   createField,
   updateRecordByApi,
   getRecords,
+  getRecord,
 } from './utils/init-app';
 
 describe('OpenAPI AggregationController (e2e)', () => {
@@ -53,6 +55,79 @@ describe('OpenAPI AggregationController (e2e)', () => {
   beforeAll(async () => {
     const appCtx = await initApp();
     app = appCtx.app;
+  });
+
+  describe('link updates when primary field is user', () => {
+    let sourceTable: ITableFullVo;
+    let targetTable: ITableFullVo;
+    let linkField: IFieldVo;
+    let symmetricFieldId: string;
+    let sourceRecordId: string;
+    let targetRecordId: string;
+
+    beforeAll(async () => {
+      const assigneeField: IFieldRo = { name: 'Assignee', type: FieldType.User };
+      sourceTable = await createTable(baseId, {
+        name: 'agg_user_primary_source',
+        fields: [assigneeField],
+        records: [
+          {
+            fields: {
+              [assigneeField.name!]: {
+                id: globalThis.testConfig.userId,
+                title: globalThis.testConfig.userName,
+                email: globalThis.testConfig.email,
+              },
+            },
+          },
+        ],
+      });
+
+      targetTable = await createTable(baseId, {
+        name: 'agg_user_primary_target',
+        fields: [{ name: 'Project', type: FieldType.SingleLineText } as IFieldRo],
+        records: [
+          { fields: { Project: 'Project Alpha' } },
+          { fields: { Project: 'Project Beta' } },
+        ],
+      });
+
+      linkField = (await createField(sourceTable.id, {
+        name: 'Related Project',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyMany,
+          foreignTableId: targetTable.id,
+        },
+      })) as IFieldVo;
+
+      symmetricFieldId = (linkField.options as ILinkFieldOptions).symmetricFieldId as string;
+      expect(symmetricFieldId).toBeDefined();
+
+      sourceRecordId = sourceTable.records[0].id;
+      targetRecordId = targetTable.records[0].id;
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, sourceTable.id);
+      await permanentDeleteTable(baseId, targetTable.id);
+    });
+
+    it('propagates symmetric link titles from user primary field', async () => {
+      await updateRecordByApi(sourceTable.id, sourceRecordId, linkField.id, [
+        { id: targetRecordId },
+      ]);
+
+      const symmetricRecord = await getRecord(targetTable.id, targetRecordId);
+      const symmetricValue = symmetricRecord.fields[symmetricFieldId];
+      expect(symmetricValue).toBeDefined();
+      const normalizedValue = Array.isArray(symmetricValue) ? symmetricValue : [symmetricValue];
+      expect(normalizedValue).toHaveLength(1);
+      expect(normalizedValue[0]).toMatchObject({
+        id: sourceRecordId,
+        title: globalThis.testConfig.userName,
+      });
+    });
   });
 
   afterAll(async () => {
@@ -710,6 +785,88 @@ describe('OpenAPI AggregationController (e2e)', () => {
     });
   });
 
+  describe('multi-value numeric lookup aggregation', () => {
+    let ordersTable: ITableFullVo;
+    let summaryTable: ITableFullVo;
+    let linkField: IFieldVo;
+    let lookupField: IFieldVo;
+    const orderAmounts = [299.88, 42.12, 10.5];
+
+    beforeAll(async () => {
+      ordersTable = await createTable(baseId, {
+        name: 'agg_order_source',
+        fields: [
+          { name: 'Order Name', type: FieldType.SingleLineText } as IFieldRo,
+          {
+            name: 'Amount',
+            type: FieldType.Number,
+            options: {
+              formatting: { type: NumberFormattingType.Decimal, precision: 2 },
+            },
+          } as IFieldRo,
+        ],
+        records: orderAmounts.map((amount, index) => ({
+          fields: { 'Order Name': `Order ${index + 1}`, Amount: amount },
+        })),
+      });
+
+      summaryTable = await createTable(baseId, {
+        name: 'agg_order_summary',
+        fields: [{ name: 'Summary', type: FieldType.SingleLineText } as IFieldRo],
+        records: [{ fields: { Summary: 'All Orders' } }],
+      });
+
+      const summaryRecordId = summaryTable.records[0].id;
+      linkField = (await createField(summaryTable.id, {
+        name: 'Orders',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: ordersTable.id,
+        },
+      } as IFieldRo)) as IFieldVo;
+
+      await updateRecordByApi(
+        summaryTable.id,
+        summaryRecordId,
+        linkField.id,
+        ordersTable.records.map((record) => ({ id: record.id }))
+      );
+
+      const amountFieldId = ordersTable.fields.find((field) => field.name === 'Amount')!.id;
+      lookupField = (await createField(summaryTable.id, {
+        name: 'Order Amount Lookup',
+        type: FieldType.Number,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: ordersTable.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: amountFieldId,
+        },
+      } as IFieldRo)) as IFieldVo;
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, summaryTable.id);
+      await permanentDeleteTable(baseId, ordersTable.id);
+    });
+
+    it('sums decimal lookup values without truncation', async () => {
+      const response = await getAggregation(summaryTable.id, {
+        viewId: summaryTable.views[0].id,
+        field: {
+          [StatisticsFunc.Sum]: [lookupField.id],
+        },
+      });
+
+      const aggregation = response.data.aggregations?.find(
+        (item) => item.fieldId === lookupField.id
+      );
+      const expectedSum = orderAmounts.reduce((acc, value) => acc + value, 0);
+      expect(aggregation?.total?.value).toBeCloseTo(expectedSum, 4);
+    });
+  });
+
   describe('get group point by group', () => {
     let table: ITableFullVo;
     beforeAll(async () => {
@@ -858,6 +1015,68 @@ describe('OpenAPI AggregationController (e2e)', () => {
         await getGroupPoints(table.id, { groupBy: groupByMultipleUserField })
       ).data!;
       expect(groupPointsForMultiple.length).toEqual(6);
+    });
+
+    it('should order user group headers by display title', async () => {
+      const groupedTable = await createTable(baseId, {
+        fields: [
+          {
+            name: 'Assignee',
+            type: FieldType.User,
+          },
+        ],
+      });
+
+      const userField = groupedTable.fields.find((field) => field.name === 'Assignee')!;
+
+      await createRecords(groupedTable.id, {
+        records: [
+          {
+            fields: {
+              [userField.id]: {
+                id: 'usrTestUserId',
+                title: 'Alpha',
+              },
+            },
+          },
+          {
+            fields: {
+              [userField.id]: {
+                id: 'usrTestUserId_1',
+                title: 'Beta',
+              },
+            },
+          },
+        ],
+      });
+
+      try {
+        const groupBy = [
+          {
+            fieldId: userField.id,
+            order: SortFunc.Asc,
+          },
+        ];
+
+        const groupPoints = (await getGroupPoints(groupedTable.id, { groupBy })).data!;
+
+        const headerTitles = groupPoints
+          .filter((point): point is IGroupHeaderPoint => point.type === GroupPointType.Header)
+          .filter(({ depth, value }) => depth === 0 && value != null)
+          .map(({ value }) => {
+            if (typeof value === 'object' && value !== null && 'title' in value) {
+              return (value as { title?: string }).title ?? null;
+            }
+            return typeof value === 'string' ? value : null;
+          })
+          .filter((title): title is string => Boolean(title));
+
+        const sortedTitles = [...headerTitles].sort((a, b) => a.localeCompare(b, 'en'));
+
+        expect(headerTitles).toEqual(sortedTitles);
+      } finally {
+        await permanentDeleteTable(baseId, groupedTable.id);
+      }
     });
   });
 

@@ -12,7 +12,7 @@ export interface IPrepareViewParams {
  */
 export interface ICreateRecordQueryBuilderOptions {
   /** The table ID or database table name */
-  tableIdOrDbTableName: string;
+  tableId: string;
   /** Optional view ID for filtering */
   viewId?: string;
   /** Optional filter */
@@ -54,7 +54,7 @@ export interface ICreateRecordQueryBuilderOptions {
  */
 export interface ICreateRecordAggregateBuilderOptions {
   /** The table ID or database table name */
-  tableIdOrDbTableName: string;
+  tableId: string;
   /** Optional view ID for filtering */
   viewId?: string;
   /** Optional filter */

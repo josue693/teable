@@ -151,6 +151,15 @@ describe('TableFields', () => {
       expect(relatedTableIds.size).toBe(3);
     });
 
+    it('should respect provided fieldIds projection', () => {
+      const onlyFirstLink = fields.getAllForeignTableIds(['fldlink1']);
+      expect(onlyFirstLink.size).toBe(1);
+      expect(onlyFirstLink.has('tblforeign1')).toBe(true);
+
+      const onlyTextField = fields.getAllForeignTableIds(['fldtext1']);
+      expect(onlyTextField.size).toBe(0);
+    });
+
     it('should return empty set when no link fields exist', () => {
       const textField = plainToInstance(SingleLineTextFieldCore, textFieldJson);
       const fieldsWithoutLinks = new TableFields([textField]);

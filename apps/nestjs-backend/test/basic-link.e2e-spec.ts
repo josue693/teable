@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { INestApplication } from '@nestjs/common';
@@ -10,6 +11,7 @@ import {
   createTable,
   permanentDeleteTable,
   getRecords,
+  getRecord,
   initApp,
   updateRecordByApi,
   getField,
@@ -327,6 +329,198 @@ describe('Basic Link Field (e2e)', () => {
       expect(task1?.fields[linkField.id]).toBeUndefined();
       expect(task1?.fields[lookupField.id]).toBeUndefined();
       expect(task1?.fields[rollupField.id]).toBe(0);
+    });
+  });
+
+  describe('Link formulas comparing text to lookup values', () => {
+    let orderTable: ITableFullVo | undefined;
+    let detailTable: ITableFullVo | undefined;
+
+    afterEach(async () => {
+      if (orderTable) {
+        await permanentDeleteTable(baseId, orderTable.id);
+        orderTable = undefined;
+      }
+      if (detailTable) {
+        await permanentDeleteTable(baseId, detailTable.id);
+        detailTable = undefined;
+      }
+    });
+
+    it('should update records without errors when formula compares text field to lookup result', async () => {
+      orderTable = await createTable(baseId, {
+        name: 'orders',
+        fields: [
+          {
+            name: 'Order Number',
+            type: FieldType.SingleLineText,
+          },
+        ],
+        records: [
+          { fields: { 'Order Number': 'ORD-001' } },
+          { fields: { 'Order Number': 'ORD-002' } },
+        ],
+      });
+
+      detailTable = await createTable(baseId, {
+        name: 'order details',
+        fields: [
+          {
+            name: 'External Number',
+            type: FieldType.SingleLineText,
+          },
+        ],
+        records: [
+          { fields: { 'External Number': 'ORD-001' } },
+          { fields: { 'External Number': 'ORD-002' } },
+        ],
+      });
+
+      const orderNumberField = orderTable.fields.find((f) => f.name === 'Order Number')!;
+      const externalNumberField = detailTable.fields.find((f) => f.name === 'External Number')!;
+
+      const linkField = await createField(orderTable.id, {
+        name: 'Detail Link',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: detailTable.id,
+        },
+      });
+
+      const lookupField = await createField(orderTable.id, {
+        name: 'External Number Lookup',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: detailTable.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: externalNumberField.id,
+        },
+      });
+
+      const formulaField = await createField(orderTable.id, {
+        name: 'Match Flag',
+        type: FieldType.Formula,
+        options: {
+          expression: `IF({${orderNumberField.id}} = {${lookupField.id}}, "match", "not-match")`,
+        },
+      });
+
+      await updateRecordByApi(orderTable.id, orderTable.records[0].id, linkField.id, {
+        id: detailTable.records[0].id,
+      });
+
+      const linkedRecord = await getRecord(orderTable.id, orderTable.records[0].id);
+      expect(linkedRecord.fields[formulaField.id]).toBe('match');
+
+      await updateRecordByApi(
+        orderTable.id,
+        orderTable.records[0].id,
+        orderNumberField.id,
+        'ORD-001-UPDATED'
+      );
+
+      const updatedRecord = await getRecord(orderTable.id, orderTable.records[0].id);
+      expect(updatedRecord.fields[formulaField.id]).toBe('not-match');
+    });
+  });
+
+  describe('Lookup formula text functions', () => {
+    let projectTable: ITableFullVo;
+    let taskTable: ITableFullVo;
+    let linkField: IFieldVo;
+    let lookupField: IFieldVo;
+    let formulaField: IFieldVo;
+
+    beforeEach(async () => {
+      const taskNameField: IFieldRo = {
+        name: 'Task',
+        type: FieldType.SingleLineText,
+      };
+      const taskDateField: IFieldRo = {
+        name: 'Due Date',
+        type: FieldType.Date,
+      };
+
+      taskTable = await createTable(baseId, {
+        name: 'Formula Tasks',
+        fields: [taskNameField, taskDateField],
+        records: [
+          {
+            fields: {
+              Task: 'Task Alpha',
+              'Due Date': '2024-10-31',
+            },
+          },
+        ],
+      });
+
+      const projectNameField: IFieldRo = {
+        name: 'Project',
+        type: FieldType.SingleLineText,
+      };
+
+      projectTable = await createTable(baseId, {
+        name: 'Formula Projects',
+        fields: [projectNameField],
+        records: [
+          {
+            fields: {
+              Project: 'Project One',
+            },
+          },
+        ],
+      });
+
+      linkField = await createField(projectTable.id, {
+        name: 'Linked Tasks',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: taskTable.id,
+        },
+      });
+
+      const dueDateFieldId = taskTable.fields.find((f) => f.name === 'Due Date')!.id;
+
+      lookupField = await createField(projectTable.id, {
+        name: 'Task Due Dates',
+        type: FieldType.Date,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: taskTable.id,
+          lookupFieldId: dueDateFieldId,
+          linkFieldId: linkField.id,
+        },
+      });
+
+      formulaField = await createField(projectTable.id, {
+        name: 'Due Year',
+        type: FieldType.Formula,
+        options: {
+          expression: `LEFT({${lookupField.id}}, 4)`,
+        },
+      });
+    });
+
+    afterEach(async () => {
+      await permanentDeleteTable(baseId, projectTable.id);
+      await permanentDeleteTable(baseId, taskTable.id);
+    });
+
+    it('should treat lookup arrays as comma-separated strings for text formulas', async () => {
+      await updateRecordByApi(projectTable.id, projectTable.records[0].id, linkField.id, [
+        { id: taskTable.records[0].id },
+      ]);
+
+      const record = await getRecord(projectTable.id, projectTable.records[0].id);
+      const lookupValue = record.fields[lookupField.id] as string[] | undefined;
+
+      expect(Array.isArray(lookupValue)).toBe(true);
+      expect(lookupValue).toHaveLength(1);
+      expect(lookupValue?.[0]).toMatch(/^2024-10-/);
+      expect(record.fields[formulaField.id]).toBe('2024');
     });
   });
 
@@ -2521,6 +2715,242 @@ describe('Basic Link Field (e2e)', () => {
       expect(newSymmetricField.options).toMatchObject({
         relationship: Relationship.ManyMany,
       });
+    });
+  });
+
+  describe('User primary field link relationships', () => {
+    const OWNER_FIELD_NAME = 'Owner';
+    const LABEL_FIELD_NAME = 'Label';
+    const defaultUserTitle = globalThis.testConfig.userName || 'Test User';
+    const secondaryUserTitle = 'test';
+
+    const defaultUserFactory = () => ({
+      id: globalThis.testConfig.userId,
+      title: defaultUserTitle,
+      email: globalThis.testConfig.email,
+    });
+
+    const secondaryUserFactory = () => ({
+      id: 'usrTestUserId',
+      title: secondaryUserTitle,
+    });
+
+    const buildUserPrimaryTable = async (
+      name: string,
+      firstUserFactory: () => Record<string, unknown>,
+      secondUserFactory: () => Record<string, unknown>
+    ) => {
+      return createTable(baseId, {
+        name,
+        fields: [
+          { name: OWNER_FIELD_NAME, type: FieldType.User } as IFieldRo,
+          { name: LABEL_FIELD_NAME, type: FieldType.SingleLineText } as IFieldRo,
+        ],
+        records: [
+          {
+            fields: {
+              [OWNER_FIELD_NAME]: firstUserFactory(),
+              [LABEL_FIELD_NAME]: `${name}-1`,
+            },
+          },
+          {
+            fields: {
+              [OWNER_FIELD_NAME]: secondUserFactory(),
+              [LABEL_FIELD_NAME]: `${name}-2`,
+            },
+          },
+        ],
+      });
+    };
+
+    const expectLinkValueHasTitle = (value: unknown, expectedTitle: string) => {
+      const extractTitle = (input: unknown): string | undefined => {
+        if (input == null) return undefined;
+        if (typeof input === 'string') return input;
+        if (Array.isArray(input)) {
+          for (const item of input) {
+            const title = extractTitle(item);
+            if (title) return title;
+          }
+          return undefined;
+        }
+        if (typeof input === 'object') {
+          const record = input as Record<string, unknown>;
+          const title = extractTitle(record.title);
+          if (title) return title;
+          const name = extractTitle(record.name);
+          if (name) return name;
+        }
+        return undefined;
+      };
+
+      const title = extractTitle(value);
+      expect(typeof title).toBe('string');
+      expect(title?.length).toBeGreaterThan(0);
+    };
+
+    it('supports ManyMany linking when both tables use user primary fields', async () => {
+      const sourceTable = await buildUserPrimaryTable(
+        'user-mm-src',
+        defaultUserFactory,
+        secondaryUserFactory
+      );
+      const targetTable = await buildUserPrimaryTable(
+        'user-mm-target',
+        secondaryUserFactory,
+        defaultUserFactory
+      );
+
+      try {
+        const linkField = (await createField(sourceTable.id, {
+          name: 'Partners',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: targetTable.id,
+          },
+        })) as IFieldVo;
+
+        const symmetricFieldId = (linkField.options as ILinkFieldOptions)
+          .symmetricFieldId as string;
+        expect(symmetricFieldId).toBeDefined();
+
+        await updateRecordByApi(sourceTable.id, sourceTable.records[0].id, linkField.id, [
+          { id: targetTable.records[0].id },
+        ]);
+
+        const sourceRecord = await getRecord(sourceTable.id, sourceTable.records[0].id);
+        expectLinkValueHasTitle(sourceRecord.fields[linkField.id], secondaryUserTitle);
+
+        const targetRecord = await getRecord(targetTable.id, targetTable.records[0].id);
+        expectLinkValueHasTitle(targetRecord.fields[symmetricFieldId], defaultUserTitle);
+      } finally {
+        await permanentDeleteTable(baseId, sourceTable.id);
+        await permanentDeleteTable(baseId, targetTable.id);
+      }
+    });
+
+    it('supports ManyOne linking when both tables use user primary fields', async () => {
+      const sourceTable = await buildUserPrimaryTable(
+        'user-mn-src',
+        defaultUserFactory,
+        secondaryUserFactory
+      );
+      const targetTable = await buildUserPrimaryTable(
+        'user-mn-target',
+        secondaryUserFactory,
+        defaultUserFactory
+      );
+
+      try {
+        const linkField = (await createField(sourceTable.id, {
+          name: 'OwnerProject',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyOne,
+            foreignTableId: targetTable.id,
+          },
+        })) as IFieldVo;
+
+        const symmetricFieldId = (linkField.options as ILinkFieldOptions)
+          .symmetricFieldId as string;
+        expect(symmetricFieldId).toBeDefined();
+
+        await updateRecordByApi(sourceTable.id, sourceTable.records[0].id, linkField.id, {
+          id: targetTable.records[0].id,
+        });
+
+        const sourceRecord = await getRecord(sourceTable.id, sourceTable.records[0].id);
+        expectLinkValueHasTitle(sourceRecord.fields[linkField.id], secondaryUserTitle);
+
+        const targetRecord = await getRecord(targetTable.id, targetTable.records[0].id);
+        expectLinkValueHasTitle(targetRecord.fields[symmetricFieldId], defaultUserTitle);
+      } finally {
+        await permanentDeleteTable(baseId, sourceTable.id);
+        await permanentDeleteTable(baseId, targetTable.id);
+      }
+    });
+
+    it('supports OneMany linking when both tables use user primary fields', async () => {
+      const sourceTable = await buildUserPrimaryTable(
+        'user-om-src',
+        defaultUserFactory,
+        secondaryUserFactory
+      );
+      const targetTable = await buildUserPrimaryTable(
+        'user-om-target',
+        secondaryUserFactory,
+        defaultUserFactory
+      );
+
+      try {
+        const linkField = (await createField(sourceTable.id, {
+          name: 'TeamMembers',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.OneMany,
+            foreignTableId: targetTable.id,
+          },
+        })) as IFieldVo;
+
+        const symmetricFieldId = (linkField.options as ILinkFieldOptions)
+          .symmetricFieldId as string;
+        expect(symmetricFieldId).toBeDefined();
+
+        await updateRecordByApi(sourceTable.id, sourceTable.records[0].id, linkField.id, [
+          { id: targetTable.records[0].id },
+        ]);
+
+        const sourceRecord = await getRecord(sourceTable.id, sourceTable.records[0].id);
+        expectLinkValueHasTitle(sourceRecord.fields[linkField.id], secondaryUserTitle);
+
+        const targetRecord = await getRecord(targetTable.id, targetTable.records[0].id);
+        expectLinkValueHasTitle(targetRecord.fields[symmetricFieldId], defaultUserTitle);
+      } finally {
+        await permanentDeleteTable(baseId, sourceTable.id);
+        await permanentDeleteTable(baseId, targetTable.id);
+      }
+    });
+
+    it('supports OneOne linking when both tables use user primary fields', async () => {
+      const sourceTable = await buildUserPrimaryTable(
+        'user-oo-src',
+        defaultUserFactory,
+        secondaryUserFactory
+      );
+      const targetTable = await buildUserPrimaryTable(
+        'user-oo-target',
+        secondaryUserFactory,
+        defaultUserFactory
+      );
+
+      try {
+        const linkField = (await createField(sourceTable.id, {
+          name: 'ProfileOwner',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.OneOne,
+            foreignTableId: targetTable.id,
+          },
+        })) as IFieldVo;
+
+        const symmetricFieldId = (linkField.options as ILinkFieldOptions)
+          .symmetricFieldId as string;
+        expect(symmetricFieldId).toBeDefined();
+
+        await updateRecordByApi(sourceTable.id, sourceTable.records[0].id, linkField.id, {
+          id: targetTable.records[0].id,
+        });
+
+        const sourceRecord = await getRecord(sourceTable.id, sourceTable.records[0].id);
+        expectLinkValueHasTitle(sourceRecord.fields[linkField.id], secondaryUserTitle);
+
+        const targetRecord = await getRecord(targetTable.id, targetTable.records[0].id);
+        expectLinkValueHasTitle(targetRecord.fields[symmetricFieldId], defaultUserTitle);
+      } finally {
+        await permanentDeleteTable(baseId, sourceTable.id);
+        await permanentDeleteTable(baseId, targetTable.id);
+      }
     });
   });
 });
