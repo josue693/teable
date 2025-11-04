@@ -2,7 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { INestApplication } from '@nestjs/common';
-import type { IFieldVo, IFilter, IGroup } from '@teable/core';
+import type { IFieldRo, IFieldVo, IFilter, IGroup } from '@teable/core';
 import {
   Colors,
   FieldKeyType,
@@ -13,6 +13,7 @@ import {
   SortFunc,
   StatisticsFunc,
   ViewType,
+  NumberFormattingType,
 } from '@teable/core';
 import type { IGroupHeaderPoint, ITableFullVo } from '@teable/openapi';
 import {
@@ -707,6 +708,88 @@ describe('OpenAPI AggregationController (e2e)', () => {
         (item) => item.fieldId === amountField.id
       );
       expect(aggregation?.total?.value).toBe(10);
+    });
+  });
+
+  describe('multi-value numeric lookup aggregation', () => {
+    let ordersTable: ITableFullVo;
+    let summaryTable: ITableFullVo;
+    let linkField: IFieldVo;
+    let lookupField: IFieldVo;
+    const orderAmounts = [299.88, 42.12, 10.5];
+
+    beforeAll(async () => {
+      ordersTable = await createTable(baseId, {
+        name: 'agg_order_source',
+        fields: [
+          { name: 'Order Name', type: FieldType.SingleLineText } as IFieldRo,
+          {
+            name: 'Amount',
+            type: FieldType.Number,
+            options: {
+              formatting: { type: NumberFormattingType.Decimal, precision: 2 },
+            },
+          } as IFieldRo,
+        ],
+        records: orderAmounts.map((amount, index) => ({
+          fields: { 'Order Name': `Order ${index + 1}`, Amount: amount },
+        })),
+      });
+
+      summaryTable = await createTable(baseId, {
+        name: 'agg_order_summary',
+        fields: [{ name: 'Summary', type: FieldType.SingleLineText } as IFieldRo],
+        records: [{ fields: { Summary: 'All Orders' } }],
+      });
+
+      const summaryRecordId = summaryTable.records[0].id;
+      linkField = (await createField(summaryTable.id, {
+        name: 'Orders',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: ordersTable.id,
+        },
+      } as IFieldRo)) as IFieldVo;
+
+      await updateRecordByApi(
+        summaryTable.id,
+        summaryRecordId,
+        linkField.id,
+        ordersTable.records.map((record) => ({ id: record.id }))
+      );
+
+      const amountFieldId = ordersTable.fields.find((field) => field.name === 'Amount')!.id;
+      lookupField = (await createField(summaryTable.id, {
+        name: 'Order Amount Lookup',
+        type: FieldType.Number,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: ordersTable.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: amountFieldId,
+        },
+      } as IFieldRo)) as IFieldVo;
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, summaryTable.id);
+      await permanentDeleteTable(baseId, ordersTable.id);
+    });
+
+    it('sums decimal lookup values without truncation', async () => {
+      const response = await getAggregation(summaryTable.id, {
+        viewId: summaryTable.views[0].id,
+        field: {
+          [StatisticsFunc.Sum]: [lookupField.id],
+        },
+      });
+
+      const aggregation = response.data.aggregations?.find(
+        (item) => item.fieldId === lookupField.id
+      );
+      const expectedSum = orderAmounts.reduce((acc, value) => acc + value, 0);
+      expect(aggregation?.total?.value).toBeCloseTo(expectedSum, 4);
     });
   });
 

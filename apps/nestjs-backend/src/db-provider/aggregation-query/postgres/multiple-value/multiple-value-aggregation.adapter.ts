@@ -1,6 +1,12 @@
 import { AggregationFunctionPostgres } from '../aggregation-function.postgres';
 
 export class MultipleValueAggregationAdapter extends AggregationFunctionPostgres {
+  private toNumericSafe(columnExpression: string): string {
+    const textExpr = `(${columnExpression})::text COLLATE "C"`;
+    const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
+    return `NULLIF(${sanitized}, '' COLLATE "C")::double precision`;
+  }
+
   unique(): string {
     return this.knex
       .raw(
@@ -13,7 +19,7 @@ export class MultipleValueAggregationAdapter extends AggregationFunctionPostgres
   max(): string {
     return this.knex
       .raw(
-        `SELECT MAX("value"::INTEGER) AS "value" FROM ?? as "${this.tableAlias}", jsonb_array_elements_text(${this.tableColumnRef}::jsonb)`,
+        `SELECT MAX(${this.toNumericSafe('"value"')}) AS "value" FROM ?? as "${this.tableAlias}", jsonb_array_elements_text(${this.tableColumnRef}::jsonb)`,
         [this.dbTableName]
       )
       .toQuery();
@@ -22,7 +28,7 @@ export class MultipleValueAggregationAdapter extends AggregationFunctionPostgres
   min(): string {
     return this.knex
       .raw(
-        `SELECT MIN("value"::INTEGER) AS "value" FROM ?? as "${this.tableAlias}", jsonb_array_elements_text(${this.tableColumnRef}::jsonb)`,
+        `SELECT MIN(${this.toNumericSafe('"value"')}) AS "value" FROM ?? as "${this.tableAlias}", jsonb_array_elements_text(${this.tableColumnRef}::jsonb)`,
         [this.dbTableName]
       )
       .toQuery();
@@ -31,7 +37,7 @@ export class MultipleValueAggregationAdapter extends AggregationFunctionPostgres
   sum(): string {
     return this.knex
       .raw(
-        `SELECT SUM("value"::INTEGER) AS "value" FROM ?? as "${this.tableAlias}", jsonb_array_elements_text(${this.tableColumnRef}::jsonb)`,
+        `SELECT SUM(${this.toNumericSafe('"value"')}) AS "value" FROM ?? as "${this.tableAlias}", jsonb_array_elements_text(${this.tableColumnRef}::jsonb)`,
         [this.dbTableName]
       )
       .toQuery();
@@ -40,7 +46,7 @@ export class MultipleValueAggregationAdapter extends AggregationFunctionPostgres
   average(): string {
     return this.knex
       .raw(
-        `SELECT AVG("value"::INTEGER) AS "value" FROM ?? as "${this.tableAlias}", jsonb_array_elements_text(${this.tableColumnRef}::jsonb)`,
+        `SELECT AVG(${this.toNumericSafe('"value"')}) AS "value" FROM ?? as "${this.tableAlias}", jsonb_array_elements_text(${this.tableColumnRef}::jsonb)`,
         [this.dbTableName]
       )
       .toQuery();
