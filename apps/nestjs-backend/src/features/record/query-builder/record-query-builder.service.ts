@@ -5,6 +5,7 @@ import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectDbProvider } from '../../../db-provider/db.provider';
 import { IDbProvider } from '../../../db-provider/db.provider.interface';
+import { isUserOrLink } from '../../../utils/is-user-or-link';
 import { ID_FIELD_NAME, preservedDbFieldNames } from '../../field/constant';
 import { TableDomainQueryService } from '../../table-domain/table-domain-query.service';
 import { FieldCteVisitor } from './field-cte-visitor';
@@ -270,7 +271,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
         if (!groupedField) continue;
         const direction: 'ASC' | 'DESC' = groupItem.order === SortFunc.Desc ? 'DESC' : 'ASC';
 
-        this.orderAggregateByGroup(qb, groupedField, direction);
+        this.orderAggregateByGroup(qb, groupedField, direction, selectionMap);
       }
     }
 
@@ -297,13 +298,18 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     visitor.build();
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   private orderAggregateByGroup(
     qb: Knex.QueryBuilder,
     field: FieldCore,
-    direction: 'ASC' | 'DESC'
+    direction: 'ASC' | 'DESC',
+    selectionMap: IReadonlyRecordSelectionMap
   ) {
     const nullOrdering = direction === 'DESC' ? 'NULLS LAST' : 'NULLS FIRST';
     const quotedAlias = `"${field.dbFieldName.replace(/"/g, '""')}"`;
+    const selection = selectionMap.get(field.id);
+    const selectionExpression =
+      typeof selection === 'string' ? selection : selection ? selection.toQuery() : undefined;
 
     if (field.type === FieldType.SingleSelect) {
       const rawChoices = (field.options as { choices?: { name: string }[] } | undefined)?.choices;
@@ -317,6 +323,23 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
         );
         return;
       }
+    }
+
+    if (isUserOrLink(field.type)) {
+      if (field.isMultipleCellValue) {
+        if (selectionExpression) {
+          qb.orderByRaw(
+            `jsonb_path_query_array((${selectionExpression})::jsonb, '$[*].title')::text ${direction} ${nullOrdering}`
+          );
+        } else {
+          qb.orderByRaw(`${quotedAlias} ${direction} ${nullOrdering}`);
+        }
+      } else {
+        qb.orderByRaw(
+          `(${selectionExpression ?? quotedAlias})::jsonb ->> 'title' ${direction} ${nullOrdering}`
+        );
+      }
+      return;
     }
 
     qb.orderByRaw(`${quotedAlias} ${direction} ${nullOrdering}`);

@@ -19,7 +19,7 @@ export class CreateRecordsOperation {
   async event2Operation(payload: ICreateRecordsPayload): Promise<ICreateRecordsOperation> {
     const { reqParams, resolveData } = payload;
     const { tableId } = reqParams;
-    const { records } = resolveData;
+    const { records = [] } = resolveData;
 
     const recordIds = records.map((record) => record.id);
 

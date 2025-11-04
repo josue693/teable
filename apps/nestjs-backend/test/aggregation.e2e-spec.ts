@@ -1016,6 +1016,68 @@ describe('OpenAPI AggregationController (e2e)', () => {
       ).data!;
       expect(groupPointsForMultiple.length).toEqual(6);
     });
+
+    it('should order user group headers by display title', async () => {
+      const groupedTable = await createTable(baseId, {
+        fields: [
+          {
+            name: 'Assignee',
+            type: FieldType.User,
+          },
+        ],
+      });
+
+      const userField = groupedTable.fields.find((field) => field.name === 'Assignee')!;
+
+      await createRecords(groupedTable.id, {
+        records: [
+          {
+            fields: {
+              [userField.id]: {
+                id: 'usrTestUserId',
+                title: 'Alpha',
+              },
+            },
+          },
+          {
+            fields: {
+              [userField.id]: {
+                id: 'usrTestUserId_1',
+                title: 'Beta',
+              },
+            },
+          },
+        ],
+      });
+
+      try {
+        const groupBy = [
+          {
+            fieldId: userField.id,
+            order: SortFunc.Asc,
+          },
+        ];
+
+        const groupPoints = (await getGroupPoints(groupedTable.id, { groupBy })).data!;
+
+        const headerTitles = groupPoints
+          .filter((point): point is IGroupHeaderPoint => point.type === GroupPointType.Header)
+          .filter(({ depth, value }) => depth === 0 && value != null)
+          .map(({ value }) => {
+            if (typeof value === 'object' && value !== null && 'title' in value) {
+              return (value as { title?: string }).title ?? null;
+            }
+            return typeof value === 'string' ? value : null;
+          })
+          .filter((title): title is string => Boolean(title));
+
+        const sortedTitles = [...headerTitles].sort((a, b) => a.localeCompare(b, 'en'));
+
+        expect(headerTitles).toEqual(sortedTitles);
+      } finally {
+        await permanentDeleteTable(baseId, groupedTable.id);
+      }
+    });
   });
 
   describe('should get calendar daily collection', () => {
