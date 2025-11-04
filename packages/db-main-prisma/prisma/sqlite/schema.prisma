@@ -176,11 +176,12 @@ model Reference {
 
 model User {
   id                   String    @id @default(cuid())
+  accountName          String?   @unique @map("account_name")
   name                 String
   password             String?
   salt                 String?
   phone                String?   @unique
-  email                String    @unique
+  email                String?   @unique
   avatar               String?
   isSystem             Boolean?  @map("is_system")
   isAdmin              Boolean?  @map("is_admin")
