@@ -133,9 +133,11 @@ export class TableDomainQueryService {
     // Mark as visited
     tables.markVisited(tableId);
 
-    const foreignTableIds = currentTableDomain.getAllForeignTableIds(
-      level === 1 ? projectionFieldIds : undefined
-    );
+    const projection =
+      level === 1 && projectionFieldIds && projectionFieldIds.length
+        ? projectionFieldIds
+        : undefined;
+    const foreignTableIds = currentTableDomain.getAllForeignTableIds(projection);
     for (const foreignTableId of foreignTableIds) {
       try {
         await this.#getAllRelatedTableDomains(foreignTableId, tables, level + 1);

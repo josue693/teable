@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { extractFieldIdsFromFilter, FieldType, SortFunc } from '@teable/core';
 import type { FieldCore, IFilter, ISortItem, TableDomain, Tables } from '@teable/core';
-import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectDbProvider } from '../../../db-provider/db.provider';
 import { IDbProvider } from '../../../db-provider/db.provider.interface';
@@ -30,24 +29,14 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     private readonly tableDomainQueryService: TableDomainQueryService,
     @InjectDbProvider()
     private readonly dbProvider: IDbProvider,
-    private readonly prismaService: PrismaService,
     @Inject('CUSTOM_KNEX') private readonly knex: Knex,
     @InjectRecordQueryDialect()
     private readonly dialect: IRecordQueryDialectProvider
   ) {}
 
-  private async getTableMeta(tableIdOrDbTableName: string) {
-    // Use transactional client so callers running inside $tx (e.g., base duplication)
-    // can resolve freshly-created tables within the same transaction.
-    return this.prismaService.txClient().tableMeta.findFirstOrThrow({
-      where: { OR: [{ id: tableIdOrDbTableName }, { dbTableName: tableIdOrDbTableName }] },
-      select: { id: true, dbViewName: true },
-    });
-  }
-
   private async createQueryBuilderFromTable(
     from: string,
-    tableRaw: { id: string },
+    tableId: string,
     projection?: string[]
   ): Promise<{
     qb: Knex.QueryBuilder;
@@ -57,7 +46,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     state: IMutableQueryBuilderState;
   }> {
     const tables = await this.tableDomainQueryService.getAllRelatedTableDomains(
-      tableRaw.id,
+      tableId,
       projection
     );
     const table = tables.mustGetEntryTable();
@@ -74,33 +63,13 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     return { qb, alias: mainTableAlias, tables, table, state };
   }
 
-  private async createQueryBuilderFromView(tableRaw: { id: string; dbViewName: string }): Promise<{
+  private async createQueryBuilderFromTableCache(tableId: string): Promise<{
     qb: Knex.QueryBuilder;
     alias: string;
     table: TableDomain;
     state: IMutableQueryBuilderState;
   }> {
-    const table = await this.tableDomainQueryService.getTableDomainById(tableRaw.id);
-    const mainTableAlias = getTableAliasFromTable(table);
-    const qb = this.knex.from({ [mainTableAlias]: tableRaw.dbViewName });
-
-    const state = new RecordQueryBuilderManager('view');
-    state.setMainTableAlias(mainTableAlias);
-    state.setMainTableSource(table.dbTableName);
-    if (tableRaw.dbViewName !== table.dbTableName) {
-      state.setMainTableSource(tableRaw.dbViewName);
-    }
-
-    return { qb, table, state, alias: mainTableAlias };
-  }
-
-  private async createQueryBuilderFromTableCache(tableRaw: { id: string }): Promise<{
-    qb: Knex.QueryBuilder;
-    alias: string;
-    table: TableDomain;
-    state: IMutableQueryBuilderState;
-  }> {
-    const table = await this.tableDomainQueryService.getTableDomainById(tableRaw.id);
+    const table = await this.tableDomainQueryService.getTableDomainById(tableId);
     const mainTableAlias = getTableAliasFromTable(table);
     const qb = this.knex.from({ [mainTableAlias]: table.dbTableName });
 
@@ -113,7 +82,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
 
   private async createQueryBuilder(
     from: string,
-    tableIdOrDbTableName: string,
+    tableId: string,
     options: Partial<ICreateRecordQueryBuilderOptions> = {}
   ): Promise<{
     qb: Knex.QueryBuilder;
@@ -121,7 +90,6 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     table: TableDomain;
     state: IMutableQueryBuilderState;
   }> {
-    const tableRaw = await this.getTableMeta(tableIdOrDbTableName);
     const useQueryModel = options.useQueryModel ?? false;
 
     let builder:
@@ -136,13 +104,13 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
 
     if (useQueryModel) {
       try {
-        builder = await this.createQueryBuilderFromTableCache(tableRaw as { id: string });
+        builder = await this.createQueryBuilderFromTableCache(tableId);
       } catch (error) {
         this.logger.error(`Failed to create query builder from view: ${error}, use table instead`);
-        builder = await this.createQueryBuilderFromTable(from, tableRaw, options.projection);
+        builder = await this.createQueryBuilderFromTable(from, tableId, options.projection);
       }
     } else {
-      builder = await this.createQueryBuilderFromTable(from, tableRaw, options.projection);
+      builder = await this.createQueryBuilderFromTable(from, tableId, options.projection);
     }
 
     const { qb, alias, table, state } = builder;
@@ -181,8 +149,8 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     from: string,
     options: ICreateRecordQueryBuilderOptions
   ): Promise<{ qb: Knex.QueryBuilder; alias: string; selectionMap: IReadonlyRecordSelectionMap }> {
-    const { tableIdOrDbTableName, filter, sort, currentUserId, restrictRecordIds } = options;
-    const { qb, alias, table, state } = await this.createQueryBuilder(from, tableIdOrDbTableName, {
+    const { tableId, filter, sort, currentUserId, restrictRecordIds } = options;
+    const { qb, alias, table, state } = await this.createQueryBuilder(from, tableId, {
       useQueryModel: options.useQueryModel,
       projection: options.projection,
       limit: options.limit,
@@ -223,7 +191,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     options: ICreateRecordAggregateBuilderOptions
   ): Promise<{ qb: Knex.QueryBuilder; alias: string; selectionMap: IReadonlyRecordSelectionMap }> {
     const {
-      tableIdOrDbTableName,
+      tableId,
       filter,
       aggregationFields,
       groupBy,
@@ -231,7 +199,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       useQueryModel,
       restrictRecordIds,
     } = options;
-    const { qb, table, alias, state } = await this.createQueryBuilder(from, tableIdOrDbTableName, {
+    const { qb, table, alias, state } = await this.createQueryBuilder(from, tableId, {
       useQueryModel,
       projection: options.projection,
       filter,

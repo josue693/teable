@@ -54,7 +54,7 @@ export class RecordQueryService {
       const { qb: queryBuilder } = await this.recordQueryBuilder.createRecordQueryBuilder(
         table.dbTableName,
         {
-          tableIdOrDbTableName: tableId,
+          tableId,
           viewId: undefined,
           useQueryModel: true,
           restrictRecordIds: recordIds,

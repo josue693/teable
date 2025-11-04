@@ -85,7 +85,7 @@ export class ComputedEvaluatorService {
 
       const dbTableName = await this.getDbTableName(tableId);
       const { qb, alias } = await this.recordQueryBuilder.createRecordQueryBuilder(dbTableName, {
-        tableIdOrDbTableName: tableId,
+        tableId,
         projection: Array.from(validFieldIdSet),
         rawProjection: true,
         preferRawFieldReferences: true,

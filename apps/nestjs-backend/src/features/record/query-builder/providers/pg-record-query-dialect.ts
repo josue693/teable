@@ -44,6 +44,17 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
   }
 
   formatStringArray(expr: string): string {
+    const trimmedRaw = expr.trim();
+    const upperExpr = trimmedRaw.toUpperCase();
+    if (upperExpr === 'NULL' || upperExpr === 'NULL::JSONB' || upperExpr === 'NULL::JSON') {
+      return 'NULL::text';
+    }
+    if (upperExpr.startsWith('NULL::') && !upperExpr.startsWith('NULL::TEXT')) {
+      return `${trimmedRaw}::text`;
+    }
+    if (upperExpr === 'NULL::TEXT') {
+      return trimmedRaw;
+    }
     const typeExpr = `pg_typeof(${expr})::text`;
     const textExpr = `((${expr})::text COLLATE "C")`;
     const trimmedExpr = `BTRIM(${textExpr})`;

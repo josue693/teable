@@ -1356,7 +1356,7 @@ export class FieldOpenApiService {
     const sourceFieldId = opts.sourceFieldId;
     const sourceFieldForFilter = { ...fieldInstance, id: sourceFieldId } as IFieldInstance;
 
-    const count = await this.getFieldRecordsCount(dbTableName, sourceFieldForFilter);
+    const count = await this.getFieldRecordsCount(dbTableName, sourceTableId, sourceFieldForFilter);
 
     if (!count) {
       if (fieldInstance.notNull || fieldInstance.unique) {
@@ -1374,6 +1374,7 @@ export class FieldOpenApiService {
     for (let i = 0; i < page; i++) {
       const sourceRecords = await this.getFieldRecords(
         dbTableName,
+        sourceTableId,
         sourceFieldForFilter,
         sourceDbFieldName,
         i,
@@ -1405,7 +1406,7 @@ export class FieldOpenApiService {
     }
   }
 
-  private async getFieldRecordsCount(dbTableName: string, field: IFieldInstance) {
+  private async getFieldRecordsCount(dbTableName: string, tableId: string, field: IFieldInstance) {
     // Build a filter that counts only non-empty values for the field
     // - For boolean (checkbox) fields: use OR(is true, is false)
     // - For other fields: use isNotEmpty
@@ -1424,7 +1425,7 @@ export class FieldOpenApiService {
           };
 
     const { qb } = await this.recordQueryBuilder.createRecordAggregateBuilder(dbTableName, {
-      tableIdOrDbTableName: dbTableName,
+      tableId,
       viewId: undefined,
       filter,
       aggregationFields: [
@@ -1445,6 +1446,7 @@ export class FieldOpenApiService {
 
   private async getFieldRecords(
     dbTableName: string,
+    tableId: string,
     field: IFieldInstance,
     dbFieldName: string,
     page: number,
@@ -1466,7 +1468,7 @@ export class FieldOpenApiService {
           };
 
     const { qb } = await this.recordQueryBuilder.createRecordQueryBuilder(dbTableName, {
-      tableIdOrDbTableName: dbTableName,
+      tableId,
       viewId: undefined,
       filter,
       useQueryModel: true,

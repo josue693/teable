@@ -296,9 +296,12 @@ export class FieldConvertingLinkService {
         select: { dbTableName: true, name: true },
       });
 
-    const result = await this.fieldCalculationService.getRecordsBatchByFields({
-      [dbTableName]: [field],
-    });
+    const result = await this.fieldCalculationService.getRecordsBatchByFields(
+      {
+        [dbTableName]: [field],
+      },
+      { [dbTableName]: tableId }
+    );
     const records = result[dbTableName];
     if (!records) {
       throw new CustomHttpException(

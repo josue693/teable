@@ -75,12 +75,13 @@ export class FieldCalculationService {
 
   private async getRecordsByPage(
     dbTableName: string,
+    tableId: string,
     fields: IFieldInstance[],
     page: number,
     chunkSize: number
   ) {
     const { qb } = await this.recordQueryBuilder.createRecordQueryBuilder(dbTableName, {
-      tableIdOrDbTableName: dbTableName,
+      tableId,
       viewId: undefined,
       useQueryModel: true,
     });
@@ -106,7 +107,12 @@ export class FieldCalculationService {
       .$queryRawUnsafe<{ [dbFieldName: string]: unknown }[]>(query);
   }
 
-  async getRecordsBatchByFields(dbTableName2fields: { [dbTableName: string]: IFieldInstance[] }) {
+  async getRecordsBatchByFields(
+    dbTableName2fields: { [dbTableName: string]: IFieldInstance[] },
+    dbTableName2tableId: { [dbTableName: string]: string }
+  ): Promise<{
+    [dbTableName: string]: IRecord[];
+  }> {
     const results: {
       [dbTableName: string]: IRecord[];
     } = {};
@@ -116,10 +122,11 @@ export class FieldCalculationService {
       const rowCount = await this.getRowCount(dbTableName);
       const totalPages = Math.ceil(rowCount / chunkSize);
       const fields = dbTableName2fields[dbTableName];
+      const tableId = dbTableName2tableId[dbTableName];
 
       const records = await lastValueFrom(
         range(0, totalPages).pipe(
-          concatMap((page) => this.getRecordsByPage(dbTableName, fields, page, chunkSize)),
+          concatMap((page) => this.getRecordsByPage(dbTableName, tableId, fields, page, chunkSize)),
           toArray(),
           map((records) => records.flat())
         )

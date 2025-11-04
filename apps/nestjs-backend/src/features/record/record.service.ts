@@ -208,7 +208,7 @@ export class RecordService {
     const { qb: queryBuilder } = await this.recordQueryBuilder.createRecordQueryBuilder(
       dbTableName,
       {
-        tableIdOrDbTableName: tableId,
+        tableId,
         viewId: undefined,
         restrictRecordIds: [recordId],
         useQueryModel: true,
@@ -571,7 +571,7 @@ export class RecordService {
     const { qb, alias, selectionMap } = await this.recordQueryBuilder.createRecordQueryBuilder(
       viewCte ?? dbTableName,
       {
-        tableIdOrDbTableName: tableId,
+        tableId,
         viewId: query.viewId,
         filter,
         currentUserId,
@@ -1389,7 +1389,7 @@ export class RecordService {
     const { qb: queryBuilder, alias } = await this.recordQueryBuilder.createRecordQueryBuilder(
       viewQueryDbTableName,
       {
-        tableIdOrDbTableName: tableId,
+        tableId,
         viewId: undefined,
         useQueryModel: query.useQueryModel,
         projection: fieldIds,
@@ -2072,7 +2072,7 @@ export class RecordService {
     const { qb, selectionMap } = await this.recordQueryBuilder.createRecordAggregateBuilder(
       dbTableName,
       {
-        tableIdOrDbTableName: tableId,
+        tableId,
         aggregationFields: [],
         viewId,
         filter,
@@ -2156,7 +2156,7 @@ export class RecordService {
     const shouldUseQueryModel = useQueryModel && !viewCte;
     const { qb: queryBuilder, selectionMap } =
       await this.recordQueryBuilder.createRecordAggregateBuilder(viewCte ?? dbTableName, {
-        tableIdOrDbTableName: tableId,
+        tableId,
         viewId,
         filter: mergedFilter,
         aggregationFields: [

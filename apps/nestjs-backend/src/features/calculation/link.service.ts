@@ -853,7 +853,7 @@ export class LinkService {
       const { qb } = await this.recordQueryBuilder.createRecordQueryBuilder(
         tableId2DbTableName[tableId],
         {
-          tableIdOrDbTableName: tableId,
+          tableId,
           viewId: undefined,
           rawProjection: true,
           preferRawFieldReferences: true,

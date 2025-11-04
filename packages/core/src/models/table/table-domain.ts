@@ -1,5 +1,7 @@
 import type { IFieldMap } from '../../formula';
 import type { FieldCore } from '../field/field';
+import type { ILookupLinkOptions } from '../field/lookup-options-base.schema';
+import { isLinkLookupOptions } from '../field/lookup-options-base.schema';
 import { TableFields } from './table-fields';
 
 /**
@@ -226,6 +228,7 @@ export class TableDomain {
     return this._fields.getAllForeignTableIds([...expandedFieldIds]);
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity
   private expandFieldIdsWithLinkDependencies(fieldIds: Iterable<string>): Set<string> {
     const visited = new Set<string>();
     const stack = [...fieldIds];
@@ -246,6 +249,14 @@ export class TableDomain {
       for (const linkField of linkFields) {
         if (!visited.has(linkField.id)) {
           stack.push(linkField.id);
+        }
+      }
+
+      const lookupOptions = (field as { lookupOptions?: ILookupLinkOptions }).lookupOptions;
+      if (lookupOptions && isLinkLookupOptions(lookupOptions)) {
+        const linkFieldId = lookupOptions.linkFieldId;
+        if (linkFieldId && !visited.has(linkFieldId)) {
+          stack.push(linkFieldId);
         }
       }
     }

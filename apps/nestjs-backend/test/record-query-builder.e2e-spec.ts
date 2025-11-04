@@ -73,7 +73,7 @@ describe('RecordQueryBuilder (e2e)', () => {
 
   it('builds SELECT for a table with 3 simple fields', async () => {
     const { qb, alias } = await rqb.createRecordQueryBuilder(dbTableName, {
-      tableIdOrDbTableName: table.id,
+      tableId: table.id,
       projection: [f1.id, f2.id, f3.id],
     });
     // Override FROM to stable name without touching alias
@@ -101,7 +101,7 @@ describe('RecordQueryBuilder (e2e)', () => {
 
   it('builds SELECT with partial projection (only two fields)', async () => {
     const { qb, alias } = await rqb.createRecordQueryBuilder(dbTableName, {
-      tableIdOrDbTableName: table.id,
+      tableId: table.id,
       projection: [f1.id, f3.id],
     });
     // Override FROM to stable name without touching alias
@@ -127,7 +127,7 @@ describe('RecordQueryBuilder (e2e)', () => {
 
   it('builds SELECT with partial projection (only two fields)', async () => {
     const { qb, alias } = await rqb.createRecordQueryBuilder(dbTableName, {
-      tableIdOrDbTableName: table.id,
+      tableId: table.id,
       projection: [f1.id],
     });
     // Override FROM to stable name without touching alias
@@ -152,7 +152,7 @@ describe('RecordQueryBuilder (e2e)', () => {
 
   it('pushes record id restriction into the base CTE', async () => {
     const { qb, alias } = await rqb.createRecordQueryBuilder(dbTableName, {
-      tableIdOrDbTableName: table.id,
+      tableId: table.id,
       projection: [f1.id],
       restrictRecordIds: ['rec_TEST_1'],
     });
@@ -166,7 +166,7 @@ describe('RecordQueryBuilder (e2e)', () => {
 
   it('pushes record id restriction into the aggregate base CTE', async () => {
     const { qb, alias } = await rqb.createRecordAggregateBuilder(dbTableName, {
-      tableIdOrDbTableName: table.id,
+      tableId: table.id,
       aggregationFields: [
         {
           fieldId: '*',
@@ -223,7 +223,7 @@ describe('RecordQueryBuilder (e2e)', () => {
       lookupField = await createField(table.id, lookupFieldRo);
 
       const { qb, alias } = await rqb.createRecordQueryBuilder(dbTableName, {
-        tableIdOrDbTableName: table.id,
+        tableId: table.id,
         projection: [lookupField.id],
       });
 
@@ -255,7 +255,7 @@ describe('RecordQueryBuilder (e2e)', () => {
 
     try {
       const { qb, alias } = await rqb.createRecordQueryBuilder(dbTableName, {
-        tableIdOrDbTableName: table.id,
+        tableId: table.id,
         projection: [selfLink.id],
       });
 
