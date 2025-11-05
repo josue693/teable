@@ -30,16 +30,6 @@ export class TableDomainQueryService {
   }
 
   /**
-   * Get a complete table domain object by dbTableName
-   * @param dbTableName - The physical table name in the database
-   */
-  async getTableDomainByDbTableName(dbTableName: string): Promise<TableDomain> {
-    const tableMeta = await this.getTableMetaByDbTableName(dbTableName);
-    const fieldRaws = await this.getTableFields(tableMeta.id);
-    return this.buildTableDomain(tableMeta, fieldRaws);
-  }
-
-  /**
    * Get table metadata by ID
    * @private
    */
