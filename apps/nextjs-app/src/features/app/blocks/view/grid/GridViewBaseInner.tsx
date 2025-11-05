@@ -58,6 +58,8 @@ import {
   extractDefaultFieldsFromFilters,
   TaskStatusCollectionContext,
   isNeedPersistEditing,
+  syncCopy as copyToClipboard,
+  LocalStorageKeys,
 } from '@teable/sdk';
 import { GRID_DEFAULT } from '@teable/sdk/components/grid/configs';
 import { useScrollFrameRate } from '@teable/sdk/components/grid/hooks';
@@ -86,10 +88,11 @@ import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { usePrevious, useClickAway } from 'react-use';
+import { usePrevious, useClickAway, useLocalStorage } from 'react-use';
 import { ExpandRecordContainer } from '@/features/app/components/expand-record-container';
 import type { IExpandRecordContainerRef } from '@/features/app/components/expand-record-container/types';
 import { useBaseUsage } from '@/features/app/hooks/useBaseUsage';
+import { useEnv } from '@/features/app/hooks/useEnv';
 import { uploadFiles } from '@/features/app/utils/uploadFile';
 import { tableConfig } from '@/features/i18n/table.config';
 import { FieldOperator } from '../../../components/field-setting';
@@ -118,6 +121,7 @@ export const GridViewBaseInner: React.FC<IGridViewBaseInnerProps> = (
 ) => {
   const { groupPointsServerData, onRowExpand } = props;
   const { t } = useTranslation(tableConfig.i18nNamespaces);
+  const { publicOrigin } = useEnv();
   const { updateRecord, duplicateRecord } = useRecordOperations();
   const { autoFillField } = useFieldOperations();
   const router = useRouter();
@@ -170,6 +174,17 @@ export const GridViewBaseInner: React.FC<IGridViewBaseInnerProps> = (
   const [autoFillFieldId, setAutoFillFieldId] = useState<string | undefined>();
 
   const { fieldAIEnable = false } = usage?.limit ?? {};
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [recordHistoryVisible, setRecordHistoryVisible] = useLocalStorage<boolean>(
+    LocalStorageKeys.RecordHistoryVisible,
+    false
+  );
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [commentVisible, setCommentVisible] = useLocalStorage<boolean>(
+    LocalStorageKeys.CommentVisible,
+    false
+  );
 
   const aiGenerateButtonRef = useRef<{
     onScrollHandler: () => void;
@@ -480,6 +495,26 @@ export const GridViewBaseInner: React.FC<IGridViewBaseInnerProps> = (
           deleteRecords: async () => {
             deleteRecords(selection);
             gridRef.current?.setSelection(emptySelection);
+          },
+          copyRecordUrl: async () => {
+            if (!record) return;
+            const recordUrl = `${publicOrigin}/base/${baseId}/${tableId}?recordId=${record.id}`;
+            await copyToClipboard(recordUrl);
+            sonnerToast.success(t('sdk:expandRecord.copy'));
+          },
+          viewRecordHistory: async () => {
+            if (!record) return;
+            const recordUrl = `${publicOrigin}/base/${baseId}/${tableId}?recordId=${record.id}&showHistory=true`;
+            await router.push(recordUrl, undefined, {
+              shallow: true,
+            });
+          },
+          addRecordComment: async () => {
+            if (!record) return;
+            const recordUrl = `${publicOrigin}/base/${baseId}/${tableId}?recordId=${record.id}&showComment=true`;
+            await router.push(recordUrl, undefined, {
+              shallow: true,
+            });
           },
           isMultipleSelected: false,
         });

@@ -39,6 +39,8 @@ interface IExpandRecorderProps {
   onClose?: () => void;
   onUpdateRecordIdCallback?: (recordId: string) => void;
   buttonClickStatusHook?: IButtonClickStatusHook;
+  showHistory?: boolean;
+  showComment?: boolean;
 }
 
 export const ExpandRecorder = (props: IExpandRecorderProps) => {
@@ -53,6 +55,8 @@ export const ExpandRecorder = (props: IExpandRecorderProps) => {
     commentId,
     viewId,
     buttonClickStatusHook,
+    showHistory,
+    showComment,
   } = props;
   const { t } = useTranslation();
   const permission = useTablePermission();
@@ -62,17 +66,29 @@ export const ExpandRecorder = (props: IExpandRecorderProps) => {
   const canDelete = Boolean(permission['record|delete']);
   const [recordHistoryVisible, setRecordHistoryVisible] = useLocalStorage<boolean>(
     LocalStorageKeys.RecordHistoryVisible,
-    false
+    Boolean(showHistory)
   );
 
   const [commentVisible, setCommentVisible] = useLocalStorage<boolean>(
     LocalStorageKeys.CommentVisible,
-    !!commentId || false
+    !!commentId || Boolean(showComment)
   );
 
   useEffect(() => {
-    commentId && setCommentVisible(true);
-  }, [commentId, setCommentVisible]);
+    if (showHistory !== undefined) {
+      setRecordHistoryVisible(showHistory);
+    }
+  }, [showHistory, setRecordHistoryVisible]);
+
+  useEffect(() => {
+    if (commentId) {
+      setCommentVisible(true);
+      return;
+    }
+    if (showComment !== undefined) {
+      setCommentVisible(showComment);
+    }
+  }, [showComment, commentId, setCommentVisible]);
 
   if (!recordId) {
     return <></>;

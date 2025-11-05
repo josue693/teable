@@ -27,6 +27,14 @@ export const ExpandRecordContainerBase = forwardRef<
   const router = useRouter();
   const recordId = router.query.recordId as string;
   const commentId = router.query.commentId as string;
+  const showHistory =
+    router.query.showHistory === 'true' || router.query.showHistory === 'false'
+      ? JSON.parse(router.query.showHistory as string)
+      : undefined;
+  const showComment =
+    router.query.showComment === 'true' || router.query.showComment === 'false'
+      ? JSON.parse(router.query.showComment as string)
+      : undefined;
   const [recordIds, setRecordIds] = useState<string[]>();
 
   useImperativeHandle(forwardRef, () => ({
@@ -45,6 +53,8 @@ export const ExpandRecordContainerBase = forwardRef<
       onClose={onClose}
       onUpdateRecordIdCallback={onUpdateRecordIdCallback}
       buttonClickStatusHook={buttonClickStatusHook}
+      showHistory={showHistory}
+      showComment={showComment}
     />
   );
 });
