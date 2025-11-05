@@ -56,7 +56,7 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
       return trimmedRaw;
     }
     const typeExpr = `pg_typeof(${expr})::text`;
-    const textExpr = `((${expr})::text COLLATE "C")`;
+    const textExpr = `((${expr})::text)`;
     const trimmedExpr = `BTRIM(${textExpr})`;
     const safeArrayExpr = `(CASE
         WHEN ${expr} IS NULL THEN '[]'::jsonb
@@ -64,7 +64,7 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
         WHEN ${typeExpr} = 'json' THEN COALESCE((${expr})::jsonb, '[]'::jsonb)
         WHEN ${typeExpr} IN ('text', 'varchar', 'bpchar', 'character varying', 'unknown') THEN
           CASE
-            WHEN ${trimmedExpr} = '' COLLATE "C" THEN '[]'::jsonb
+            WHEN ${trimmedExpr} = '' THEN '[]'::jsonb
             WHEN LEFT(${trimmedExpr}, 1) = '[' THEN COALESCE((${expr})::jsonb, '[]'::jsonb)
             ELSE jsonb_build_array(to_jsonb(${expr}))
           END
@@ -128,9 +128,9 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
     if (this.isNumericLiteral(expr)) {
       return `(${expr})::numeric`;
     }
-    const textExpr = `((${expr})::text COLLATE "C")`;
+    const textExpr = `((${expr})::text)`;
     const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
-    return `NULLIF(${sanitized}, '' COLLATE "C")::numeric`;
+    return `NULLIF(${sanitized}, '')::numeric`;
   }
 
   linkHasAny(selectionSql: string): string {
@@ -247,9 +247,9 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
   }
 
   private sanitizeNumericTextExpression(expression: string): string {
-    const textExpr = `((${expression})::text COLLATE "C")`;
+    const textExpr = `((${expression})::text)`;
     const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
-    return `NULLIF(${sanitized}, '' COLLATE "C")::double precision`;
+    return `NULLIF(${sanitized}, '')::double precision`;
   }
 
   private buildJsonNumericSumExpression(fieldExpression: string): string {

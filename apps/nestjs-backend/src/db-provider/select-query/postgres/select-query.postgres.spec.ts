@@ -50,6 +50,22 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
     );
   });
 
+  it('find casts numeric search values to text expressions', () => {
+    expect(query.find('202', '"text_col"')).toBe(`POSITION((202)::text IN ("text_col")::text)`);
+  });
+
+  it('find with start argument casts inputs to text expressions', () => {
+    expect(query.find('202', '"text_col"', '7')).toBe(
+      `POSITION((202)::text IN SUBSTRING(("text_col")::text FROM 7::integer)) + 7::integer - 1`
+    );
+  });
+
+  it('search casts numeric search values before applying upper', () => {
+    expect(query.search('202', '"text_col"')).toBe(
+      `POSITION(UPPER((202)::text) IN UPPER(("text_col")::text))`
+    );
+  });
+
   describe('timezone-aware wrappers', () => {
     let tzQuery: SelectQueryPostgres;
     const timeZone = 'Asia/Shanghai';
@@ -259,14 +275,14 @@ describe('SelectQueryPostgres unit-aware date helpers', () => {
     it('sum rewrites multiple params to addition with numeric coercion', () => {
       const sql = query.sum(['column_a', 'column_b', '10']);
       expect(sql).toBe(
-        "(COALESCE(NULLIF(REGEXP_REPLACE(((column_a)::text COLLATE \"C\"), '[^0-9.+-]', '', 'g'), '' COLLATE \"C\")::double precision, 0) + COALESCE(NULLIF(REGEXP_REPLACE(((column_b)::text COLLATE \"C\"), '[^0-9.+-]', '', 'g'), '' COLLATE \"C\")::double precision, 0) + COALESCE((10)::double precision, 0))"
+        "(COALESCE(NULLIF(REGEXP_REPLACE(((column_a)::text), '[^0-9.+-]', '', 'g'), '')::double precision, 0) + COALESCE(NULLIF(REGEXP_REPLACE(((column_b)::text), '[^0-9.+-]', '', 'g'), '')::double precision, 0) + COALESCE((10)::double precision, 0))"
       );
     });
 
     it('average divides the rewritten sum by parameter count', () => {
       const sql = query.average(['column_a', '10']);
       expect(sql).toBe(
-        "((COALESCE(NULLIF(REGEXP_REPLACE(((column_a)::text COLLATE \"C\"), '[^0-9.+-]', '', 'g'), '' COLLATE \"C\")::double precision, 0) + COALESCE((10)::double precision, 0))) / 2"
+        "((COALESCE(NULLIF(REGEXP_REPLACE(((column_a)::text), '[^0-9.+-]', '', 'g'), '')::double precision, 0) + COALESCE((10)::double precision, 0))) / 2"
       );
     });
   });
@@ -356,9 +372,11 @@ describe('Select formula string comparisons', () => {
     query.setContext(buildContext());
     const sql = query.equal('"main"."text_col"', '"main"."json_col"');
 
-    expect(sql).toContain('pg_typeof(("main"."json_col")) = ANY');
-    expect(sql).toContain('jsonb_typeof((("main"."json_col"))::jsonb)');
-    expect(sql).toContain('("main"."text_col")::text COLLATE "C"');
+    expect(sql).toContain('jsonb_typeof(to_jsonb("main"."json_col"))');
+    expect(sql).toContain('CASE jsonb_typeof(to_jsonb("main"."json_col"))');
+    expect(sql).toContain('WHEN \'string\' THEN to_jsonb("main"."json_col") #>> \'{}\'');
+    expect(sql).toContain('ELSE to_jsonb("main"."json_col")::text');
+    expect(sql).toContain('("main"."text_col")::text');
     expect(sql).not.toContain('= "main"."json_col"');
   });
 });

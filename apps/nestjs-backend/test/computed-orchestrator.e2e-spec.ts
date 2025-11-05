@@ -39,6 +39,7 @@ import {
   initApp,
   permanentDeleteTable,
   updateRecordByApi,
+  updateRecord,
   getRecord,
 } from './utils/init-app';
 
@@ -189,6 +190,43 @@ describe('Computed Orchestrator (e2e)', () => {
       const row = await getRow(tblName, table.records[0].id);
       const f1Full = (await getFields(table.id)).find((f) => f.id === (f1 as any).id)! as any;
       expect(parseMaybe((row as any)[f1Full.dbFieldName])).toEqual(2);
+
+      await permanentDeleteTable(baseId, table.id);
+    });
+
+    it('creates and updates numeric formula via API with computed results', async () => {
+      const table = await createTable(baseId, {
+        name: 'Formula_Api_RoundTrip',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'A', type: FieldType.Number } as IFieldRo,
+        ],
+      });
+
+      const aField = table.fields.find((f) => f.name === 'A')!;
+      const formulaField = (await createField(table.id, {
+        name: 'F_via_api',
+        type: FieldType.Formula,
+        options: { expression: `{${aField.id}} * 2` },
+      } as IFieldRo)) as any;
+
+      const created = await createRecords(table.id, {
+        records: [
+          {
+            fields: {
+              [aField.id]: 10,
+            },
+          },
+        ],
+      });
+
+      const recordId = created.records[0].id;
+      const createdRecord = await getRecord(table.id, recordId);
+      expect(createdRecord.fields[formulaField.id]).toEqual(20);
+
+      await updateRecordByApi(table.id, recordId, aField.id, null);
+      const updatedRecord = await getRecord(table.id, recordId);
+      expect(updatedRecord.fields[formulaField.id]).toBeUndefined();
 
       await permanentDeleteTable(baseId, table.id);
     });
@@ -389,6 +427,70 @@ describe('Computed Orchestrator (e2e)', () => {
       } finally {
         await permanentDeleteTable(baseId, child.id);
         await permanentDeleteTable(baseId, parent.id);
+      }
+    });
+
+    it('persists datetime + blank guard formulas without timestamptz jsonb casts', async () => {
+      const table = await createTable(baseId, {
+        name: 'Formula_Datetime_Blank',
+        fields: [
+          { name: 'Status', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Due Date', type: FieldType.Date } as IFieldRo,
+        ],
+        records: [{ fields: {} }],
+      });
+
+      try {
+        const statusField = table.fields.find((f) => f.name === 'Status')!;
+        const dueField = table.fields.find((f) => f.name === 'Due Date')!;
+
+        const expression = `IF({${statusField.id}}=BLANK(),"未分配",IF(AND({${statusField.id}}="进行中",DATETIME_DIFF(TODAY(),{${dueField.id}},"day")>=1),"🔴超时","🔵正常"))`;
+        const formulaField = await createField(table.id, {
+          name: 'Status Summary',
+          type: FieldType.Formula,
+          options: {
+            expression,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const recordId = table.records[0].id;
+        const overdueDate = dayjs().tz('Asia/Shanghai').subtract(2, 'day').format('YYYY-MM-DD');
+
+        // Allow async computed persistence to populate the initial formula value
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const initial = await getRecord(table.id, recordId);
+        expect(initial.fields?.[formulaField.id]).toEqual('未分配');
+
+        await updateRecord(table.id, recordId, {
+          record: {
+            fields: {
+              [statusField.id]: '进行中',
+              [dueField.id]: overdueDate,
+            },
+          },
+          fieldKeyType: FieldKeyType.Id,
+          typecast: true,
+        });
+
+        const overdueRecord = await getRecord(table.id, recordId);
+        expect(overdueRecord.fields?.[formulaField.id]).toEqual('🔴超时');
+
+        await updateRecord(table.id, recordId, {
+          record: {
+            fields: {
+              [statusField.id]: null,
+            },
+          },
+          fieldKeyType: FieldKeyType.Id,
+          typecast: true,
+        });
+
+        const resetRecord = await getRecord(table.id, recordId);
+        expect(resetRecord.fields?.[formulaField.id]).toEqual('未分配');
+      } finally {
+        await permanentDeleteTable(baseId, table.id);
       }
     });
 

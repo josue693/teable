@@ -2,9 +2,9 @@ import { AggregationFunctionPostgres } from '../aggregation-function.postgres';
 
 export class MultipleValueAggregationAdapter extends AggregationFunctionPostgres {
   private toNumericSafe(columnExpression: string): string {
-    const textExpr = `(${columnExpression})::text COLLATE "C"`;
+    const textExpr = `(${columnExpression})::text`;
     const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
-    return `NULLIF(${sanitized}, '' COLLATE "C")::double precision`;
+    return `NULLIF(${sanitized}, '')::double precision`;
   }
 
   unique(): string {

@@ -826,7 +826,7 @@ abstract class BaseSqlConversionVisitor<
           const numericExpr = this.safeCastToNumeric(valueSql);
           return `(COALESCE(${numericExpr}, 0) <> 0)`;
         }
-        const sanitized = `REGEXP_REPLACE(((${valueSql})::text COLLATE "C"), '[^0-9.+-]', '', 'g')`;
+        const sanitized = `REGEXP_REPLACE(((${valueSql})::text), '[^0-9.+-]', '', 'g')`;
         const numericCandidate = `(CASE
           WHEN ${sanitized} ~ '^[-+]{0,1}(\\d+\\.\\d+|\\d+|\\.\\d+)$' THEN ${sanitized}::double precision
           ELSE NULL
@@ -1542,8 +1542,11 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
       // Also check for binary logical operators
       if (parent instanceof BinaryOpContext) {
         const operator = parent._op?.text;
-        const logicalOperators = ['&&', '||', '=', '!=', '<>', '>', '<', '>=', '<='];
-        return logicalOperators.includes(operator || '');
+        if (!operator) return false;
+        // Only treat actual logical operators as boolean context; comparison operators
+        // should preserve the original field value for proper type-aware comparisons.
+        const logicalOperators = ['&&', '||'];
+        return logicalOperators.includes(operator);
       }
 
       parent = parent.parent;

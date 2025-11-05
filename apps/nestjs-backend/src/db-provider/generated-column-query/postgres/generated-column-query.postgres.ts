@@ -1,3 +1,5 @@
+/* eslint-disable regexp/no-unused-capturing-group */
+/* eslint-disable sonarjs/cognitive-complexity */
 /* eslint-disable no-useless-escape */
 import { DbFieldType } from '@teable/core';
 import { GeneratedColumnQueryAbstract } from '../generated-column-query.abstract';
@@ -52,9 +54,9 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
     if (this.isNumericLiteral(expr)) {
       return `(${expr})::double precision`;
     }
-    const textExpr = `((${expr})::text COLLATE "C")`;
+    const textExpr = `((${expr})::text)`;
     const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
-    return `NULLIF(${sanitized}, '' COLLATE "C")::double precision`;
+    return `NULLIF(${sanitized}, '')::double precision`;
   }
 
   private normalizeBlankComparable(value: string): string {
@@ -63,7 +65,7 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
   }
 
   private ensureTextCollation(expr: string): string {
-    return `(${expr})::text COLLATE "C"`;
+    return `(${expr})::text`;
   }
 
   private buildBlankAwareComparison(operator: '=' | '<>', left: string, right: string): string {
@@ -107,9 +109,14 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
       return true;
     }
 
+    return this.getExpressionFieldType(value) === DbFieldType.Text;
+  }
+
+  private getExpressionFieldType(value: string): DbFieldType | undefined {
+    const trimmed = this.stripOuterParentheses(value);
     const columnMatch = trimmed.match(/^"([^"]+)"$/) ?? trimmed.match(/^"[^"]+"\."([^"]+)"$/);
     if (!columnMatch || columnMatch.length < 2) {
-      return false;
+      return undefined;
     }
 
     const columnName = columnMatch[1];
@@ -117,11 +124,42 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
     const field =
       table?.fieldList?.find((item) => item.dbFieldName === columnName) ??
       table?.fields?.ordered?.find((item) => item.dbFieldName === columnName);
-    if (!field) {
-      return false;
-    }
+    return field?.dbFieldType as DbFieldType | undefined;
+  }
 
-    return field.dbFieldType === DbFieldType.Text;
+  private buildJsonScalarCoercion(jsonExpr: string): string {
+    return `CASE jsonb_typeof(${jsonExpr})
+          WHEN 'string' THEN (${jsonExpr}) #>> '{}'
+          WHEN 'number' THEN (${jsonExpr}) #>> '{}'
+          WHEN 'boolean' THEN (${jsonExpr}) #>> '{}'
+          WHEN 'null' THEN NULL
+          ELSE (${jsonExpr})::text
+        END`;
+  }
+
+  private coerceJsonExpressionToText(wrapped: string): string {
+    const doubleWrapped = `(${wrapped})`;
+    const directJsonExpr = `${doubleWrapped}::jsonb`;
+    const fallbackJsonExpr = `to_jsonb${wrapped}`;
+    const jsonTypeGuard = `pg_typeof(${wrapped}) = ANY('{json,jsonb}'::regtype[])`;
+
+    return `(CASE
+      WHEN ${wrapped} IS NULL THEN NULL
+      WHEN ${jsonTypeGuard} THEN
+        ${this.buildJsonScalarCoercion(directJsonExpr)}
+      ELSE
+        ${this.buildJsonScalarCoercion(fallbackJsonExpr)}
+    END)`;
+  }
+
+  private coerceNonJsonExpressionToText(wrapped: string): string {
+    const jsonbValue = `to_jsonb${wrapped}`;
+
+    return `(CASE
+      WHEN ${wrapped} IS NULL THEN NULL
+      ELSE
+        ${this.buildJsonScalarCoercion(jsonbValue)}
+    END)`;
   }
 
   private coerceToTextComparable(value: string): string {
@@ -137,19 +175,90 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
     }
 
     const wrapped = `(${value})`;
-    const jsonbValue = `to_jsonb${wrapped}`;
-    const coerced = `(CASE
-      WHEN ${wrapped} IS NULL THEN NULL
-      ELSE
-        CASE jsonb_typeof(${jsonbValue})
-          WHEN 'string' THEN ${jsonbValue} #>> '{}'
-          WHEN 'number' THEN ${jsonbValue} #>> '{}'
-          WHEN 'boolean' THEN ${jsonbValue} #>> '{}'
-          WHEN 'null' THEN NULL
-          ELSE ${jsonbValue}::text
-        END
-    END)`;
+    const coerced =
+      this.getExpressionFieldType(value) === DbFieldType.Json
+        ? this.coerceJsonExpressionToText(wrapped)
+        : this.coerceNonJsonExpressionToText(wrapped);
     return this.ensureTextCollation(coerced);
+  }
+
+  private inferExpressionCategory(
+    value: string
+  ): 'text' | 'numeric' | 'boolean' | 'datetime' | 'unknown' {
+    const trimmed = this.stripOuterParentheses(value).trim();
+    if (!trimmed) {
+      return 'unknown';
+    }
+    if (/^NULL$/i.test(trimmed)) {
+      return 'unknown';
+    }
+    if (/^(TRUE|FALSE)$/i.test(trimmed)) {
+      return 'boolean';
+    }
+    if (/^'.*'$/.test(trimmed)) {
+      return 'text';
+    }
+    if (/^[-+]?\d+(\.\d+)?$/.test(trimmed)) {
+      return 'numeric';
+    }
+    if (/\b::(text|varchar|character varying|bpchar)\b/i.test(value)) {
+      return 'text';
+    }
+    if (/\b::(timestamp|timestamptz|date)\b/i.test(value)) {
+      return 'datetime';
+    }
+    if (
+      /\b::(double precision|numeric|bigint|integer|smallint|real|float4|float8)\b/i.test(value)
+    ) {
+      return 'numeric';
+    }
+    if (
+      /(REGEXP_REPLACE|REPLACE|SUBSTRING|LEFT|RIGHT|TRIM|BTRIM|LPAD|RPAD|CONCAT|STRING_AGG|TO_CHAR|FORMAT|JSON_BUILD_OBJECT|JSONB_BUILD_OBJECT|JSON_EXTRACT_PATH_TEXT|LOWER|UPPER|INITCAP)\s*\(/i.test(
+        value
+      )
+    ) {
+      return 'text';
+    }
+    if (value.includes('||')) {
+      return 'text';
+    }
+    const fieldType = this.getExpressionFieldType(value);
+    if (fieldType === DbFieldType.Text || fieldType === DbFieldType.Blob) {
+      return 'text';
+    }
+    if (fieldType === DbFieldType.Integer || fieldType === DbFieldType.Real) {
+      return 'numeric';
+    }
+    if (fieldType === DbFieldType.Boolean) {
+      return 'boolean';
+    }
+    if (fieldType === DbFieldType.DateTime) {
+      return 'datetime';
+    }
+    return 'unknown';
+  }
+
+  private shouldCoerceCaseResults(
+    categories: Array<'text' | 'numeric' | 'boolean' | 'datetime' | 'unknown'>
+  ): boolean {
+    const distinct = new Set(categories.filter((category) => category !== 'unknown'));
+    return distinct.size > 1;
+  }
+
+  private normalizeCaseResults(valueIfTrue: string, valueIfFalse: string): [string, string] {
+    const [normalizedTrue, normalizedFalse] = this.normalizeCaseResultList([
+      valueIfTrue,
+      valueIfFalse,
+    ]);
+    return [normalizedTrue, normalizedFalse];
+  }
+
+  private normalizeCaseResultList(values: string[]): string[] {
+    const categories = values.map((value) => this.inferExpressionCategory(value));
+    if (this.shouldCoerceCaseResults(categories)) {
+      return values.map((value) => this.ensureTextCollation(value));
+    }
+    return values;
   }
 
   private countANonNullExpression(value: string): string {
@@ -327,18 +436,24 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
   }
 
   find(searchText: string, withinText: string, startNum?: string): string {
+    const normalizedSearch = this.ensureTextCollation(searchText);
+    const normalizedWithin = this.ensureTextCollation(withinText);
+
     if (startNum) {
-      return `POSITION(${searchText} IN SUBSTRING(${withinText} FROM ${startNum}::integer)) + ${startNum}::integer - 1`;
+      return `POSITION(${normalizedSearch} IN SUBSTRING(${normalizedWithin} FROM ${startNum}::integer)) + ${startNum}::integer - 1`;
     }
-    return `POSITION(${searchText} IN ${withinText})`;
+    return `POSITION(${normalizedSearch} IN ${normalizedWithin})`;
   }
 
   search(searchText: string, withinText: string, startNum?: string): string {
+    const normalizedSearch = this.ensureTextCollation(searchText);
+    const normalizedWithin = this.ensureTextCollation(withinText);
+
     // PostgreSQL doesn't have case-insensitive POSITION, so we use ILIKE with pattern matching
     if (startNum) {
-      return `POSITION(UPPER(${searchText}) IN UPPER(SUBSTRING(${withinText} FROM ${startNum}::integer))) + ${startNum}::integer - 1`;
+      return `POSITION(UPPER(${normalizedSearch}) IN UPPER(SUBSTRING(${normalizedWithin} FROM ${startNum}::integer))) + ${startNum}::integer - 1`;
     }
-    return `POSITION(UPPER(${searchText}) IN UPPER(${withinText}))`;
+    return `POSITION(UPPER(${normalizedSearch}) IN UPPER(${normalizedWithin}))`;
   }
 
   mid(text: string, startNum: string, numChars: string): string {
@@ -710,7 +825,8 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
   // Logical Functions
   if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
     const booleanCondition = this.normalizeBooleanCondition(condition);
-    return `CASE WHEN (${booleanCondition}) THEN ${valueIfTrue} ELSE ${valueIfFalse} END`;
+    const [normalizedTrue, normalizedFalse] = this.normalizeCaseResults(valueIfTrue, valueIfFalse);
+    return `CASE WHEN (${booleanCondition}) THEN ${normalizedTrue} ELSE ${normalizedFalse} END`;
   }
 
   and(params: string[]): string {
@@ -759,14 +875,21 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
     cases: Array<{ case: string; result: string }>,
     defaultResult?: string
   ): string {
+    const caseResults = cases.map((caseItem) => caseItem.result);
+    const resultsToNormalize =
+      defaultResult !== undefined ? [...caseResults, defaultResult] : caseResults;
+    const normalizedResults = this.normalizeCaseResultList(resultsToNormalize);
+
     let caseStatement = 'CASE';
 
-    for (const caseItem of cases) {
-      caseStatement += ` WHEN ${expression} = ${caseItem.case} THEN ${caseItem.result}`;
-    }
+    cases.forEach((caseItem, index) => {
+      const condition = this.buildBlankAwareComparison('=', expression, caseItem.case);
+      caseStatement += ` WHEN ${condition} THEN ${normalizedResults[index]}`;
+    });
 
-    if (defaultResult) {
-      caseStatement += ` ELSE ${defaultResult}`;
+    if (defaultResult !== undefined) {
+      const normalizedDefault = normalizedResults[cases.length];
+      caseStatement += ` ELSE ${normalizedDefault}`;
     }
 
     caseStatement += ' END';
