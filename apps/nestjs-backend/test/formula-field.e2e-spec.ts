@@ -1,7 +1,12 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 /* eslint-disable @typescript-eslint/naming-convention */
 import type { INestApplication } from '@nestjs/common';
-import type { FormulaFieldCore, IFieldVo } from '@teable/core';
+import type {
+  FormulaFieldCore,
+  IFieldVo,
+  INumberFieldOptions,
+  IRatingFieldOptions,
+} from '@teable/core';
 import { Colors, FieldKeyType, FieldType, Relationship } from '@teable/core';
 import type { ITableFullVo } from '@teable/openapi';
 import { getError } from './utils/get-error';
@@ -43,7 +48,7 @@ describe('OpenAPI Formula Field (e2e)', () => {
             type: FieldType.Number,
             options: {
               formatting: { type: 'decimal', precision: 2 },
-            },
+            } as INumberFieldOptions,
           },
           {
             name: 'Date Field',
@@ -56,7 +61,7 @@ describe('OpenAPI Formula Field (e2e)', () => {
               icon: 'star',
               max: 5,
               color: 'yellowBright',
-            },
+            } as IRatingFieldOptions,
           },
           {
             name: 'Checkbox Field',
@@ -766,7 +771,7 @@ describe('OpenAPI Formula Field (e2e)', () => {
           {
             name: 'Score',
             type: FieldType.Rating,
-            options: { icon: 'star', max: 5, color: 'yellowBright' },
+            options: { icon: 'star', max: 5, color: 'yellowBright' } as IRatingFieldOptions,
           },
         ],
         records: [

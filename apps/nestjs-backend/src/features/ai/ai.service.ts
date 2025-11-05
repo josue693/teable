@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { IAIConfig, IAiGenerateRo, LLMProvider, LLMProviderType } from '@teable/openapi';
 import { IntegrationType, SettingKey, Task } from '@teable/openapi';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 import { generateText, streamText } from 'ai';
 import { BaseConfig, IBaseConfig } from '../../configs/base.config';
 import { SettingService } from '../setting/setting.service';
@@ -54,12 +54,12 @@ export class AiService {
     modelKey: string,
     llmProviders?: LLMProvider[],
     isImageGeneration?: false
-  ): Promise<LanguageModelV1>;
+  ): Promise<LanguageModel>;
   async getModelInstance(
     modelKey: string,
     llmProviders: LLMProvider[] = [],
     isImageGeneration = false
-  ): Promise<LanguageModelV1 | ReturnType<OpenAIProvider['image']>> {
+  ): Promise<LanguageModel | ReturnType<OpenAIProvider['image']>> {
     const { type, model, baseUrl, apiKey } = await this.getModelConfig(modelKey, llmProviders);
 
     if (!baseUrl || !apiKey) {
@@ -75,6 +75,7 @@ export class AiService {
     }
 
     const providerOptions = getAdaptedProviderOptions(type as LLMProviderType, {
+      name: model,
       baseURL: baseUrl,
       apiKey,
     });
@@ -82,7 +83,7 @@ export class AiService {
 
     return isImageGeneration
       ? (modelProvider.image(model) as ReturnType<OpenAIProvider['image']>)
-      : (modelProvider(model) as LanguageModelV1);
+      : modelProvider(model);
   }
 
   async getAIConfig(baseId: string) {
@@ -209,6 +210,9 @@ export class AiService {
     const { modelKey: _modelKey, task = Task.Coding } = aiGenerateRo;
     const config = await this.getAIConfig(baseId);
     const modelKey = _modelKey ?? getTaskModelKey(config, task);
+    if (!modelKey) {
+      throw new Error('Model key is not set');
+    }
     return await this.getModelInstance(modelKey, config.llmProviders);
   }
 
@@ -217,7 +221,7 @@ export class AiService {
     const modelInstance = await this.getGenerationModelInstance(baseId, aiGenerateRo);
 
     return await streamText({
-      model: modelInstance as LanguageModelV1,
+      model: modelInstance,
       prompt: prompt,
     });
   }
@@ -227,7 +231,7 @@ export class AiService {
     const modelInstance = await this.getGenerationModelInstance(baseId, aiGenerateRo);
 
     const { text } = await generateText({
-      model: modelInstance as LanguageModelV1,
+      model: modelInstance,
       prompt: prompt,
     });
     return text;
