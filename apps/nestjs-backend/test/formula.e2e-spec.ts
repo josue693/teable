@@ -1853,6 +1853,47 @@ describe('OpenAPI formula (e2e)', () => {
       expect(values.not).toBe(true);
     });
 
+    it('should not persist logical coercion AND formula as generated column', async () => {
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: 3,
+              [textFieldRo.name]: 'non-empty',
+            },
+          },
+        ],
+      });
+      const recordId = records[0].id;
+
+      const formulaField = await createField(table1Id, {
+        name: 'logical-coercion-and-persisted',
+        type: FieldType.Formula,
+        options: {
+          expression: `AND({${numberFieldRo.id}}, {${textFieldRo.id}})`,
+        },
+      });
+
+      const recordAfterFormula = await getRecord(table1Id, recordId);
+      const value = recordAfterFormula.data.fields[formulaField.name];
+      expect(typeof value).toBe('boolean');
+      expect(value).toBe(true);
+
+      const refreshed = await getField(table1Id, formulaField.id);
+      const rawMeta = refreshed.meta as unknown;
+      let persistedAsGeneratedColumn: boolean | undefined;
+      if (typeof rawMeta === 'string') {
+        persistedAsGeneratedColumn = (
+          JSON.parse(rawMeta) as { persistedAsGeneratedColumn?: boolean }
+        ).persistedAsGeneratedColumn;
+      } else if (rawMeta && typeof rawMeta === 'object') {
+        persistedAsGeneratedColumn = (rawMeta as { persistedAsGeneratedColumn?: boolean })
+          .persistedAsGeneratedColumn;
+      }
+      expect(persistedAsGeneratedColumn).not.toBe(true);
+    });
+
     it('should evaluate logical formulas referencing boolean checkbox fields', async () => {
       const checkboxField = await createField(table1Id, {
         name: 'logical-checkbox',
