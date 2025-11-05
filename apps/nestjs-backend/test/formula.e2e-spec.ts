@@ -534,41 +534,6 @@ describe('OpenAPI formula (e2e)', () => {
     expect(clearedRecord.fields[equalsEmptyField.name]).toEqual(1);
   });
 
-  it('should normalize IF branches with mixed result types to text output', async () => {
-    const mixedBranchField = await createField(table1Id, {
-      name: 'if-mixed-branches',
-      type: FieldType.Formula,
-      options: {
-        expression: `IF({${textFieldRo.id}} = "", {${numberFieldRo.id}}, "fallback")`,
-      },
-    });
-
-    const { records } = await createRecords(table1Id, {
-      fieldKeyType: FieldKeyType.Name,
-      records: [
-        {
-          fields: {
-            [numberFieldRo.name]: numberFieldSeedValue,
-          },
-        },
-      ],
-    });
-
-    const recordId = records[0].id;
-    expect(records[0].fields[mixedBranchField.name]).toEqual(numberFieldSeedValue.toString());
-
-    const updatedRecord = await updateRecord(table1Id, recordId, {
-      fieldKeyType: FieldKeyType.Name,
-      record: {
-        fields: {
-          [textFieldRo.name]: 'hello',
-        },
-      },
-    });
-
-    expect(updatedRecord.fields[mixedBranchField.name]).toEqual('fallback');
-  });
-
   it('should calculate formula containing question mark literal', async () => {
     const urlFormulaField = await createField(table1Id, {
       name: 'url formula',

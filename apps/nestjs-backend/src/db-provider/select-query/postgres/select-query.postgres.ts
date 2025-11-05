@@ -1,5 +1,3 @@
-/* eslint-disable sonarjs/cognitive-complexity */
-/* eslint-disable regexp/no-unused-capturing-group */
 import { DbFieldType } from '@teable/core';
 import type { ISelectFormulaConversionContext } from '../../../features/record/query-builder/sql-conversion.visitor';
 import { SelectQueryAbstract } from '../select-query.abstract';
@@ -94,8 +92,21 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
       return true;
     }
 
-    const fieldType = this.getExpressionFieldType(value);
-    return fieldType === DbFieldType.Text || fieldType === DbFieldType.Blob;
+    const columnMatch = trimmed.match(/^"([^"]+)"$/) ?? trimmed.match(/^"[^"]+"\."([^"]+)"$/);
+    if (!columnMatch || columnMatch.length < 2) {
+      return false;
+    }
+
+    const columnName = columnMatch[1];
+    const table = this.context?.table;
+    const field =
+      table?.fieldList?.find((item) => item.dbFieldName === columnName) ??
+      table?.fields?.ordered?.find((item) => item.dbFieldName === columnName);
+    if (!field) {
+      return false;
+    }
+
+    return field.dbFieldType === DbFieldType.Text;
   }
 
   private coerceToTextComparable(value: string): string {
@@ -124,100 +135,6 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
         END
     END)`;
     return this.ensureTextCollation(coerced);
-  }
-
-  private getExpressionFieldType(value: string): DbFieldType | undefined {
-    const trimmed = this.stripOuterParentheses(value);
-    const columnMatch = trimmed.match(/^"([^"]+)"$/) ?? trimmed.match(/^"[^"]+"\."([^"]+)"$/);
-    if (!columnMatch || columnMatch.length < 2) {
-      return undefined;
-    }
-
-    const columnName = columnMatch[1];
-    const table = this.context?.table;
-    const field =
-      table?.fieldList?.find((item) => item.dbFieldName === columnName) ??
-      table?.fields?.ordered?.find((item) => item.dbFieldName === columnName);
-    return field?.dbFieldType as DbFieldType | undefined;
-  }
-
-  private inferExpressionCategory(
-    value: string
-  ): 'text' | 'numeric' | 'boolean' | 'datetime' | 'unknown' {
-    const trimmed = this.stripOuterParentheses(value).trim();
-    if (!trimmed) {
-      return 'unknown';
-    }
-    if (/^NULL$/i.test(trimmed)) {
-      return 'unknown';
-    }
-    if (/^(TRUE|FALSE)$/i.test(trimmed)) {
-      return 'boolean';
-    }
-    if (/^'.*'$/.test(trimmed)) {
-      return 'text';
-    }
-    if (/^[-+]?\d+(\.\d+)?$/.test(trimmed)) {
-      return 'numeric';
-    }
-    if (/\b::(text|varchar|character varying|bpchar)\b/i.test(value)) {
-      return 'text';
-    }
-    if (/\b::(timestamp|timestamptz|date)\b/i.test(value)) {
-      return 'datetime';
-    }
-    if (
-      /\b::(double precision|numeric|bigint|integer|smallint|real|float4|float8)\b/i.test(value)
-    ) {
-      return 'numeric';
-    }
-    if (
-      /(REGEXP_REPLACE|REPLACE|SUBSTRING|LEFT|RIGHT|TRIM|BTRIM|LPAD|RPAD|CONCAT|STRING_AGG|TO_CHAR|FORMAT|JSON_BUILD_OBJECT|JSONB_BUILD_OBJECT|JSON_EXTRACT_PATH_TEXT|LOWER|UPPER|INITCAP)\s*\(/i.test(
-        value
-      )
-    ) {
-      return 'text';
-    }
-    if (value.includes('||')) {
-      return 'text';
-    }
-    const fieldType = this.getExpressionFieldType(value);
-    if (fieldType === DbFieldType.Text || fieldType === DbFieldType.Blob) {
-      return 'text';
-    }
-    if (fieldType === DbFieldType.Integer || fieldType === DbFieldType.Real) {
-      return 'numeric';
-    }
-    if (fieldType === DbFieldType.Boolean) {
-      return 'boolean';
-    }
-    if (fieldType === DbFieldType.DateTime) {
-      return 'datetime';
-    }
-    return 'unknown';
-  }
-
-  private shouldCoerceCaseResults(
-    categories: Array<'text' | 'numeric' | 'boolean' | 'datetime' | 'unknown'>
-  ): boolean {
-    const distinct = new Set(categories.filter((category) => category !== 'unknown'));
-    return distinct.size > 1;
-  }
-
-  private normalizeCaseResultList(values: string[]): string[] {
-    const categories = values.map((value) => this.inferExpressionCategory(value));
-    if (this.shouldCoerceCaseResults(categories)) {
-      return values.map((value) => this.ensureTextCollation(value));
-    }
-    return values;
-  }
-
-  private normalizeCaseResults(valueIfTrue: string, valueIfFalse: string): [string, string] {
-    const [normalizedTrue, normalizedFalse] = this.normalizeCaseResultList([
-      valueIfTrue,
-      valueIfFalse,
-    ]);
-    return [normalizedTrue, normalizedFalse];
   }
 
   private countANonNullExpression(value: string): string {
@@ -791,8 +708,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
   if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
     const truthinessScore = this.truthinessScore(condition);
-    const [normalizedTrue, normalizedFalse] = this.normalizeCaseResults(valueIfTrue, valueIfFalse);
-    return `CASE WHEN (${truthinessScore}) = 1 THEN ${normalizedTrue} ELSE ${normalizedFalse} END`;
+    return `CASE WHEN (${truthinessScore}) = 1 THEN ${valueIfTrue} ELSE ${valueIfFalse} END`;
   }
 
   and(params: string[]): string {
@@ -835,21 +751,14 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     cases: Array<{ case: string; result: string }>,
     defaultResult?: string
   ): string {
-    const caseResults = cases.map((caseItem) => caseItem.result);
-    const resultsToNormalize =
-      defaultResult !== undefined ? [...caseResults, defaultResult] : caseResults;
-    const normalizedResults = this.normalizeCaseResultList(resultsToNormalize);
-
-    let sql = 'CASE';
-    cases.forEach((caseItem, index) => {
-      const condition = this.buildBlankAwareComparison('=', expression, caseItem.case);
-      sql += ` WHEN ${condition} THEN ${normalizedResults[index]}`;
-    });
-    if (defaultResult !== undefined) {
-      const normalizedDefault = normalizedResults[cases.length];
-      sql += ` ELSE ${normalizedDefault}`;
+    let sql = `CASE ${expression}`;
+    for (const caseItem of cases) {
+      sql += ` WHEN ${caseItem.case} THEN ${caseItem.result}`;
     }
-    sql += ' END';
+    if (defaultResult) {
+      sql += ` ELSE ${defaultResult}`;
+    }
+    sql += ` END`;
     return sql;
   }
 
