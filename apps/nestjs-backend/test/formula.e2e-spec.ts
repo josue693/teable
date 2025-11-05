@@ -25,6 +25,7 @@ import {
   createTable,
   permanentDeleteTable,
   getRecords,
+  getField,
   initApp,
   updateRecord,
   updateRecordByApi,
@@ -3011,6 +3012,68 @@ describe('OpenAPI formula (e2e)', () => {
         expect(Number.isFinite(numericValue)).toBe(true);
         expect(numericValue).toBeCloseTo(diffDays, 6);
       }
+    });
+
+    it('should not persist chained DATETIME_DIFF formula as generated column', async () => {
+      const startDateField = await createField(table1Id, {
+        name: 'shift-start',
+        type: FieldType.Date,
+      } as IFieldRo);
+      const endDateField = await createField(table1Id, {
+        name: 'shift-end',
+        type: FieldType.Date,
+      } as IFieldRo);
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [startDateField.name]: '2025-04-10T08:15:00.000Z',
+              [endDateField.name]: '2025-04-10T09:45:00.000Z',
+            },
+          },
+        ],
+      });
+      const recordId = records[0].id;
+
+      const durationField = await createField(table1Id, {
+        name: 'shift-duration-minutes',
+        type: FieldType.Formula,
+        options: {
+          expression: `DATETIME_DIFF({${endDateField.id}}, {${startDateField.id}}, 'minute')`,
+        },
+      });
+
+      const remainingField = await createField(table1Id, {
+        name: 'shift-remaining',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${durationField.id}} - 1`,
+        },
+      });
+
+      const recordAfterFormula = await getRecord(table1Id, recordId);
+      const rawDuration = recordAfterFormula.data.fields[durationField.name];
+      const duration = typeof rawDuration === 'number' ? rawDuration : Number(rawDuration);
+      expect(duration).toBeCloseTo(90, 6);
+
+      const rawRemaining = recordAfterFormula.data.fields[remainingField.name];
+      const remaining = typeof rawRemaining === 'number' ? rawRemaining : Number(rawRemaining);
+      expect(remaining).toBeCloseTo(89, 6);
+
+      const refreshedRemainingField = await getField(table1Id, remainingField.id);
+      const rawMeta = refreshedRemainingField.meta as unknown;
+      let persistedAsGeneratedColumn: boolean | undefined;
+      if (typeof rawMeta === 'string') {
+        persistedAsGeneratedColumn = (
+          JSON.parse(rawMeta) as { persistedAsGeneratedColumn?: boolean }
+        ).persistedAsGeneratedColumn;
+      } else if (rawMeta && typeof rawMeta === 'object') {
+        persistedAsGeneratedColumn = (rawMeta as { persistedAsGeneratedColumn?: boolean })
+          .persistedAsGeneratedColumn;
+      }
+      expect(persistedAsGeneratedColumn).not.toBe(true);
     });
 
     it.each(isSameCases)(

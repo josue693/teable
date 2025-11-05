@@ -137,10 +137,16 @@ export class FormulaSupportGeneratedColumnValidator {
 
     // If it's a formula field, recursively check its dependencies
     if (field.type === FieldType.Formula) {
+      const formulaField = field as FormulaFieldCore;
+
+      if (!formulaField.getIsPersistedAsGeneratedColumn()) {
+        return false;
+      }
+
       visitedFields.add(fieldId);
 
       try {
-        const expression = (field as FormulaFieldCore).getExpression();
+        const expression = formulaField.getExpression();
         if (expression) {
           const tree = parseFormula(expression);
           return this.validateFieldReferences(tree, visitedFields);
