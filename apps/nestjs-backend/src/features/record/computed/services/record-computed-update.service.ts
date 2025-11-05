@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { FieldType } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { Knex } from 'knex';
@@ -102,12 +103,17 @@ export class RecordComputedUpdateService {
     const columnNames = this.getUpdatableColumns(fields);
     const returningNames = this.getReturningColumns(fields);
     if (!columnNames.length) {
+      const selectSql = qb.toQuery();
       // No updatable columns (e.g., all are generated formulas). Return current values via SELECT.
-      return await this.prismaService
-        .txClient()
-        .$queryRawUnsafe<
-          Array<{ __id: string; __version: number } & Record<string, unknown>>
-        >(qb.toQuery());
+      try {
+        return await this.prismaService
+          .txClient()
+          .$queryRawUnsafe<
+            Array<{ __id: string; __version: number } & Record<string, unknown>>
+          >(selectSql);
+      } catch (error) {
+        this.handleRawQueryError(error, selectSql);
+      }
     }
 
     const returningWithAutoNumber = Array.from(
@@ -122,8 +128,29 @@ export class RecordComputedUpdateService {
       returningDbFieldNames: returningWithAutoNumber,
     });
     this.logger.debug('updateFromSelect SQL:', sql);
-    return await this.prismaService
-      .txClient()
-      .$queryRawUnsafe<Array<{ __id: string; __version: number } & Record<string, unknown>>>(sql);
+    try {
+      return await this.prismaService
+        .txClient()
+        .$queryRawUnsafe<Array<{ __id: string; __version: number } & Record<string, unknown>>>(sql);
+    } catch (error) {
+      this.handleRawQueryError(error, sql);
+    }
+  }
+
+  private handleRawQueryError(error: unknown, sql: string): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      error.message = `${error.message}\nSQL: ${sql}`;
+      Object.assign(error, { sql });
+      this.logger.error(
+        `updateFromSelect known request error. SQL: ${sql}`,
+        error.stack ?? undefined
+      );
+      throw error;
+    }
+    this.logger.error(
+      `updateFromSelect unexpected query error. SQL: ${sql}`,
+      (error as Error)?.stack
+    );
+    throw error;
   }
 }
