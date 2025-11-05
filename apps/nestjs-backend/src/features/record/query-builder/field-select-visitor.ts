@@ -23,7 +23,7 @@ import type {
   ButtonFieldCore,
   TableDomain,
 } from '@teable/core';
-import { DbFieldType, FieldType, isLinkLookupOptions } from '@teable/core';
+import { DbFieldType, FieldType, isLinkLookupOptions, DriverClient } from '@teable/core';
 // no driver-specific logic here; use dialect for differences
 import type { Knex } from 'knex';
 import type { IDbProvider } from '../../../db-provider/db.provider.interface';
@@ -79,6 +79,43 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
    */
   private shouldSelectRaw() {
     return this.isViewContext() || this.isTableCacheContext();
+  }
+
+  private castExpressionForDbType(expression: string, field: FieldCore): string {
+    if (this.dbProvider.driver !== DriverClient.Pg) {
+      return expression;
+    }
+
+    const suffix = this.getCastSuffixForDbType(field.dbFieldType);
+    if (!suffix) {
+      return expression;
+    }
+
+    return `(${expression})${suffix}`;
+  }
+
+  private getCastSuffixForDbType(dbFieldType?: DbFieldType): string | null {
+    switch (dbFieldType) {
+      case DbFieldType.Json:
+        return '::jsonb';
+      case DbFieldType.Integer:
+        return '::integer';
+      case DbFieldType.Real:
+        return '::double precision';
+      case DbFieldType.DateTime:
+        return '::timestamptz';
+      case DbFieldType.Boolean:
+        return '::boolean';
+      case DbFieldType.Blob:
+        return '::bytea';
+      case DbFieldType.Text:
+      default:
+        return null;
+    }
+  }
+
+  private buildTypedNull(field: FieldCore): string {
+    return this.dialect.typedNullFor(field.dbFieldType);
   }
 
   /**
@@ -213,9 +250,9 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
     if (!field.isLookup) {
       // If any referenced field (recursively) is unresolved, fall back to NULL
       if (field.hasUnresolvedReferences(this.table)) {
-        const raw = this.qb.client.raw('NULL');
-        this.state.setSelection(field.id, 'NULL');
-        return raw;
+        const nullExpr = this.buildTypedNull(field);
+        this.state.setSelection(field.id, nullExpr);
+        return this.qb.client.raw(nullExpr);
       }
 
       const expression = field.getExpression();
@@ -238,8 +275,9 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
         });
         const normalized =
           field.dbFieldType === DbFieldType.Json ? `to_jsonb(${formulaSql})` : formulaSql;
-        this.state.setSelection(field.id, normalized);
-        return normalized;
+        const casted = this.castExpressionForDbType(normalized as string, field);
+        this.state.setSelection(field.id, casted);
+        return casted;
       }
 
       // For non-raw contexts where the generated column exists, select it directly
@@ -329,8 +367,9 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
       // When building directly from base table and no CTE is available
       // (e.g., foreign table deleted or errored), return a dialect-typed NULL
       // to avoid type mismatch when assigning into persisted columns.
-      const raw = this.qb.client.raw(this.dialect.typedNullFor(field.dbFieldType));
-      this.state.setSelection(field.id, 'NULL');
+      const nullExpr = this.dialect.typedNullFor(field.dbFieldType);
+      const raw = this.qb.client.raw(nullExpr);
+      this.state.setSelection(field.id, nullExpr);
       return raw;
     }
 
@@ -396,9 +435,9 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
         this.state.setSelection(field.id, columnSelector);
         return columnSelector;
       }
-      const raw = this.qb.client.raw('NULL');
-      this.state.setSelection(field.id, 'NULL');
-      return raw;
+      const nullExpr = this.buildTypedNull(field);
+      this.state.setSelection(field.id, nullExpr);
+      return this.qb.client.raw(nullExpr);
     }
     const cteName = fieldCteMap.get(linkLookupOptions.linkFieldId)!;
 

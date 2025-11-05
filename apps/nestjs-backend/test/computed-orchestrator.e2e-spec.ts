@@ -193,6 +193,43 @@ describe('Computed Orchestrator (e2e)', () => {
       await permanentDeleteTable(baseId, table.id);
     });
 
+    it('creates and updates numeric formula via API with computed results', async () => {
+      const table = await createTable(baseId, {
+        name: 'Formula_Api_RoundTrip',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'A', type: FieldType.Number } as IFieldRo,
+        ],
+      });
+
+      const aField = table.fields.find((f) => f.name === 'A')!;
+      const formulaField = (await createField(table.id, {
+        name: 'F_via_api',
+        type: FieldType.Formula,
+        options: { expression: `{${aField.id}} * 2` },
+      } as IFieldRo)) as any;
+
+      const created = await createRecords(table.id, {
+        records: [
+          {
+            fields: {
+              [aField.id]: 10,
+            },
+          },
+        ],
+      });
+
+      const recordId = created.records[0].id;
+      const createdRecord = await getRecord(table.id, recordId);
+      expect(createdRecord.fields[formulaField.id]).toEqual(20);
+
+      await updateRecordByApi(table.id, recordId, aField.id, null);
+      const updatedRecord = await getRecord(table.id, recordId);
+      expect(updatedRecord.fields[formulaField.id]).toBeUndefined();
+
+      await permanentDeleteTable(baseId, table.id);
+    });
+
     it('Formula unchanged publishes computed value with empty oldValue', async () => {
       // T with A and F = {A}*{A}; change A: 1 -> -1, F stays 1
       const table = await createTable(baseId, {
