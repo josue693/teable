@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/no-identical-functions */
 import type {
   TableDomain,
   IFunctionCallInfo,
@@ -56,6 +57,14 @@ export class FormulaSupportGeneratedColumnValidator {
       }
 
       if (this.hasDatetimeStringConcatenation(tree)) {
+        return false;
+      }
+
+      if (this.hasLogicalNonBooleanArgs(tree)) {
+        return false;
+      }
+
+      if (this.containsLogicalFunctions(tree)) {
         return false;
       }
 
@@ -137,10 +146,16 @@ export class FormulaSupportGeneratedColumnValidator {
 
     // If it's a formula field, recursively check its dependencies
     if (field.type === FieldType.Formula) {
+      const formulaField = field as FormulaFieldCore;
+
+      if (!formulaField.getIsPersistedAsGeneratedColumn()) {
+        return false;
+      }
+
       visitedFields.add(fieldId);
 
       try {
-        const expression = (field as FormulaFieldCore).getExpression();
+        const expression = formulaField.getExpression();
         if (expression) {
           const tree = parseFormula(expression);
           return this.validateFieldReferences(tree, visitedFields);
@@ -554,12 +569,13 @@ export class FormulaSupportGeneratedColumnValidator {
 
       // eslint-disable-next-line sonarjs/no-identical-functions
       visitChildren(node: RuleNode): boolean {
-        const n = node.childCount;
-        for (let i = 0; i < n; i++) {
-          const child = node.getChild(i);
+        let index = 0;
+        while (index < node.childCount) {
+          const child = node.getChild(index);
           if (child && child.accept(this)) {
             return true;
           }
+          index++;
         }
         return false;
       }
@@ -580,6 +596,89 @@ export class FormulaSupportGeneratedColumnValidator {
     }
 
     return tree.accept(new DatetimeConcatDetector()) ?? false;
+  }
+
+  private hasLogicalNonBooleanArgs(tree: ExprContext): boolean {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    class LogicalArgumentDetector extends AbstractParseTreeVisitor<boolean> {
+      protected defaultResult(): boolean {
+        return false;
+      }
+
+      visitChildren(node: RuleNode): boolean {
+        const n = node.childCount;
+        for (let i = 0; i < n; i++) {
+          const child = node.getChild(i);
+          if (child && child.accept(this)) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      visitFunctionCall(ctx: FunctionCallContext): boolean {
+        const rawName = ctx.func_name().text.toUpperCase();
+        const fnName = normalizeFunctionNameAlias(rawName) as FunctionName;
+        const isLogical =
+          fnName === FunctionName.And ||
+          fnName === FunctionName.Or ||
+          fnName === FunctionName.Not ||
+          fnName === FunctionName.Xor;
+
+        if (isLogical) {
+          const exprs = ctx.expr();
+          for (const exprCtx of exprs) {
+            const argType = self.inferBasicType(exprCtx);
+            if (argType === 'string' || argType === 'number' || argType === 'datetime') {
+              return true;
+            }
+          }
+        }
+
+        return this.visitChildren(ctx);
+      }
+    }
+
+    return tree.accept(new LogicalArgumentDetector()) ?? false;
+  }
+
+  private containsLogicalFunctions(tree: ExprContext): boolean {
+    class LogicalFunctionDetector extends AbstractParseTreeVisitor<boolean> {
+      protected defaultResult(): boolean {
+        return false;
+      }
+
+      visitChildren(node: RuleNode): boolean {
+        let index = 0;
+        while (index < node.childCount) {
+          const child = node.getChild(index);
+          if (child && child.accept(this)) {
+            return true;
+          }
+          index++;
+        }
+        return false;
+      }
+
+      visitFunctionCall(ctx: FunctionCallContext): boolean {
+        const rawName = ctx.func_name().text.toUpperCase();
+        const fnName = normalizeFunctionNameAlias(rawName) as FunctionName;
+        const isLogical =
+          fnName === FunctionName.And ||
+          fnName === FunctionName.Or ||
+          fnName === FunctionName.Not ||
+          fnName === FunctionName.Xor;
+
+        if (isLogical) {
+          return true;
+        }
+
+        return this.visitChildren(ctx);
+      }
+    }
+
+    return tree.accept(new LogicalFunctionDetector()) ?? false;
   }
 
   // eslint-disable-next-line sonarjs/cognitive-complexity

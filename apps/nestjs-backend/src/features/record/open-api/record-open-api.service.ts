@@ -128,7 +128,9 @@ export class RecordOpenApiService {
       tableId,
       [recordId],
       undefined,
-      updateRecordRo.fieldKeyType || FieldKeyType.Name
+      updateRecordRo.fieldKeyType || FieldKeyType.Name,
+      undefined,
+      true
     );
 
     if (snapshots.length !== 1) {

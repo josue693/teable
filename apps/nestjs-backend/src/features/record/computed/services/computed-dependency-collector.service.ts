@@ -388,6 +388,7 @@ export class ComputedDependencyCollectorService {
 
     const unionQuery = this.knex.queryBuilder().union(selects);
     const finalQuery = this.knex.select('id').from(unionQuery.as('u')).distinct('id').toQuery();
+    this.logger.debug(`Linked Record IDs SQL: ${finalQuery}`);
     const rows = await this.prismaService.txClient().$queryRawUnsafe<{ id: string }[]>(finalQuery);
     return rows.map((r) => r.id).filter(Boolean);
   }

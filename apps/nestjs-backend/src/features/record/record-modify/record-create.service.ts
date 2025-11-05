@@ -95,7 +95,7 @@ export class RecordCreateService {
       this.recordService.convertProjection(projection),
       fieldKeyType,
       CellFormat.Json,
-      false
+      true
     );
     return { records: snapshots.map((s) => s.data) };
   }
