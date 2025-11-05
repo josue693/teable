@@ -46,7 +46,8 @@ import {
   useTableId,
   useView,
 } from '@teable/sdk/hooks';
-import { Skeleton, useToast } from '@teable/ui-lib/shadcn';
+import { Skeleton } from '@teable/ui-lib/shadcn';
+import { toast } from '@teable/ui-lib/shadcn/ui/sonner';
 import { uniqueId } from 'lodash';
 import { useRouter } from 'next/router';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -77,7 +78,6 @@ export const GridViewBase = (props: IGridViewProps) => {
   const gridRef = useRef<IGridRef>(null);
   const container = useRef<HTMLDivElement>(null);
   const expandRecordRef = useRef<IExpandRecordContainerRef>(null);
-  const { toast } = useToast();
   const theme = useGridTheme();
   const rowCount = useRowCount();
   const ssrRecords = useSSRRecords();
@@ -230,12 +230,12 @@ export const GridViewBase = (props: IGridViewProps) => {
     async (selection: CombinedSelection) => {
       const allowCopy = view?.shareMeta?.allowCopy;
       if (!allowCopy) {
-        toast({ title: "Sorry, the table's owner has disabled copying" });
+        toast.warning("Sorry, the table's owner has disabled copying");
         return;
       }
       await copy(selection);
     },
-    [copy, view?.shareMeta?.allowCopy, toast]
+    [copy, view?.shareMeta?.allowCopy]
   );
 
   const onColumnStatisticClick = useCallback(
