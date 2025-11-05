@@ -534,41 +534,6 @@ describe('OpenAPI formula (e2e)', () => {
     expect(clearedRecord.fields[equalsEmptyField.name]).toEqual(1);
   });
 
-  it('should normalize IF branches with mixed result types to text output', async () => {
-    const mixedBranchField = await createField(table1Id, {
-      name: 'if-mixed-branches',
-      type: FieldType.Formula,
-      options: {
-        expression: `IF({${textFieldRo.id}} = "", {${numberFieldRo.id}}, "fallback")`,
-      },
-    });
-
-    const { records } = await createRecords(table1Id, {
-      fieldKeyType: FieldKeyType.Name,
-      records: [
-        {
-          fields: {
-            [numberFieldRo.name]: numberFieldSeedValue,
-          },
-        },
-      ],
-    });
-
-    const recordId = records[0].id;
-    expect(records[0].fields[mixedBranchField.name]).toEqual(numberFieldSeedValue.toString());
-
-    const updatedRecord = await updateRecord(table1Id, recordId, {
-      fieldKeyType: FieldKeyType.Name,
-      record: {
-        fields: {
-          [textFieldRo.name]: 'hello',
-        },
-      },
-    });
-
-    expect(updatedRecord.fields[mixedBranchField.name]).toEqual('fallback');
-  });
-
   it('should calculate formula containing question mark literal', async () => {
     const urlFormulaField = await createField(table1Id, {
       name: 'url formula',
@@ -1510,6 +1475,84 @@ describe('OpenAPI formula (e2e)', () => {
           '2025-10-31-tag',
           '2025-11-05-tag',
         ]);
+      } finally {
+        if (host) {
+          await permanentDeleteTable(baseId, host.id);
+        }
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
+    it('should evaluate formulas referencing lookup formulas', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'formula-lookup-formula-foreign',
+        fields: [
+          { name: 'First Name', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Last Name', type: FieldType.SingleLineText } as IFieldRo,
+        ],
+        records: [
+          {
+            fields: {
+              'First Name': 'Ada',
+              'Last Name': 'Lovelace',
+            },
+          },
+        ],
+      });
+      let host: ITableFullVo | undefined;
+      try {
+        host = await createTable(baseId, {
+          name: 'formula-lookup-formula-host',
+          fields: [{ name: 'Note', type: FieldType.SingleLineText } as IFieldRo],
+          records: [{ fields: { Note: 'host note' } }],
+        });
+
+        const linkField = await createField(host.id, {
+          name: 'Linked Person',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyOne,
+            foreignTableId: foreign.id,
+          } as ILinkFieldOptionsRo,
+        } as IFieldRo);
+
+        const firstNameFieldId = foreign.fields.find((field) => field.name === 'First Name')!.id;
+        const lastNameFieldId = foreign.fields.find((field) => field.name === 'Last Name')!.id;
+        const fullNameFormula = await createField(foreign.id, {
+          name: 'Full Name',
+          type: FieldType.Formula,
+          options: {
+            expression: `{${firstNameFieldId}} & "-" & {${lastNameFieldId}}`,
+          },
+        } as IFieldRo);
+
+        const lookupField = await createField(host.id, {
+          name: 'Full Name Lookup',
+          type: FieldType.Formula,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: fullNameFormula.id,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const hostRecordId = host.records[0].id;
+        await updateRecordByApi(host.id, hostRecordId, linkField.id, {
+          id: foreign.records[0].id,
+        });
+
+        const hostFormula = await createField(host.id, {
+          name: 'Greeting',
+          type: FieldType.Formula,
+          options: {
+            expression: `CONCATENATE({${lookupField.id}}, "!")`,
+          },
+        } as IFieldRo);
+
+        const recordAfter = await getRecord(host.id, hostRecordId);
+        expect(recordAfter.data.fields[lookupField.name]).toBe('Ada-Lovelace');
+        expect(recordAfter.data.fields[hostFormula.name]).toBe('Ada-Lovelace!');
       } finally {
         if (host) {
           await permanentDeleteTable(baseId, host.id);

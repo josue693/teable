@@ -1,5 +1,3 @@
-/* eslint-disable regexp/no-unused-capturing-group */
-/* eslint-disable sonarjs/cognitive-complexity */
 /* eslint-disable no-useless-escape */
 import { DbFieldType } from '@teable/core';
 import { GeneratedColumnQueryAbstract } from '../generated-column-query.abstract';
@@ -180,85 +178,6 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
         ? this.coerceJsonExpressionToText(wrapped)
         : this.coerceNonJsonExpressionToText(wrapped);
     return this.ensureTextCollation(coerced);
-  }
-
-  private inferExpressionCategory(
-    value: string
-  ): 'text' | 'numeric' | 'boolean' | 'datetime' | 'unknown' {
-    const trimmed = this.stripOuterParentheses(value).trim();
-    if (!trimmed) {
-      return 'unknown';
-    }
-    if (/^NULL$/i.test(trimmed)) {
-      return 'unknown';
-    }
-    if (/^(TRUE|FALSE)$/i.test(trimmed)) {
-      return 'boolean';
-    }
-    if (/^'.*'$/.test(trimmed)) {
-      return 'text';
-    }
-    if (/^[-+]?\d+(\.\d+)?$/.test(trimmed)) {
-      return 'numeric';
-    }
-    if (/\b::(text|varchar|character varying|bpchar)\b/i.test(value)) {
-      return 'text';
-    }
-    if (/\b::(timestamp|timestamptz|date)\b/i.test(value)) {
-      return 'datetime';
-    }
-    if (
-      /\b::(double precision|numeric|bigint|integer|smallint|real|float4|float8)\b/i.test(value)
-    ) {
-      return 'numeric';
-    }
-    if (
-      /(REGEXP_REPLACE|REPLACE|SUBSTRING|LEFT|RIGHT|TRIM|BTRIM|LPAD|RPAD|CONCAT|STRING_AGG|TO_CHAR|FORMAT|JSON_BUILD_OBJECT|JSONB_BUILD_OBJECT|JSON_EXTRACT_PATH_TEXT|LOWER|UPPER|INITCAP)\s*\(/i.test(
-        value
-      )
-    ) {
-      return 'text';
-    }
-    if (value.includes('||')) {
-      return 'text';
-    }
-    const fieldType = this.getExpressionFieldType(value);
-    if (fieldType === DbFieldType.Text || fieldType === DbFieldType.Blob) {
-      return 'text';
-    }
-    if (fieldType === DbFieldType.Integer || fieldType === DbFieldType.Real) {
-      return 'numeric';
-    }
-    if (fieldType === DbFieldType.Boolean) {
-      return 'boolean';
-    }
-    if (fieldType === DbFieldType.DateTime) {
-      return 'datetime';
-    }
-    return 'unknown';
-  }
-
-  private shouldCoerceCaseResults(
-    categories: Array<'text' | 'numeric' | 'boolean' | 'datetime' | 'unknown'>
-  ): boolean {
-    const distinct = new Set(categories.filter((category) => category !== 'unknown'));
-    return distinct.size > 1;
-  }
-
-  private normalizeCaseResults(valueIfTrue: string, valueIfFalse: string): [string, string] {
-    const [normalizedTrue, normalizedFalse] = this.normalizeCaseResultList([
-      valueIfTrue,
-      valueIfFalse,
-    ]);
-    return [normalizedTrue, normalizedFalse];
-  }
-
-  private normalizeCaseResultList(values: string[]): string[] {
-    const categories = values.map((value) => this.inferExpressionCategory(value));
-    if (this.shouldCoerceCaseResults(categories)) {
-      return values.map((value) => this.ensureTextCollation(value));
-    }
-    return values;
   }
 
   private countANonNullExpression(value: string): string {
@@ -850,8 +769,7 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
   // Logical Functions
   if(condition: string, valueIfTrue: string, valueIfFalse: string): string {
     const booleanCondition = this.normalizeBooleanCondition(condition);
-    const [normalizedTrue, normalizedFalse] = this.normalizeCaseResults(valueIfTrue, valueIfFalse);
-    return `CASE WHEN (${booleanCondition}) THEN ${normalizedTrue} ELSE ${normalizedFalse} END`;
+    return `CASE WHEN (${booleanCondition}) THEN ${valueIfTrue} ELSE ${valueIfFalse} END`;
   }
 
   and(params: string[]): string {
@@ -900,21 +818,14 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
     cases: Array<{ case: string; result: string }>,
     defaultResult?: string
   ): string {
-    const caseResults = cases.map((caseItem) => caseItem.result);
-    const resultsToNormalize =
-      defaultResult !== undefined ? [...caseResults, defaultResult] : caseResults;
-    const normalizedResults = this.normalizeCaseResultList(resultsToNormalize);
-
     let caseStatement = 'CASE';
 
-    cases.forEach((caseItem, index) => {
-      const condition = this.buildBlankAwareComparison('=', expression, caseItem.case);
-      caseStatement += ` WHEN ${condition} THEN ${normalizedResults[index]}`;
-    });
+    for (const caseItem of cases) {
+      caseStatement += ` WHEN ${expression} = ${caseItem.case} THEN ${caseItem.result}`;
+    }
 
-    if (defaultResult !== undefined) {
-      const normalizedDefault = normalizedResults[cases.length];
-      caseStatement += ` ELSE ${normalizedDefault}`;
+    if (defaultResult) {
+      caseStatement += ` ELSE ${defaultResult}`;
     }
 
     caseStatement += ' END';
