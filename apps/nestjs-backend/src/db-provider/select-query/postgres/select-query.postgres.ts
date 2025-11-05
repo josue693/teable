@@ -122,18 +122,17 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     }
 
     const wrapped = `(${value})`;
+    const jsonbValue = `to_jsonb${wrapped}`;
     const coerced = `(CASE
       WHEN ${wrapped} IS NULL THEN NULL
-      WHEN pg_typeof(${wrapped}) = ANY(ARRAY['jsonb'::regtype, 'json'::regtype]) THEN (
-        CASE jsonb_typeof((${wrapped})::jsonb)
-          WHEN 'string' THEN (${wrapped})::jsonb #>> '{}'
-          WHEN 'number' THEN (${wrapped})::jsonb #>> '{}'
-          WHEN 'boolean' THEN (${wrapped})::jsonb #>> '{}'
+      ELSE
+        CASE jsonb_typeof(${jsonbValue})
+          WHEN 'string' THEN ${jsonbValue} #>> '{}'
+          WHEN 'number' THEN ${jsonbValue} #>> '{}'
+          WHEN 'boolean' THEN ${jsonbValue} #>> '{}'
           WHEN 'null' THEN NULL
-          ELSE (${wrapped})::jsonb::text
+          ELSE ${jsonbValue}::text
         END
-      )
-      ELSE ${wrapped}::text
     END)`;
     return this.ensureTextCollation(coerced);
   }

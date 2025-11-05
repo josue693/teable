@@ -356,8 +356,10 @@ describe('Select formula string comparisons', () => {
     query.setContext(buildContext());
     const sql = query.equal('"main"."text_col"', '"main"."json_col"');
 
-    expect(sql).toContain('pg_typeof(("main"."json_col")) = ANY');
-    expect(sql).toContain('jsonb_typeof((("main"."json_col"))::jsonb)');
+    expect(sql).toContain('jsonb_typeof(to_jsonb("main"."json_col"))');
+    expect(sql).toContain('CASE jsonb_typeof(to_jsonb("main"."json_col"))');
+    expect(sql).toContain('WHEN \'string\' THEN to_jsonb("main"."json_col") #>> \'{}\'');
+    expect(sql).toContain('ELSE to_jsonb("main"."json_col")::text');
     expect(sql).toContain('("main"."text_col")::text COLLATE "C"');
     expect(sql).not.toContain('= "main"."json_col"');
   });
