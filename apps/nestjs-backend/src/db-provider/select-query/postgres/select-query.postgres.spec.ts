@@ -425,7 +425,7 @@ describe('Select formula arithmetic coercion', () => {
   it('coerces unary minus of text operands', () => {
     const sql = provider.convertFormulaToSelectQuery(`-{${rightField.id}}`, buildContext());
 
-    expect(sql.trim().startsWith('(-')).toBe(true);
+    expect((sql as string).trim().startsWith('(-')).toBe(true);
     expect(sql).toContain(
       "REGEXP_REPLACE(((\"main\".\"right_text_col\")::text), '[^0-9.+-]', '', 'g')"
     );
