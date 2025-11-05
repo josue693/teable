@@ -3549,6 +3549,80 @@ describe('OpenAPI formula (e2e)', () => {
     });
   });
 
+  it('should evaluate link equality formula comparing link title and concatenated text', async () => {
+    const foreign = await createTable(baseId, {
+      name: 'link-equality-foreign',
+      fields: [{ name: 'Title', type: FieldType.SingleLineText } as IFieldRo],
+      records: [{ fields: { Title: 'AlphaSet1' } }],
+    });
+    let host: ITableFullVo | undefined;
+    try {
+      host = await createTable(baseId, {
+        name: 'link-equality-host',
+        fields: [
+          { name: 'Ad', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Adset', type: FieldType.SingleLineText } as IFieldRo,
+        ],
+        records: [{ fields: { Ad: 'Alpha', Adset: 'Set1' } }],
+      });
+
+      const adField = host.fields.find((field) => field.name === 'Ad')!;
+      const adsetField = host.fields.find((field) => field.name === 'Adset')!;
+
+      const concatenatedField = await createField(host.id, {
+        name: 'Ad & Adset',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${adField.id}} & {${adsetField.id}}`,
+        },
+      });
+
+      const linkField = await createField(host.id, {
+        name: 'Related Campaign',
+        type: FieldType.Link,
+        options: {
+          foreignTableId: foreign.id,
+          relationship: Relationship.ManyOne,
+        } as ILinkFieldOptionsRo,
+      } as IFieldRo);
+
+      const equalityField = await createField(host.id, {
+        name: 'Link Matches Text',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${linkField.id}} = {${concatenatedField.id}}`,
+        },
+      });
+
+      const recordId = host.records[0].id;
+      await updateRecordByApi(host.id, recordId, linkField.id, {
+        id: foreign.records[0].id,
+      });
+
+      let record = await getRecord(host.id, recordId);
+      expect(record.data.fields[concatenatedField.name]).toBe('AlphaSet1');
+      expect(record.data.fields[equalityField.name]).toBe(true);
+
+      await updateRecord(host.id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [adField.name]: 'Beta',
+          },
+        },
+      });
+
+      record = await getRecord(host.id, recordId);
+      expect(record.data.fields[concatenatedField.name]).toBe('BetaSet1');
+      expect(record.data.fields[equalityField.name]).toBe(false);
+    } finally {
+      if (host) {
+        await permanentDeleteTable(baseId, host.id);
+      }
+      await permanentDeleteTable(baseId, foreign.id);
+    }
+  });
+
   it('should calculate primary field when have link relationship', async () => {
     const table2: ITableFullVo = await createTable(baseId, { name: 'table2' });
     const linkFieldRo: IFieldRo = {

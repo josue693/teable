@@ -64,9 +64,9 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
     if (this.isNumericLiteral(expr)) {
       return `(${expr})::double precision`;
     }
-    const textExpr = `((${expr})::text COLLATE "C")`;
+    const textExpr = `((${expr})::text)`;
     const sanitized = `REGEXP_REPLACE(${textExpr}, '[^0-9.+-]', '', 'g')`;
-    return `NULLIF(${sanitized}, '' COLLATE "C")::double precision`;
+    return `NULLIF(${sanitized}, '')::double precision`;
   }
 
   private coalesceNumeric(expr: string): string {
@@ -83,7 +83,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   private ensureTextCollation(expr: string): string {
-    return `(${expr})::text COLLATE "C"`;
+    return `(${expr})::text`;
   }
 
   private isTextLikeExpression(value: string): boolean {
@@ -445,18 +445,24 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
   }
 
   find(searchText: string, withinText: string, startNum?: string): string {
+    const normalizedSearch = this.ensureTextCollation(searchText);
+    const normalizedWithin = this.ensureTextCollation(withinText);
+
     if (startNum) {
-      return `POSITION(${searchText} IN SUBSTRING(${withinText} FROM ${startNum}::integer)) + ${startNum}::integer - 1`;
+      return `POSITION(${normalizedSearch} IN SUBSTRING(${normalizedWithin} FROM ${startNum}::integer)) + ${startNum}::integer - 1`;
     }
-    return `POSITION(${searchText} IN ${withinText})`;
+    return `POSITION(${normalizedSearch} IN ${normalizedWithin})`;
   }
 
   search(searchText: string, withinText: string, startNum?: string): string {
+    const normalizedSearch = this.ensureTextCollation(searchText);
+    const normalizedWithin = this.ensureTextCollation(withinText);
+
     // Similar to find but case-insensitive
     if (startNum) {
-      return `POSITION(UPPER(${searchText}) IN UPPER(SUBSTRING(${withinText} FROM ${startNum}::integer))) + ${startNum}::integer - 1`;
+      return `POSITION(UPPER(${normalizedSearch}) IN UPPER(SUBSTRING(${normalizedWithin} FROM ${startNum}::integer))) + ${startNum}::integer - 1`;
     }
-    return `POSITION(UPPER(${searchText}) IN UPPER(${withinText}))`;
+    return `POSITION(UPPER(${normalizedSearch}) IN UPPER(${normalizedWithin}))`;
   }
 
   mid(text: string, startNum: string, numChars: string): string {

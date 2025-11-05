@@ -296,7 +296,7 @@ exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Text Fun
 
 exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Text Functions > should implement mid function 1`] = `"SUBSTRING(column_a FROM 2::integer FOR 5::integer)"`;
 
-exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Text Functions > should implement regexpReplace function 1`] = `"REGEXP_REPLACE((column_a)::text COLLATE \"C\", ('pattern')::text COLLATE \"C\", ('replacement')::text COLLATE \"C\", 'g')"`;
+exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Text Functions > should implement regexpReplace function 1`] = `"REGEXP_REPLACE((column_a)::text, ('pattern')::text, ('replacement')::text, 'g')"`;
 
 exports[`GeneratedColumnQuery > PostgreSQL Generated Column Functions > Text Functions > should implement replace function 1`] = `"OVERLAY(column_a PLACING 'new' FROM 2::integer FOR 3::integer)"`;
 

@@ -31,6 +31,22 @@ describe('GeneratedColumnQueryPostgres unit-aware helpers', () => {
     );
   });
 
+  it('find casts numeric search values to text expressions', () => {
+    expect(query.find('202', '"text_col"')).toBe(`POSITION((202)::text IN ("text_col")::text)`);
+  });
+
+  it('find with start argument casts inputs to text expressions', () => {
+    expect(query.find('202', '"text_col"', '3')).toBe(
+      `POSITION((202)::text IN SUBSTRING(("text_col")::text FROM 3::integer)) + 3::integer - 1`
+    );
+  });
+
+  it('search casts numeric search values before applying upper', () => {
+    expect(query.search('202', '"text_col"')).toBe(
+      `POSITION(UPPER((202)::text) IN UPPER(("text_col")::text))`
+    );
+  });
+
   const dateAddCases: Array<{ literal: string; unit: string; factor: number }> = [
     { literal: 'millisecond', unit: 'millisecond', factor: 1 },
     { literal: 'milliseconds', unit: 'millisecond', factor: 1 },
@@ -204,6 +220,6 @@ describe('GeneratedColumnQueryPostgres unit-aware helpers', () => {
 
     expect(sql).toContain('pg_typeof(("json_col")) = ANY');
     expect(sql).toContain('jsonb_typeof((("json_col"))::jsonb)');
-    expect(sql).toContain('("text_col")::text COLLATE "C"');
+    expect(sql).toContain('("text_col")::text');
   });
 });
