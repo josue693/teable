@@ -932,11 +932,15 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
   // Binary Operations
   add(left: string, right: string): string {
-    return `(${left} + ${right})`;
+    const l = this.toNumericSafe(left);
+    const r = this.toNumericSafe(right);
+    return `((${l}) + (${r}))`;
   }
 
   subtract(left: string, right: string): string {
-    return `(${left} - ${right})`;
+    const l = this.toNumericSafe(left);
+    const r = this.toNumericSafe(right);
+    return `((${l}) - (${r}))`;
   }
 
   multiply(left: string, right: string): string {
@@ -1016,7 +1020,8 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
   // Unary Operations
   unaryMinus(value: string): string {
-    return `(-${value})`;
+    const numericValue = this.toNumericSafe(value);
+    return `(-(${numericValue}))`;
   }
 
   // Field Reference

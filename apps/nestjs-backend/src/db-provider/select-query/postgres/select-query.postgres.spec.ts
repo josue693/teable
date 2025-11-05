@@ -354,6 +354,85 @@ describe('Select formula boolean normalization', () => {
   });
 });
 
+describe('Select formula arithmetic coercion', () => {
+  const knexClient = knex({ client: 'pg' });
+  const provider = new PostgresProvider(knexClient);
+
+  const leftFieldVo: IFieldVo = {
+    id: 'fldLeftText001',
+    name: 'Left Text',
+    type: FieldType.SingleLineText,
+    options: {},
+    dbFieldName: 'left_text_col',
+    dbFieldType: DbFieldType.Text,
+    cellValueType: CellValueType.String,
+    isLookup: false,
+    isComputed: false,
+    isMultipleCellValue: false,
+  };
+
+  const rightFieldVo: IFieldVo = {
+    id: 'fldRightText001',
+    name: 'Right Text',
+    type: FieldType.SingleLineText,
+    options: {},
+    dbFieldName: 'right_text_col',
+    dbFieldType: DbFieldType.Text,
+    cellValueType: CellValueType.String,
+    isLookup: false,
+    isComputed: false,
+    isMultipleCellValue: false,
+  };
+
+  const leftField = createFieldInstanceByVo(leftFieldVo);
+  const rightField = createFieldInstanceByVo(rightFieldVo);
+
+  const table = new TableDomain({
+    id: 'tblArithmeticText',
+    name: 'Arithmetic Text Table',
+    dbTableName: 'arithmetic_text_table',
+    lastModifiedTime: '1970-01-01T00:00:00.000Z',
+    fields: [leftField, rightField],
+  });
+
+  const buildContext = (): ISelectFormulaConversionContext => ({
+    table,
+    tableAlias: 'main',
+    selectionMap: new Map<string, IFieldSelectName>([
+      [leftField.id, '"main"."left_text_col"'],
+      [rightField.id, '"main"."right_text_col"'],
+    ]),
+    timeZone: 'UTC',
+    preferRawFieldReferences: true,
+  });
+
+  it('coerces text operands when subtracting in select SQL', () => {
+    const sql = provider.convertFormulaToSelectQuery(
+      `{${leftField.id}} - {${rightField.id}}`,
+      buildContext()
+    );
+
+    expect(sql).toContain(
+      "REGEXP_REPLACE(((\"main\".\"left_text_col\")::text), '[^0-9.+-]', '', 'g')"
+    );
+    expect(sql).toContain(
+      "REGEXP_REPLACE(((\"main\".\"right_text_col\")::text), '[^0-9.+-]', '', 'g')"
+    );
+    expect(sql).toContain('::double precision');
+    expect(sql).not.toContain('"main"."left_text_col" - "main"."right_text_col"');
+  });
+
+  it('coerces unary minus of text operands', () => {
+    const sql = provider.convertFormulaToSelectQuery(`-{${rightField.id}}`, buildContext());
+
+    expect(sql.trim().startsWith('(-')).toBe(true);
+    expect(sql).toContain(
+      "REGEXP_REPLACE(((\"main\".\"right_text_col\")::text), '[^0-9.+-]', '', 'g')"
+    );
+    expect(sql).toContain('::double precision');
+  });
+});
+
 describe('Select formula string comparisons', () => {
   const query = new SelectQueryPostgres();
   const tableStub = {

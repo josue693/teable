@@ -270,6 +270,29 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
     return `CASE WHEN ${value} IS NULL THEN 0 ELSE 1 END`;
   }
 
+  override add(left: string, right: string): string {
+    const l = this.toNumericSafe(left);
+    const r = this.toNumericSafe(right);
+    return `((${l}) + (${r}))`;
+  }
+
+  override subtract(left: string, right: string): string {
+    const l = this.toNumericSafe(left);
+    const r = this.toNumericSafe(right);
+    return `((${l}) - (${r}))`;
+  }
+
+  override multiply(left: string, right: string): string {
+    const l = this.toNumericSafe(left);
+    const r = this.toNumericSafe(right);
+    return `((${l}) * (${r}))`;
+  }
+
+  override unaryMinus(value: string): string {
+    const numericValue = this.toNumericSafe(value);
+    return `(-(${numericValue}))`;
+  }
+
   override divide(left: string, right: string): string {
     const l = this.toNumericSafe(left);
     const r = this.toNumericSafe(right);
@@ -308,12 +331,14 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
   // Numeric Functions
   sum(params: string[]): string {
     // Use addition instead of SUM() aggregation function for generated columns
-    return `(${params.join(' + ')})`;
+    const numericParams = params.map((param) => `(${this.toNumericSafe(param)})`);
+    return `(${numericParams.join(' + ')})`;
   }
 
   average(params: string[]): string {
     // Use addition and division instead of AVG() aggregation function for generated columns
-    return `(${params.join(' + ')}) / ${params.length}`;
+    const numericParams = params.map((param) => `(${this.toNumericSafe(param)})`);
+    return `(${numericParams.join(' + ')}) / ${params.length}`;
   }
 
   max(params: string[]): string {
