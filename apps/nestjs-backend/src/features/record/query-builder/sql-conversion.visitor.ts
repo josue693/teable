@@ -24,6 +24,7 @@ import {
   isLinkField,
   parseFormula,
   isFieldHasExpression,
+  isFormulaField,
   isLinkLookupOptions,
   normalizeFunctionNameAlias,
   DbFieldType,
@@ -211,6 +212,9 @@ function shouldExpandFieldReference(
   | AutoNumberFieldCore
   | CreatedTimeFieldCore
   | LastModifiedTimeFieldCore {
+  if (isFormulaField(field) && field.isLookup) {
+    return false;
+  }
   return isFieldHasExpression(field);
 }
 

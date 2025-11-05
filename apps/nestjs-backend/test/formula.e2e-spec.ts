@@ -1518,6 +1518,84 @@ describe('OpenAPI formula (e2e)', () => {
       }
     });
 
+    it('should evaluate formulas referencing lookup formulas', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'formula-lookup-formula-foreign',
+        fields: [
+          { name: 'First Name', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Last Name', type: FieldType.SingleLineText } as IFieldRo,
+        ],
+        records: [
+          {
+            fields: {
+              'First Name': 'Ada',
+              'Last Name': 'Lovelace',
+            },
+          },
+        ],
+      });
+      let host: ITableFullVo | undefined;
+      try {
+        host = await createTable(baseId, {
+          name: 'formula-lookup-formula-host',
+          fields: [{ name: 'Note', type: FieldType.SingleLineText } as IFieldRo],
+          records: [{ fields: { Note: 'host note' } }],
+        });
+
+        const linkField = await createField(host.id, {
+          name: 'Linked Person',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyOne,
+            foreignTableId: foreign.id,
+          } as ILinkFieldOptionsRo,
+        } as IFieldRo);
+
+        const firstNameFieldId = foreign.fields.find((field) => field.name === 'First Name')!.id;
+        const lastNameFieldId = foreign.fields.find((field) => field.name === 'Last Name')!.id;
+        const fullNameFormula = await createField(foreign.id, {
+          name: 'Full Name',
+          type: FieldType.Formula,
+          options: {
+            expression: `{${firstNameFieldId}} & "-" & {${lastNameFieldId}}`,
+          },
+        } as IFieldRo);
+
+        const lookupField = await createField(host.id, {
+          name: 'Full Name Lookup',
+          type: FieldType.Formula,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: fullNameFormula.id,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const hostRecordId = host.records[0].id;
+        await updateRecordByApi(host.id, hostRecordId, linkField.id, {
+          id: foreign.records[0].id,
+        });
+
+        const hostFormula = await createField(host.id, {
+          name: 'Greeting',
+          type: FieldType.Formula,
+          options: {
+            expression: `CONCATENATE({${lookupField.id}}, "!")`,
+          },
+        } as IFieldRo);
+
+        const recordAfter = await getRecord(host.id, hostRecordId);
+        expect(recordAfter.data.fields[lookupField.name]).toBe('Ada-Lovelace');
+        expect(recordAfter.data.fields[hostFormula.name]).toBe('Ada-Lovelace!');
+      } finally {
+        if (host) {
+          await permanentDeleteTable(baseId, host.id);
+        }
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
     it('should calculate numeric formulas using lookup fields', async () => {
       const foreign = await createTable(baseId, {
         name: 'formula-lookup-numeric-foreign',

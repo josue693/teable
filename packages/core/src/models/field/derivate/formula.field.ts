@@ -126,7 +126,7 @@ export class FormulaFieldCore extends FormulaAbstractCore {
       if (!ref) return true;
       if (ref.hasError) return true;
       // Drill down if the referenced field is a formula
-      if (ref.type === FieldType.Formula) {
+      if (ref.type === FieldType.Formula && !ref.isLookup) {
         const refFormula = ref as FormulaFieldCore;
         if (refFormula.hasUnresolvedReferences(tableDomain, visited)) return true;
       }
