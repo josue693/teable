@@ -128,8 +128,8 @@ export class LocalAuthService {
     const setting = await this.settingService.getSetting();
     const { email, verification, accountName } = body;
 
-    if (setting?.enableAccountNameRegistration && !accountName) {
-      throw new BadRequestException('Account name is required');
+    if (setting?.enableAccountNameRegistration && !email && !accountName) {
+      throw new BadRequestException('At least one of email or account name is required');
     }
 
     if (!setting?.enableEmailVerification) {

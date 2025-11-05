@@ -82,12 +82,19 @@ export class UserService {
   }
 
   async generateUniqueAccountName(): Promise<string> {
+    const maxRetries = 10;
+    let attempt = 0;
     let accountName = generateAccountName();
     let existingUser = await this.getUserByAccountName(accountName);
-
-    while (existingUser) {
+    while (existingUser && attempt < maxRetries) {
       accountName = generateAccountName();
       existingUser = await this.getUserByAccountName(accountName);
+      attempt++;
+    }
+    if (existingUser) {
+      throw new BadRequestException(
+        'Failed to generate a unique account name after multiple attempts.'
+      );
     }
 
     return accountName;
