@@ -8,6 +8,7 @@ interface IUser {
   id: string;
   name: string;
   email: string;
+  accountName: string;
 }
 
 interface IContext {
@@ -56,8 +57,8 @@ export class UserFieldCore extends UserAbstractCore {
 
   private matchUser(value: string, userSets: IUser[] = []) {
     const foundUser = userSets.find((user) => {
-      const { id, name, email } = user;
-      return value === id || value === name || value === email;
+      const { id, name, email, accountName } = user;
+      return value === id || value === name || value === email || value === accountName;
     });
     return foundUser ? { id: foundUser.id, title: foundUser.name, email: foundUser.email } : null;
   }

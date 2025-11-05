@@ -250,6 +250,7 @@ export class CollaboratorService {
     builder.whereNotNull('users.id');
     builder.select({
       id: 'users.id',
+      accountName: 'users.account_name',
       name: 'users.name',
       email: 'users.email',
       avatar: 'users.avatar',
@@ -259,6 +260,7 @@ export class CollaboratorService {
     return this.prismaService.txClient().$queryRawUnsafe<
       {
         id: string;
+        accountName: string;
         name: string;
         email: string;
         avatar: string | null;

@@ -2,7 +2,7 @@
   Warnings:
 
   - A unique constraint covering the columns `[account_name]` on the table `users` will be added. If there are existing duplicate values, this will fail.
-  - Made the column `account_name` on table `users` required. This step will fail if there are existing NULL values in that column.
+  - Made the column `account_name` on table `users`.
 
 */
 -- AlterTable

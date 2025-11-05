@@ -89,6 +89,7 @@ describe('UserFieldCore', () => {
         {
           id: 'usr1234567',
           name: 'anonymous',
+          accountName: 'usr1234567',
           email: 'anonymous@teable.ai',
         },
       ],
@@ -108,6 +109,7 @@ describe('UserFieldCore', () => {
     ctx.userSets.push({
       id: 'usrA2',
       name: 'anonymous',
+      accountName: 'usrA2',
       email: 'a2@teable.ai',
     });
     expect(field.convertStringToCellValue('anonymous', ctx)).toEqual({

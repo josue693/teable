@@ -244,7 +244,8 @@ export class LocalAuthService {
 
     await this.verifySignup(body);
 
-    let user = null;
+    let user: Awaited<ReturnType<typeof this.userService.getUserByEmailOrAccountName>> | null =
+      null;
     if (email) {
       user = await this.userService.getUserByEmail(email);
       this.isRegisteredValidate(user);

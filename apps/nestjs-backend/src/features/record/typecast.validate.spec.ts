@@ -389,8 +389,22 @@ describe('TypeCastAndValidate', () => {
     };
     beforeEach(() => {
       collaboratorService.getUserCollaboratorsByTableId.mockResolvedValue([
-        { id: '1', name: 'bob', email: 'bob@example.com', avatar: null, isSystem: false },
-        { id: '2', name: 'tom', email: 'tom@example.com', avatar: null, isSystem: false },
+        {
+          id: '1',
+          accountName: 'bob',
+          name: 'bob',
+          email: 'bob@example.com',
+          avatar: null,
+          isSystem: false,
+        },
+        {
+          id: '2',
+          accountName: 'tom',
+          name: 'tom',
+          email: 'tom@example.com',
+          avatar: null,
+          isSystem: false,
+        },
       ]);
     });
 
