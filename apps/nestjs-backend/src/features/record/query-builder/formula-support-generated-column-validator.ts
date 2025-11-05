@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/no-identical-functions */
 import type {
   TableDomain,
   IFunctionCallInfo,

@@ -25,23 +25,21 @@ export const FieldValue = <T extends IConditionItemProperty = IViewFilterConditi
   const field = fields.find((f) => f.id === item.field);
 
   const defaultReferenceSource = useMemo<IFilterReferenceSource | undefined>(() => {
-    if (!field) {
+    if (!referenceSource) {
+      return undefined;
+    }
+    if (referenceSource.tableId) {
       return referenceSource;
     }
-    if (referenceSource?.fields?.length) {
-      return referenceSource;
-    }
-    const candidates = field.tableId
-      ? fields.filter((candidate) => candidate.tableId === field.tableId)
-      : fields;
-    if (!candidates.length) {
+    const fallbackTableId = referenceSource.fields[0]?.tableId ?? field?.tableId;
+    if (!fallbackTableId) {
       return referenceSource;
     }
     return {
-      fields: candidates,
-      tableId: field.tableId ?? candidates[0]?.tableId,
+      ...referenceSource,
+      tableId: fallbackTableId,
     };
-  }, [field, fields, referenceSource]);
+  }, [field?.tableId, referenceSource]);
 
   return (
     <BaseFieldValue
