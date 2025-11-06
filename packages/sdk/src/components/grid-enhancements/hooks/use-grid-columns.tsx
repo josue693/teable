@@ -192,6 +192,7 @@ export const useCreateCellValue2GridDisplay = (
   recordEditable?: boolean
 ) => {
   const { t } = useTranslation();
+  const { resolvedTheme } = useTheme();
   const i18nMap = useAttachmentPreviewI18Map();
 
   return useCallback(
@@ -429,7 +430,7 @@ export const useCreateCellValue2GridDisplay = (
             const cv = (cellValue ?? []) as IAttachmentCellValue;
             const data = cv.map(
               ({ id, mimetype, presignedUrl, smThumbnailUrl, lgThumbnailUrl }) => {
-                const url = getFileCover(mimetype, presignedUrl);
+                const url = getFileCover(mimetype, presignedUrl, resolvedTheme as 'light' | 'dark');
                 const thumbnailUrl =
                   !rowHeight || rowHeight === RowHeightLevel.Short
                     ? smThumbnailUrl
@@ -446,6 +447,7 @@ export const useCreateCellValue2GridDisplay = (
               type: CellType.Image,
               data,
               displayData,
+              editorWidth: 462,
               onPreview: (activeId: string) => {
                 expandPreviewModal({
                   activeId,
@@ -538,7 +540,7 @@ export const useCreateCellValue2GridDisplay = (
           }
         }
       },
-    [i18nMap, recordEditable, rowHeight, t]
+    [i18nMap, recordEditable, resolvedTheme, rowHeight, t]
   );
 };
 
