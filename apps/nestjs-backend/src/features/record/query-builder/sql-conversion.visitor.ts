@@ -1,3 +1,4 @@
+/* eslint-disable regexp/no-dupe-characters-character-class */
 /* eslint-disable sonarjs/no-duplicated-branches */
 /* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable sonarjs/no-collapsible-if */
@@ -28,6 +29,8 @@ import {
   isLinkLookupOptions,
   normalizeFunctionNameAlias,
   DbFieldType,
+  extractFieldReferenceId,
+  getFieldReferenceTokenText,
 } from '@teable/core';
 import type {
   FormulaVisitor,
@@ -332,7 +335,9 @@ abstract class BaseSqlConversionVisitor<
   }
 
   visitFieldReferenceCurly(ctx: FieldReferenceCurlyContext): string {
-    const fieldId = ctx.text.slice(1, -1); // Remove curly braces
+    const normalizedFieldId = extractFieldReferenceId(ctx);
+    const rawToken = getFieldReferenceTokenText(ctx);
+    const fieldId = normalizedFieldId ?? rawToken?.slice(1, -1).trim() ?? '';
 
     const fieldInfo = this.context.table.getField(fieldId);
     if (!fieldInfo) {
@@ -525,6 +530,11 @@ abstract class BaseSqlConversionVisitor<
             coercedFalse = 'NULL';
           }
 
+          if (this.inferExpressionType(ctx) === 'string') {
+            coercedTrue = this.coerceCaseBranchToText(coercedTrue);
+            coercedFalse = this.coerceCaseBranchToText(coercedFalse);
+          }
+
           return this.formulaQuery.if(conditionSql, coercedTrue, coercedFalse);
         })
         .with(FunctionName.And, () => {
@@ -631,6 +641,12 @@ abstract class BaseSqlConversionVisitor<
 
           // Normalize blank results only after we have collected all branch types
           normalizeBlankResults();
+
+          if (this.inferExpressionType(ctx) === 'string') {
+            for (const entry of resultEntries) {
+              entry.sql = this.coerceCaseBranchToText(entry.sql);
+            }
+          }
 
           // Apply normalized SQL back to cases/default
           let resultIndex = 0;
@@ -774,7 +790,9 @@ abstract class BaseSqlConversionVisitor<
   ): string {
     let normalizedValue = value;
     if (exprCtx instanceof FieldReferenceCurlyContext) {
-      const fieldId = exprCtx.text.slice(1, -1);
+      const normalizedFieldId = extractFieldReferenceId(exprCtx);
+      const rawToken = getFieldReferenceTokenText(exprCtx);
+      const fieldId = normalizedFieldId ?? rawToken?.slice(1, -1).trim() ?? '';
       const fieldInfo = this.context.table.getField(fieldId);
       if (fieldInfo?.isMultipleCellValue && this.dialect) {
         // Normalize multi-value references (lookup, link, multi-select, etc.) into a deterministic
@@ -787,6 +805,36 @@ abstract class BaseSqlConversionVisitor<
       return this.formulaQuery.datetimeFormat(normalizedValue, "'YYYY-MM-DD'");
     }
     return normalizedValue;
+  }
+
+  private coerceCaseBranchToText(expr: string): string {
+    const trimmed = expr.trim();
+    const driver = this.context.driverClient ?? DriverClient.Pg;
+
+    // eslint-disable-next-line regexp/prefer-w
+    const nullPattern = /^NULL(?:::[a-zA-Z_][a-zA-Z0-9_\s]*)?$/i;
+    if (!trimmed || nullPattern.test(trimmed)) {
+      return driver === DriverClient.Sqlite ? 'CAST(NULL AS TEXT)' : 'NULL::text';
+    }
+
+    const isStringLiteral = trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'");
+    if (isStringLiteral) {
+      return expr;
+    }
+
+    if (driver === DriverClient.Sqlite) {
+      const upper = trimmed.toUpperCase();
+      if (upper.startsWith('CAST(') && upper.endsWith('AS TEXT)')) {
+        return expr;
+      }
+      return `CAST(${expr} AS TEXT)`;
+    }
+
+    if (/::\s*text\b/i.test(trimmed) || /\)::\s*text\b/i.test(trimmed)) {
+      return expr;
+    }
+
+    return `(${expr})::text`;
   }
 
   private normalizeTextSliceCount(valueSql?: string, exprCtx?: ExprContext): string {
@@ -863,7 +911,9 @@ abstract class BaseSqlConversionVisitor<
       return null;
     }
 
-    const fieldId = exprCtx.text.slice(1, -1);
+    const normalizedFieldId = extractFieldReferenceId(exprCtx);
+    const rawToken = getFieldReferenceTokenText(exprCtx);
+    const fieldId = normalizedFieldId ?? rawToken?.slice(1, -1).trim() ?? '';
     const fieldInfo = this.context.table?.getField(fieldId);
     if (!fieldInfo) {
       return null;
@@ -967,7 +1017,9 @@ abstract class BaseSqlConversionVisitor<
   private inferFieldReferenceType(
     ctx: FieldReferenceCurlyContext
   ): 'string' | 'number' | 'boolean' | 'datetime' | 'unknown' {
-    const fieldId = ctx.text.slice(1, -1); // Remove curly braces
+    const normalizedFieldId = extractFieldReferenceId(ctx);
+    const rawToken = getFieldReferenceTokenText(ctx);
+    const fieldId = normalizedFieldId ?? rawToken?.slice(1, -1).trim() ?? '';
     const fieldInfo = this.context.table.getField(fieldId);
 
     if (!fieldInfo) {
@@ -1253,7 +1305,9 @@ export class GeneratedColumnSqlConversionVisitor extends BaseSqlConversionVisito
   }
 
   visitFieldReferenceCurly(ctx: FieldReferenceCurlyContext): string {
-    const fieldId = ctx.text.slice(1, -1); // Remove curly braces
+    const normalizedFieldId = extractFieldReferenceId(ctx);
+    const rawToken = getFieldReferenceTokenText(ctx);
+    const fieldId = normalizedFieldId ?? rawToken?.slice(1, -1).trim() ?? '';
     this.dependencies.push(fieldId);
     return super.visitFieldReferenceCurly(ctx);
   }
@@ -1270,7 +1324,9 @@ export class SelectColumnSqlConversionVisitor extends BaseSqlConversionVisitor<I
    */
   // eslint-disable-next-line sonarjs/cognitive-complexity
   visitFieldReferenceCurly(ctx: FieldReferenceCurlyContext): string {
-    const fieldId = ctx.text.slice(1, -1); // Remove curly braces
+    const normalizedFieldId = extractFieldReferenceId(ctx);
+    const rawToken = getFieldReferenceTokenText(ctx);
+    const fieldId = normalizedFieldId ?? rawToken?.slice(1, -1).trim() ?? '';
 
     const fieldInfo = this.context.table.getField(fieldId);
     if (!fieldInfo) {
