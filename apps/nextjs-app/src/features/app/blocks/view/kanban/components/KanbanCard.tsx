@@ -1,11 +1,21 @@
 /* eslint-disable jsx-a11y/no-static-element-interactions,jsx-a11y/click-events-have-key-events */
 import type { DraggableProvided } from '@hello-pangea/dnd';
 import { FieldKeyType, type IAttachmentCellValue } from '@teable/core';
-import { ArrowDown, ArrowUp, Copy, Maximize2, Trash2 } from '@teable/icons';
+import {
+  ArrowDown,
+  ArrowUp,
+  Copy,
+  History,
+  Link,
+  Maximize2,
+  MessageSquare,
+  Trash2,
+} from '@teable/icons';
 import type { IRecordInsertOrderRo } from '@teable/openapi';
 import { createRecords, deleteRecord, duplicateRecord } from '@teable/openapi';
+import { syncCopy as copyToClipboard } from '@teable/sdk';
 import { CellValue } from '@teable/sdk/components';
-import { useFieldStaticGetter, useTableId, useViewId } from '@teable/sdk/hooks';
+import { useBaseId, useFieldStaticGetter, useTableId, useViewId } from '@teable/sdk/hooks';
 import type { Record } from '@teable/sdk/model';
 import {
   ContextMenu,
@@ -15,8 +25,11 @@ import {
   ContextMenuTrigger,
   cn,
 } from '@teable/ui-lib/shadcn';
+import { toast as sonnerToast } from '@teable/ui-lib/shadcn/ui/sonner';
+import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import { useMemo } from 'react';
+import { useEnv } from '@/features/app/hooks/useEnv';
 import { tableConfig } from '@/features/i18n/table.config';
 import { CardCarousel } from '../../gallery/components';
 import type { IKanbanContext } from '../context';
@@ -33,8 +46,11 @@ interface IKanbanCardProps {
 
 export const KanbanCard = (props: IKanbanCardProps) => {
   const { stack, card, provided, isDragging } = props;
+  const baseId = useBaseId();
   const tableId = useTableId();
   const viewId = useViewId();
+  const router = useRouter();
+  const { publicOrigin } = useEnv();
   const getFieldStatic = useFieldStaticGetter();
   const { t } = useTranslation(tableConfig.i18nNamespaces);
   const {
@@ -97,6 +113,49 @@ export const KanbanCard = (props: IKanbanCardProps) => {
     if (record != null) {
       setExpandRecordId(record.id);
     }
+  };
+
+  const onCopyRecordUrl = async () => {
+    if (!baseId || !tableId) return;
+    const recordUrl = `${publicOrigin}/base/${baseId}/${tableId}?recordId=${card.id}`;
+    await copyToClipboard(recordUrl);
+    sonnerToast.success(t('sdk:expandRecord.copy'));
+  };
+
+  const onViewRecordHistory = async () => {
+    if (!baseId || !tableId) return;
+    setExpandRecordId(card.id);
+    await router.push(
+      {
+        pathname: router.pathname,
+        query: {
+          ...router.query,
+          showHistory: true,
+        },
+      },
+      undefined,
+      {
+        shallow: true,
+      }
+    );
+  };
+
+  const onAddRecordComment = async () => {
+    if (!baseId || !tableId) return;
+    setExpandRecordId(card.id);
+    await router.push(
+      {
+        pathname: router.pathname,
+        query: {
+          ...router.query,
+          showComment: true,
+        },
+      },
+      undefined,
+      {
+        shallow: true,
+      }
+    );
   };
 
   return (
@@ -171,6 +230,19 @@ export const KanbanCard = (props: IKanbanCardProps) => {
         <ContextMenuItem onClick={onExpand}>
           <Maximize2 className="mr-2 size-4" />
           {t('table:kanban.cardMenu.expandCard')}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={onCopyRecordUrl}>
+          <Link className="mr-2 size-4" />
+          {t('sdk:expandRecord.copyRecordUrl')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onViewRecordHistory}>
+          <History className="mr-2 size-4" />
+          {t('sdk:expandRecord.viewRecordHistory')}
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onAddRecordComment}>
+          <MessageSquare className="mr-2 size-4" />
+          {t('sdk:expandRecord.addRecordComment')}
         </ContextMenuItem>
         {cardDeletable && !card.undeletable && (
           <>

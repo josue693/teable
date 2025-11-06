@@ -1,7 +1,7 @@
 import type { IRecord } from '@teable/core';
 import { deleteRecord } from '@teable/openapi';
 import { sonner } from '@teable/ui-lib';
-import { useEffect, type FC, type PropsWithChildren } from 'react';
+import { useCallback, useEffect, type FC, type PropsWithChildren } from 'react';
 import { useLocalStorage } from 'react-use';
 import { LocalStorageKeys } from '../../config/local-storage-keys';
 import { StandaloneViewProvider, ViewProvider } from '../../context';
@@ -74,21 +74,37 @@ export const ExpandRecorder = (props: IExpandRecorderProps) => {
     !!commentId || Boolean(showComment)
   );
 
+  const onRecordHistoryToggle = useCallback(
+    (visible?: boolean) => {
+      setCommentVisible(false);
+      setRecordHistoryVisible(visible ?? !recordHistoryVisible);
+    },
+    [setCommentVisible, setRecordHistoryVisible, recordHistoryVisible]
+  );
+
+  const onCommentToggle = useCallback(
+    (visible?: boolean) => {
+      setRecordHistoryVisible(false);
+      setCommentVisible(visible ?? !commentVisible);
+    },
+    [setRecordHistoryVisible, setCommentVisible, commentVisible]
+  );
+
   useEffect(() => {
     if (showHistory !== undefined) {
-      setRecordHistoryVisible(showHistory);
+      onRecordHistoryToggle(showHistory);
     }
-  }, [showHistory, setRecordHistoryVisible]);
+  }, [showHistory, onRecordHistoryToggle]);
 
   useEffect(() => {
     if (commentId) {
-      setCommentVisible(true);
+      onCommentToggle(true);
       return;
     }
     if (showComment !== undefined) {
-      setCommentVisible(showComment);
+      onCommentToggle(showComment);
     }
-  }, [showComment, commentId, setCommentVisible]);
+  }, [showComment, commentId, onCommentToggle]);
 
   if (!recordId) {
     return <></>;
@@ -115,16 +131,6 @@ export const ExpandRecorder = (props: IExpandRecorderProps) => {
     const url = window.location.href;
     syncCopy(url);
     toast.success(t('expandRecord.copy'));
-  };
-
-  const onRecordHistoryToggle = () => {
-    setCommentVisible(false);
-    setRecordHistoryVisible(!recordHistoryVisible);
-  };
-
-  const onCommentToggle = () => {
-    setRecordHistoryVisible(false);
-    setCommentVisible(!commentVisible);
   };
 
   return (
