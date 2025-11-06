@@ -273,6 +273,10 @@
     "link": {
       "oneWay": "Unidireccional",
       "twoWay": "Bidireccional"
+    },
+    "button": {
+      "runAutomation": "Ejecutar automatización",
+      "runAutomationConfirmTip": "Está a punto de ejecutar {{name}}, ¿confirma si desea continuar?"
     }
   },
   "formula": {

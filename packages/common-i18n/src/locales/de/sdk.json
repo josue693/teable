@@ -337,6 +337,10 @@
     "link": {
       "oneWay": "Einfach",
       "twoWay": "Doppelt"
+    },
+    "button": {
+      "runAutomation": "Automatisierung ausführen",
+      "runAutomationConfirmTip": "Sie sind dabei {{name}} auszuführen, bitte bestätigen Sie, ob Sie fortfahren möchten?"
     }
   },
   "permission": {

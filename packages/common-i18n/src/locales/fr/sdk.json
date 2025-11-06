@@ -312,6 +312,10 @@
     "link": {
       "oneWay": "Unidirectionnel",
       "twoWay": "Bidirectionnel"
+    },
+    "button": {
+      "runAutomation": "Exécuter l'automatisation",
+      "runAutomationConfirmTip": "Vous êtes sur le point d'exécuter {{name}}, veuillez confirmer si vous souhaitez continuer ?"
     }
   },
   "spaceRole": {

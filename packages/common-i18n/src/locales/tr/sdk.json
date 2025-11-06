@@ -328,6 +328,10 @@
     "link": {
       "oneWay": "Tek yönlü",
       "twoWay": "Çift yönlü"
+    },
+    "button": {
+      "runAutomation": "Otomasyonu çalıştır",
+      "runAutomationConfirmTip": "{{name}} çalıştırmak üzeresiniz, devam etmek istediğinizi onaylayın?"
     }
   },
   "permission": {

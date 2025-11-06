@@ -337,6 +337,10 @@
     "link": {
       "oneWay": "Unidirezionale",
       "twoWay": "Bidirezionale"
+    },
+    "button": {
+      "runAutomation": "Esegui automazione",
+      "runAutomationConfirmTip": "Stai per eseguire {{name}}, confermi di voler continuare?"
     }
   },
   "permission": {

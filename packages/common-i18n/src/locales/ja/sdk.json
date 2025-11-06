@@ -315,6 +315,10 @@
     "link": {
       "oneWay": "一方向",
       "twoWay": "双方向"
+    },
+    "button": {
+      "runAutomation": "オートメーションを実行",
+      "runAutomationConfirmTip": "{{name}} を実行しようとしています。続行してもよろしいですか？"
     }
   },
   "permission": {
