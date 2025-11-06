@@ -22,6 +22,7 @@ import {
   type LastModifiedByFieldCore,
   type ButtonFieldCore,
   type INumberFormatting,
+  type IDatetimeFormatting,
 } from '@teable/core';
 import { match, P } from 'ts-pattern';
 import type { IRecordQueryDialectProvider } from './record-query-dialect.interface';
@@ -65,6 +66,20 @@ export class FieldFormattingVisitor implements IFieldVisitor<string> {
   }
 
   /**
+   * Apply date/time formatting to field expression
+   */
+  private applyDateFormatting(formatting: IDatetimeFormatting): string {
+    return this.dialect.formatDate(this.fieldExpression, formatting);
+  }
+
+  /**
+   * Format multiple datetime values contained in a JSON array
+   */
+  private formatMultipleDateValues(formatting: IDatetimeFormatting): string {
+    return this.dialect.formatDateArray(this.fieldExpression, formatting);
+  }
+
+  /**
    * Format multiple string values (like multiple select) to comma-separated string
    * Also handles link field arrays with objects containing id and title
    */
@@ -96,7 +111,12 @@ export class FieldFormattingVisitor implements IFieldVisitor<string> {
   }
 
   visitDateField(_field: DateFieldCore): string {
-    // Date fields are stored as ISO strings, return as-is
+    if (_field.options?.formatting) {
+      if (_field.isMultipleCellValue) {
+        return this.formatMultipleDateValues(_field.options.formatting);
+      }
+      return this.applyDateFormatting(_field.options.formatting);
+    }
     return this.fieldExpression;
   }
 
@@ -159,11 +179,16 @@ export class FieldFormattingVisitor implements IFieldVisitor<string> {
         { cellValueType: CellValueType.Number, formatting: P.not(P.nullish) },
         ({ formatting }) => this.applyNumberFormatting(formatting as INumberFormatting)
       )
-      .with({ cellValueType: CellValueType.DateTime, formatting: P.not(P.nullish) }, () => {
-        // For datetime formatting, we would need to implement date formatting logic
-        // For now, return as-is since datetime fields are typically stored as ISO strings
-        return this.fieldExpression;
-      })
+      .with(
+        { cellValueType: CellValueType.DateTime, formatting: P.not(P.nullish) },
+        ({ formatting, isMultipleCellValue }) => {
+          const datetimeFormatting = formatting as IDatetimeFormatting;
+          if (isMultipleCellValue) {
+            return this.formatMultipleDateValues(datetimeFormatting);
+          }
+          return this.applyDateFormatting(datetimeFormatting);
+        }
+      )
       .with({ cellValueType: CellValueType.String, isMultipleCellValue: true }, () => {
         // For multiple-value string fields (like multiple select), convert array to comma-separated string
         return this.formatMultipleStringValues();

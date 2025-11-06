@@ -1,4 +1,9 @@
-import type { INumberFormatting, ICurrencyFormatting, FieldCore } from '@teable/core';
+import type {
+  INumberFormatting,
+  ICurrencyFormatting,
+  FieldCore,
+  IDatetimeFormatting,
+} from '@teable/core';
 import { DriverClient, FieldType, Relationship, DbFieldType } from '@teable/core';
 import type { Knex } from 'knex';
 import type { IRecordQueryDialectProvider } from '../record-query-dialect.interface';
@@ -63,6 +68,14 @@ export class SqliteRecordQueryDialect implements IRecordQueryDialectProvider {
 
   formatRating(expr: string): string {
     return `CASE WHEN (${expr} = CAST(${expr} AS INTEGER)) THEN CAST(CAST(${expr} AS INTEGER) AS TEXT) ELSE CAST(${expr} AS TEXT) END`;
+  }
+
+  formatDate(expr: string, _formatting: IDatetimeFormatting): string {
+    return `CAST(${expr} AS TEXT)`;
+  }
+
+  formatDateArray(expr: string, _formatting: IDatetimeFormatting): string {
+    return this.formatStringArray(expr);
   }
 
   coerceToNumericForCompare(expr: string): string {

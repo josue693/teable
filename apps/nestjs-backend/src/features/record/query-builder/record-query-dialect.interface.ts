@@ -4,6 +4,7 @@ import type {
   INumberFormatting,
   Relationship,
   DbFieldType,
+  IDatetimeFormatting,
 } from '@teable/core';
 import type { Knex } from 'knex';
 
@@ -90,6 +91,17 @@ export interface IRecordQueryDialectProvider {
    * ```
    */
   formatRating(expr: string): string;
+
+  /**
+   * Format a datetime SQL expression according to field formatting (date preset, time preset, timezone).
+   * Implementations should mirror {@link formatDateToString} semantics.
+   */
+  formatDate(expr: string, formatting: IDatetimeFormatting): string;
+
+  /**
+   * Format each element of a JSON array of datetimes according to field formatting and join with comma + space.
+   */
+  formatDateArray(expr: string, formatting: IDatetimeFormatting): string;
 
   // Safe coercions used in comparisons
 
