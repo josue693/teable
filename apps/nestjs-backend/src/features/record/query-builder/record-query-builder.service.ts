@@ -37,7 +37,8 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
   private async createQueryBuilderFromTable(
     from: string,
     tableId: string,
-    projection?: string[]
+    projection?: string[],
+    baseBuilder?: Knex.QueryBuilder
   ): Promise<{
     qb: Knex.QueryBuilder;
     alias: string;
@@ -51,7 +52,8 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     );
     const table = tables.mustGetEntryTable();
     const mainTableAlias = getTableAliasFromTable(table);
-    const qb = this.knex.from({ [mainTableAlias]: from });
+    const qbSource = baseBuilder ?? this.knex.queryBuilder();
+    const qb = qbSource.from({ [mainTableAlias]: from });
 
     const state: IMutableQueryBuilderState = new RecordQueryBuilderManager('table');
     state.setMainTableAlias(mainTableAlias);
@@ -63,7 +65,11 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     return { qb, alias: mainTableAlias, tables, table, state };
   }
 
-  private async createQueryBuilderFromTableCache(tableId: string): Promise<{
+  private async createQueryBuilderFromTableCache(
+    tableId: string,
+    from: string,
+    baseBuilder?: Knex.QueryBuilder
+  ): Promise<{
     qb: Knex.QueryBuilder;
     alias: string;
     table: TableDomain;
@@ -71,7 +77,8 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
   }> {
     const table = await this.tableDomainQueryService.getTableDomainById(tableId);
     const mainTableAlias = getTableAliasFromTable(table);
-    const qb = this.knex.from({ [mainTableAlias]: table.dbTableName });
+    const qbSource = baseBuilder ?? this.knex.queryBuilder();
+    const qb = qbSource.from({ [mainTableAlias]: from });
 
     const state = new RecordQueryBuilderManager('tableCache');
     state.setMainTableAlias(mainTableAlias);
@@ -91,6 +98,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     state: IMutableQueryBuilderState;
   }> {
     const useQueryModel = options.useQueryModel ?? false;
+    const baseBuilder = options.builder;
 
     let builder:
       | {
@@ -104,13 +112,23 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
 
     if (useQueryModel) {
       try {
-        builder = await this.createQueryBuilderFromTableCache(tableId);
+        builder = await this.createQueryBuilderFromTableCache(tableId, from, baseBuilder);
       } catch (error) {
         this.logger.error(`Failed to create query builder from view: ${error}, use table instead`);
-        builder = await this.createQueryBuilderFromTable(from, tableId, options.projection);
+        builder = await this.createQueryBuilderFromTable(
+          from,
+          tableId,
+          options.projection,
+          baseBuilder
+        );
       }
     } else {
-      builder = await this.createQueryBuilderFromTable(from, tableId, options.projection);
+      builder = await this.createQueryBuilderFromTable(
+        from,
+        tableId,
+        options.projection,
+        baseBuilder
+      );
     }
 
     const { qb, alias, table, state } = builder;
@@ -151,6 +169,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
   ): Promise<{ qb: Knex.QueryBuilder; alias: string; selectionMap: IReadonlyRecordSelectionMap }> {
     const { tableId, filter, sort, currentUserId, restrictRecordIds } = options;
     const { qb, alias, table, state } = await this.createQueryBuilder(from, tableId, {
+      builder: options.builder,
       useQueryModel: options.useQueryModel,
       projection: options.projection,
       limit: options.limit,
@@ -176,7 +195,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
 
     const selectionMap = state.getSelectionMap();
     if (filter) {
-      this.buildFilter(qb, table, filter, selectionMap, currentUserId);
+      this.buildFilter(qb, table, filter, selectionMap, currentUserId, alias);
     }
 
     if (sort) {
@@ -200,6 +219,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       restrictRecordIds,
     } = options;
     const { qb, table, alias, state } = await this.createQueryBuilder(from, tableId, {
+      builder: options.builder,
       useQueryModel,
       projection: options.projection,
       filter,
@@ -211,7 +231,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     const selectionMap = state.getSelectionMap();
 
     if (filter) {
-      this.buildFilter(qb, table, filter, selectionMap, currentUserId);
+      this.buildFilter(qb, table, filter, selectionMap, currentUserId, alias);
     }
 
     const fieldMap = table.fieldList.reduce(
@@ -394,7 +414,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       .from({ [alias]: originalSource });
 
     if (applyPagination && filter) {
-      this.buildFilter(baseBuilder, table, filter, baseSelectionMap!, currentUserId);
+      this.buildFilter(baseBuilder, table, filter, baseSelectionMap!, currentUserId, alias);
     }
 
     if (applyPagination && sort && sort.length) {
@@ -568,22 +588,34 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     table: TableDomain,
     filter: IFilter,
     selectionMap: IReadonlyRecordSelectionMap,
-    currentUserId?: string
+    currentUserId: string | undefined,
+    mainAlias?: string
   ): this {
-    // Build field map only from currently selected fields to respect field-level permissions
-    // and support both id and name lookups in filters.
-    const allowedIds = new Set<string>(Array.from(selectionMap.keys()));
+    // Allow filters to reference fields even if they are not part of the final projection
+    // so that permission-hidden fields can still participate in WHERE clauses.
     const map = table.fieldList.reduce(
       (acc, field) => {
-        if (!allowedIds.has(field.id)) return acc;
         acc[field.id] = field;
         acc[field.name] = field;
         return acc;
       },
       {} as Record<string, FieldCore>
     );
+    const augmentedSelection = new Map(selectionMap);
+    if (mainAlias) {
+      table.fieldList.forEach((field) => {
+        const qualified = this.knex.ref(`${mainAlias}.${field.dbFieldName}`).toQuery();
+        augmentedSelection.set(field.id, qualified);
+      });
+    }
     this.dbProvider
-      .filterQuery(qb, map, filter, { withUserId: currentUserId }, { selectionMap })
+      .filterQuery(
+        qb,
+        map,
+        filter,
+        { withUserId: currentUserId },
+        { selectionMap: augmentedSelection }
+      )
       .appendQueryBuilder();
     return this;
   }

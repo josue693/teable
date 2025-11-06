@@ -11,6 +11,7 @@ import type {
   IColumnMeta,
   IExtraResult,
   IFilter,
+  IFilterItem,
   IFilterSet,
   IGridColumnMeta,
   IGroup,
@@ -393,10 +394,15 @@ export class RecordService {
     projection?: string[]
   ) {
     if (filter || orderBy?.length || groupBy?.length || search) {
-      // The field Meta is needed to construct the filter if it exists
-      const fields = await this.getFieldsByProjection(tableId, this.convertProjection(projection));
+      // Always load full field metadata so filters can reference denied fields for read,
+      // while projection limits applied later keep them hidden from results.
+      const fields = await this.getFieldsByProjection(tableId, undefined);
+      const allowedSet = projection?.length ? new Set(projection) : undefined;
       return fields.reduce(
         (map, field) => {
+          if (allowedSet && !allowedSet.has(field.id)) {
+            return map;
+          }
           map[field.id] = field;
           map[field.name] = field;
           return map;
@@ -404,6 +410,71 @@ export class RecordService {
         {} as Record<string, IFieldInstance>
       );
     }
+  }
+
+  private async sanitizeFilterByEnabledFields(
+    tableId: string,
+    filter: IFilter | undefined,
+    enabledFieldIds?: string[]
+  ): Promise<IFilter | undefined> {
+    if (!filter || !enabledFieldIds?.length) {
+      return filter;
+    }
+    const fields = await this.dataLoaderService.field.load(tableId);
+    const keyToId = new Map<string, string>();
+    for (const field of fields) {
+      keyToId.set(field.id, field.id);
+      keyToId.set(field.name, field.id);
+      keyToId.set(field.dbFieldName, field.id);
+    }
+    const allowed = new Set(enabledFieldIds);
+
+    const sanitize = (target: IFilter): IFilter | null => {
+      if (!target) {
+        return null;
+      }
+
+      const isFilterGroup = (value: unknown): value is IFilter =>
+        !!value && typeof value === 'object' && 'filterSet' in value;
+
+      const isFilterLeaf = (value: unknown): value is IFilterItem =>
+        !!value && typeof value === 'object' && 'fieldId' in value;
+
+      const sanitizedSet: NonNullable<IFilter>['filterSet'] = [];
+      for (const item of target.filterSet) {
+        if (isFilterGroup(item)) {
+          const nested = sanitize(item);
+          if (nested) {
+            sanitizedSet.push(nested);
+          }
+          continue;
+        }
+
+        if (!isFilterLeaf(item)) {
+          continue;
+        }
+
+        const candidateId = keyToId.get(item.fieldId) ?? item.fieldId;
+        if (!allowed.has(candidateId)) {
+          continue;
+        }
+        sanitizedSet.push({
+          ...item,
+          fieldId: candidateId,
+        });
+      }
+
+      if (sanitizedSet.length === 0) {
+        return null;
+      }
+      return {
+        ...target,
+        filterSet: sanitizedSet,
+      };
+    };
+
+    const sanitized = sanitize(filter);
+    return sanitized ?? undefined;
   }
 
   private async getTinyView(tableId: string, viewId?: string) {
@@ -478,11 +549,10 @@ export class RecordService {
       }
     );
 
-    const queryBuilder = builder.from(viewCte ?? dbTableName);
-
     const view = await this.getTinyView(tableId, viewId);
 
-    const filter = mergeWithDefaultFilter(view?.filter, extraFilter);
+    const mergedFilter = mergeWithDefaultFilter(view?.filter, extraFilter);
+    const filter = await this.sanitizeFilterByEnabledFields(tableId, mergedFilter, enabledFieldIds);
     const orderBy = mergeWithDefaultSort(view?.sort, extraOrderBy);
     const groupBy = parseGroup(extraGroupBy);
     const fieldMap = await this.getNecessaryFieldMap(
@@ -497,7 +567,7 @@ export class RecordService {
     const search = originSearch ? this.parseSearch(originSearch, fieldMap) : undefined;
 
     return {
-      queryBuilder,
+      permissionBuilder: builder,
       dbTableName,
       viewCte,
       filter,
@@ -505,6 +575,7 @@ export class RecordService {
       orderBy,
       groupBy,
       fieldMap,
+      enabledFieldIds,
     };
   }
 
@@ -556,8 +627,17 @@ export class RecordService {
     useQueryModel = false
   ) {
     // Prepare the base query builder, filtering conditions, sorting rules, grouping rules and field mapping
-    const { dbTableName, viewCte, filter, search, orderBy, groupBy, fieldMap } =
-      await this.prepareQuery(tableId, query);
+    const {
+      permissionBuilder,
+      dbTableName,
+      viewCte,
+      filter,
+      search,
+      orderBy,
+      groupBy,
+      fieldMap,
+      enabledFieldIds,
+    } = await this.prepareQuery(tableId, query);
 
     const basicSortIndex = await this.getBasicOrderIndexField(dbTableName, query.viewId);
 
@@ -568,6 +648,12 @@ export class RecordService {
 
     // Retrieve the current user's ID to build user-related query conditions
     const currentUserId = this.cls.get('user.id');
+    const projectionIds = fieldMap
+      ? Array.from(new Set(Object.values(fieldMap).map((f) => f.id))).filter(
+          (id) => !enabledFieldIds || enabledFieldIds.includes(id)
+        )
+      : [];
+
     const { qb, alias, selectionMap } = await this.recordQueryBuilder.createRecordQueryBuilder(
       viewCte ?? dbTableName,
       {
@@ -577,27 +663,16 @@ export class RecordService {
         currentUserId,
         sort: [...(groupBy ?? []), ...(orderBy ?? [])],
         // Only select fields required by filter/order/search to avoid touching unrelated columns
-        projection: fieldMap ? Object.values(fieldMap).map((f) => f.id) : [],
+        projection: projectionIds,
         useQueryModel,
         limit: query.take,
         offset: query.skip,
         hasSearch: Boolean(search?.[2]),
         defaultOrderField: basicSortIndex,
         restrictRecordIds,
+        builder: permissionBuilder,
       }
     );
-
-    // Ensure permission CTE is attached to the final query builder when referencing it via FROM.
-    // The initial wrapView done in prepareQuery computed viewCte and enabledFieldIds for fieldMap,
-    // but the actual builder used below is created anew by recordQueryBuilder. Attach the CTE here
-    // so that `FROM view_cte_tmp` resolves correctly in the generated SQL.
-    const docIdWrap = await this.recordPermissionService.wrapView(tableId, qb, {
-      viewId: query.viewId,
-      keepPrimaryKey: Boolean(query.filterLinkCellSelected),
-    });
-    if (docIdWrap.viewCte) {
-      qb.from({ [alias]: docIdWrap.viewCte });
-    }
 
     if (query.filterLinkCellSelected && query.filterLinkCellCandidate) {
       throw new BadRequestException(
@@ -626,7 +701,12 @@ export class RecordService {
     }
 
     if (search && search[2] && fieldMap) {
-      const searchFields = await this.getSearchFields(fieldMap, search, query?.viewId);
+      const searchFields = await this.getSearchFields(
+        fieldMap,
+        search,
+        query?.viewId,
+        enabledFieldIds
+      );
       const tableIndex = await this.tableIndexService.getActivatedTableIndexes(tableId);
       qb.where((builder) => {
         this.dbProvider.searchQuery(builder, searchFields, tableIndex, search, { selectionMap });
@@ -1386,7 +1466,8 @@ export class RecordService {
     const { tableId, recordIds, projection, fieldKeyType, cellFormat } = query;
     const fields = await this.getFieldsByProjection(tableId, projection, fieldKeyType);
     const fieldIds = fields.map((f) => f.id);
-    const { qb: queryBuilder, alias } = await this.recordQueryBuilder.createRecordQueryBuilder(
+
+    const { qb: queryBuilder } = await this.recordQueryBuilder.createRecordQueryBuilder(
       viewQueryDbTableName,
       {
         tableId,
@@ -1394,17 +1475,10 @@ export class RecordService {
         useQueryModel: query.useQueryModel,
         projection: fieldIds,
         restrictRecordIds: recordIds,
+        builder,
       }
     );
 
-    // Attach permission CTE and switch FROM to the CTE if available so masking applies.
-    const wrap = await this.recordPermissionService.wrapView(tableId, queryBuilder, {
-      keepPrimaryKey: true,
-    });
-    if (wrap.viewCte) {
-      // Preserve the alias used by the query builder to keep selected columns valid.
-      queryBuilder.from({ [alias]: wrap.viewCte });
-    }
     const nativeQuery = queryBuilder.whereIn('__id', recordIds).toQuery();
 
     this.logger.debug('getSnapshotBulkInner query %s', nativeQuery);
@@ -2068,9 +2142,18 @@ export class RecordService {
     useQueryModel = false
   ) {
     const withUserId = this.cls.get('user.id');
+    const wrap = await this.recordPermissionService.wrapView(
+      tableId,
+      this.knex.queryBuilder(),
+      viewId
+        ? {
+            viewId,
+          }
+        : undefined
+    );
 
     const { qb, selectionMap } = await this.recordQueryBuilder.createRecordAggregateBuilder(
-      dbTableName,
+      wrap.viewCte ?? dbTableName,
       {
         tableId,
         aggregationFields: [],
@@ -2078,11 +2161,17 @@ export class RecordService {
         filter,
         currentUserId: withUserId,
         useQueryModel,
+        builder: wrap.builder,
       }
     );
 
     if (search && search[2]) {
-      const searchFields = await this.getSearchFields(fieldInstanceMap, search, viewId);
+      const searchFields = await this.getSearchFields(
+        fieldInstanceMap,
+        search,
+        viewId,
+        wrap.enabledFieldIds
+      );
       const tableIndex = await this.tableIndexService.getActivatedTableIndexes(tableId);
       qb.where((builder) => {
         this.dbProvider.searchQuery(builder, searchFields, tableIndex, search, { selectionMap });
@@ -2121,14 +2210,14 @@ export class RecordService {
 
     const viewId = ignoreViewQuery ? undefined : query?.viewId;
     const viewRaw = await this.getTinyView(tableId, viewId);
-    const { viewCte, enabledFieldIds } = await this.recordPermissionService.wrapView(
-      tableId,
-      this.knex.queryBuilder(),
-      {
-        keepPrimaryKey: Boolean(query?.filterLinkCellSelected),
-        viewId,
-      }
-    );
+    const {
+      viewCte,
+      builder: permissionBuilder,
+      enabledFieldIds,
+    } = await this.recordPermissionService.wrapView(tableId, this.knex.queryBuilder(), {
+      keepPrimaryKey: Boolean(query?.filterLinkCellSelected),
+      viewId,
+    });
     const fieldInstanceMap = (await this.getNecessaryFieldMap(
       tableId,
       filter,
@@ -2137,12 +2226,18 @@ export class RecordService {
       search,
       enabledFieldIds
     ))!;
-    const groupBy = fullGroupBy.filter((item) => fieldInstanceMap[item.fieldId]);
+    const enabledFieldIdSet = enabledFieldIds ? new Set(enabledFieldIds) : undefined;
+    const groupBy = fullGroupBy.filter(
+      (item) =>
+        fieldInstanceMap[item.fieldId] &&
+        (!enabledFieldIdSet || enabledFieldIdSet.has(item.fieldId))
+    );
 
     if (!groupBy?.length) {
       return {
         groupPoints,
         filter,
+        builder: permissionBuilder,
       };
     }
 
@@ -2169,13 +2264,8 @@ export class RecordService {
         groupBy,
         currentUserId: withUserId,
         useQueryModel: shouldUseQueryModel,
+        builder: permissionBuilder,
       });
-
-    // Attach permission CTE to the aggregate query when using the permission view.
-    await this.recordPermissionService.wrapView(tableId, queryBuilder, {
-      viewId,
-      keepPrimaryKey: Boolean(query?.filterLinkCellSelected),
-    });
 
     if (search && search[2]) {
       const searchFields = await this.getSearchFields(fieldInstanceMap, search, viewId);
@@ -2225,7 +2315,12 @@ export class RecordService {
       collapsedGroupIds,
     });
 
-    return { groupPoints, allGroupHeaderRefs, filter: mergeFilter(filter, filterWithCollapsed) };
+    return {
+      groupPoints,
+      allGroupHeaderRefs,
+      filter: mergeFilter(filter, filterWithCollapsed),
+      builder: permissionBuilder,
+    };
   }
 
   async getRecordStatus(
