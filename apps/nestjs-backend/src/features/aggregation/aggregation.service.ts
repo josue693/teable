@@ -252,24 +252,22 @@ export class AggregationService implements IAggregationService {
       allowedFieldIds,
     });
 
-    // Build aggregate query first, then attach permission CTE on the same builder
-    const { qb, alias } = await this.recordQueryBuilder.createRecordAggregateBuilder(dbTableName, {
-      tableId,
-      viewId,
-      filter,
-      aggregationFields: statisticFields,
-      groupBy,
-      currentUserId: withUserId,
-      // Limit link/lookup CTEs to enabled fields so denied fields resolve to NULL
-      projection,
-      useQueryModel,
-    });
-
-    // Attach permission CTE and switch FROM to the CTE alias
-    const wrap = await this.recordPermissionService.wrapView(tableId, qb, { viewId });
-    if (wrap.viewCte) {
-      qb.from({ [alias]: wrap.viewCte });
-    }
+    // Build aggregate query using the permission-aware builder so the CTE is preserved
+    const { qb } = await this.recordQueryBuilder.createRecordAggregateBuilder(
+      permissionProbe.viewCte ?? dbTableName,
+      {
+        tableId,
+        viewId,
+        filter,
+        aggregationFields: statisticFields,
+        groupBy,
+        currentUserId: withUserId,
+        // Limit link/lookup CTEs to enabled fields so denied fields resolve to NULL
+        projection,
+        useQueryModel,
+        builder: permissionProbe.builder,
+      }
+    );
 
     const aggSql = qb.toQuery();
     this.logger.debug('handleAggregation aggSql: %s', aggSql);
@@ -508,8 +506,13 @@ export class AggregationService implements IAggregationService {
     const restrictRecordIds =
       selectedRecordIds && !filterLinkCellCandidate ? selectedRecordIds : undefined;
 
+    const wrap = await this.recordPermissionService.wrapView(tableId, this.knex.queryBuilder(), {
+      viewId,
+      keepPrimaryKey: Boolean(filterLinkCellSelected),
+    });
+
     const { qb, alias, selectionMap } = await this.recordQueryBuilder.createRecordAggregateBuilder(
-      dbTableName,
+      wrap.viewCte ?? dbTableName,
       {
         tableId,
         viewId,
@@ -524,17 +527,9 @@ export class AggregationService implements IAggregationService {
         ],
         restrictRecordIds,
         useQueryModel: true,
+        builder: wrap.builder,
       }
     );
-
-    // Ensure the CTE is attached to this builder and FROM references the CTE alias
-    const wrap = await this.recordPermissionService.wrapView(tableId, qb, {
-      viewId,
-      keepPrimaryKey: Boolean(filterLinkCellSelected),
-    });
-    if (wrap.viewCte) {
-      qb.from({ [alias]: wrap.viewCte });
-    }
 
     if (search && search[2]) {
       const searchFields = await this.recordService.getSearchFields(

@@ -1286,7 +1286,7 @@ describe('OpenAPI formula (e2e)', () => {
       }
     );
 
-    it.only('should evaluate nested FIND formula on select field consistently', async () => {
+    it('should evaluate nested FIND formula on select field consistently', async () => {
       const assignmentField = await createField(table1Id, {
         name: '归属/对接',
         type: FieldType.SingleSelect,

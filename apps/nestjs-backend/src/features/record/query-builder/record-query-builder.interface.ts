@@ -13,6 +13,8 @@ export interface IPrepareViewParams {
 export interface ICreateRecordQueryBuilderOptions {
   /** The table ID or database table name */
   tableId: string;
+  /** Optional preconfigured query builder (e.g., with permission CTEs attached) */
+  builder?: Knex.QueryBuilder;
   /** Optional view ID for filtering */
   viewId?: string;
   /** Optional filter */
@@ -55,6 +57,8 @@ export interface ICreateRecordQueryBuilderOptions {
 export interface ICreateRecordAggregateBuilderOptions {
   /** The table ID or database table name */
   tableId: string;
+  /** Optional preconfigured query builder (e.g., with permission CTEs attached) */
+  builder?: Knex.QueryBuilder;
   /** Optional view ID for filtering */
   viewId?: string;
   /** Optional filter */
