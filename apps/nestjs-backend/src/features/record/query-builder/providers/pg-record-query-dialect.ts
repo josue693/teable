@@ -1,5 +1,18 @@
-import { DriverClient, FieldType, CellValueType, DbFieldType } from '@teable/core';
-import type { INumberFormatting, ICurrencyFormatting, Relationship, FieldCore } from '@teable/core';
+import {
+  DriverClient,
+  FieldType,
+  CellValueType,
+  DbFieldType,
+  DateFormattingPreset,
+  TimeFormatting,
+} from '@teable/core';
+import type {
+  INumberFormatting,
+  ICurrencyFormatting,
+  Relationship,
+  FieldCore,
+  IDatetimeFormatting,
+} from '@teable/core';
 import type { Knex } from 'knex';
 import type { IRecordQueryDialectProvider } from '../record-query-dialect.interface';
 
@@ -90,6 +103,78 @@ export class PgRecordQueryDialect implements IRecordQueryDialectProvider {
 
   formatRating(expr: string): string {
     return `CASE WHEN (${expr} = ROUND(${expr})) THEN ROUND(${expr})::TEXT ELSE (${expr})::TEXT END`;
+  }
+
+  private escapeLiteral(value: string): string {
+    return value.replace(/'/g, "''");
+  }
+
+  private getDatePattern(date: string): string {
+    switch (date as DateFormattingPreset) {
+      case DateFormattingPreset.US:
+        return 'FMMM/FMDD/YYYY';
+      case DateFormattingPreset.European:
+        return 'FMDD/FMMM/YYYY';
+      case DateFormattingPreset.Asian:
+        return 'YYYY/MM/DD';
+      case DateFormattingPreset.ISO:
+        return 'YYYY-MM-DD';
+      case DateFormattingPreset.YM:
+        return 'YYYY-MM';
+      case DateFormattingPreset.MD:
+        return 'MM-DD';
+      case DateFormattingPreset.Y:
+        return 'YYYY';
+      case DateFormattingPreset.M:
+        return 'MM';
+      case DateFormattingPreset.D:
+        return 'DD';
+      default:
+        return 'YYYY-MM-DD';
+    }
+  }
+
+  private getTimePattern(time: TimeFormatting | undefined): string | null {
+    switch (time) {
+      case TimeFormatting.Hour24:
+        return 'HH24:MI';
+      case TimeFormatting.Hour12:
+        return 'HH12:MI AM';
+      default:
+        return null;
+    }
+  }
+
+  private buildDateFormattingExpression(
+    valueExpression: string,
+    formatting: IDatetimeFormatting
+  ): string {
+    const { date, time, timeZone } = formatting;
+    const timePattern = this.getTimePattern(time ?? TimeFormatting.None);
+    const datePattern = this.getDatePattern(date);
+    const pattern = timePattern ? `${datePattern} ${timePattern}` : datePattern;
+    const tz = this.escapeLiteral(timeZone ?? 'UTC');
+    const patternLiteral = this.escapeLiteral(pattern);
+    return `TO_CHAR(TIMEZONE('${tz}', (${valueExpression})::timestamptz), '${patternLiteral}')`;
+  }
+
+  formatDate(expr: string, formatting: IDatetimeFormatting): string {
+    return this.buildDateFormattingExpression(expr, formatting);
+  }
+
+  formatDateArray(expr: string, formatting: IDatetimeFormatting): string {
+    const elementExpr = this.buildDateFormattingExpression("(elem #>> '{}')", formatting);
+    return `(
+        SELECT string_agg(
+          CASE
+            WHEN (elem #>> '{}') IS NULL THEN NULL
+            ELSE ${elementExpr}
+          END,
+          ', '
+          ORDER BY ord
+        )
+        FROM jsonb_array_elements(COALESCE((${expr})::jsonb, '[]'::jsonb)) WITH ORDINALITY AS t(elem, ord)
+      )`;
   }
 
   private hasWrappingParentheses(expr: string): boolean {

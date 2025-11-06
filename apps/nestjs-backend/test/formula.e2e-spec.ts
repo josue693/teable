@@ -3897,6 +3897,175 @@ describe('OpenAPI formula (e2e)', () => {
     expect(record1.fields[formulaField.name]).toEqual('text');
   });
 
+  it('should format link titles using foreign field formatting', async () => {
+    const foreignDate = await createTable(baseId, {
+      name: 'link-format-date-foreign',
+      fields: [
+        {
+          name: 'Due Date',
+          type: FieldType.Date,
+          options: {
+            formatting: {
+              date: DateFormattingPreset.Asian,
+              time: TimeFormatting.None,
+              timeZone: 'UTC',
+            },
+          },
+        } as IFieldRo,
+      ],
+      records: [
+        {
+          fields: {
+            'Due Date': '2024-05-06T01:23:45.000Z',
+          },
+        },
+        {
+          fields: {
+            'Due Date': '2024-05-07T09:00:00.000Z',
+          },
+        },
+      ],
+    });
+
+    const foreignNumber = await createTable(baseId, {
+      name: 'link-format-number-foreign',
+      fields: [
+        {
+          name: 'Completion',
+          type: FieldType.Number,
+          options: {
+            formatting: {
+              type: NumberFormattingType.Percent,
+              precision: 1,
+            },
+          },
+        } as IFieldRo,
+      ],
+      records: [
+        {
+          fields: {
+            Completion: 0.321,
+          },
+        },
+        {
+          fields: {
+            Completion: 0.875,
+          },
+        },
+      ],
+    });
+
+    let host: ITableFullVo | undefined;
+    try {
+      host = await createTable(baseId, {
+        name: 'link-format-host',
+        fields: [{ name: 'Label', type: FieldType.SingleLineText } as IFieldRo],
+        records: [{ fields: { Label: 'host row' } }],
+      });
+
+      const dateLinkField = await createField(host.id, {
+        name: 'Date Link',
+        type: FieldType.Link,
+        options: {
+          foreignTableId: foreignDate.id,
+          relationship: Relationship.ManyOne,
+        } as ILinkFieldOptionsRo,
+      } as IFieldRo);
+
+      const dateMultiLinkField = await createField(host.id, {
+        name: 'Date Links',
+        type: FieldType.Link,
+        options: {
+          foreignTableId: foreignDate.id,
+          relationship: Relationship.ManyMany,
+        } as ILinkFieldOptionsRo,
+      } as IFieldRo);
+
+      const numberLinkField = await createField(host.id, {
+        name: 'Number Link',
+        type: FieldType.Link,
+        options: {
+          foreignTableId: foreignNumber.id,
+          relationship: Relationship.ManyOne,
+        } as ILinkFieldOptionsRo,
+      } as IFieldRo);
+
+      const numberMultiLinkField = await createField(host.id, {
+        name: 'Number Links',
+        type: FieldType.Link,
+        options: {
+          foreignTableId: foreignNumber.id,
+          relationship: Relationship.ManyMany,
+        } as ILinkFieldOptionsRo,
+      } as IFieldRo);
+
+      const hostRecordId = host.records[0].id;
+
+      await updateRecordByApi(host.id, hostRecordId, dateLinkField.id, {
+        id: foreignDate.records[0].id,
+      });
+
+      await updateRecordByApi(
+        host.id,
+        hostRecordId,
+        dateMultiLinkField.id,
+        foreignDate.records.map((record) => ({ id: record.id }))
+      );
+
+      await updateRecordByApi(host.id, hostRecordId, numberLinkField.id, {
+        id: foreignNumber.records[0].id,
+      });
+
+      await updateRecordByApi(
+        host.id,
+        hostRecordId,
+        numberMultiLinkField.id,
+        foreignNumber.records.map((record) => ({ id: record.id }))
+      );
+
+      const record = await getRecord(host.id, hostRecordId);
+      const dateLink = record.data.fields[dateLinkField.name] as {
+        id: string;
+        title: string;
+      } | null;
+      expect(dateLink).toBeDefined();
+      expect(dateLink?.id).toBe(foreignDate.records[0].id);
+      expect(dateLink?.title).toBe('2024/05/06');
+
+      const numberLink = record.data.fields[numberLinkField.name] as {
+        id: string;
+        title: string;
+      } | null;
+      expect(numberLink).toBeDefined();
+      expect(numberLink?.id).toBe(foreignNumber.records[0].id);
+      expect(numberLink?.title).toBe('32.1%');
+
+      const dateMultiLink = record.data.fields[dateMultiLinkField.name] as Array<{
+        id: string;
+        title: string;
+      }> | null;
+      expect(Array.isArray(dateMultiLink)).toBe(true);
+      expect(dateMultiLink?.length).toBe(2);
+      const dateMultiTitles = dateMultiLink?.map((item) => item.title);
+      expect(dateMultiTitles).toEqual(['2024/05/06', '2024/05/07']);
+
+      const numberMultiLink = record.data.fields[numberMultiLinkField.name] as Array<{
+        id: string;
+        title: string;
+      }> | null;
+      expect(Array.isArray(numberMultiLink)).toBe(true);
+      expect(numberMultiLink?.length).toBe(2);
+      const numberMultiTitles = numberMultiLink?.map((item) => item.title);
+      expect(numberMultiTitles).toEqual(['32.1%', '87.5%']);
+    } finally {
+      if (host) {
+        await permanentDeleteTable(baseId, host.id);
+      }
+      await permanentDeleteTable(baseId, foreignDate.id);
+      await permanentDeleteTable(baseId, foreignNumber.id);
+    }
+  });
+
   describe('safe calculate', () => {
     let table: ITableFullVo;
     beforeEach(async () => {
