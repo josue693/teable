@@ -99,6 +99,8 @@ const NUMBER_FUNCTIONS = new Set<FunctionName>([
   FunctionName.Log,
   FunctionName.Mod,
   FunctionName.Value,
+  FunctionName.Find,
+  FunctionName.Search,
   FunctionName.Len,
   FunctionName.Count,
   FunctionName.CountA,

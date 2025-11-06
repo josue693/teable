@@ -1286,6 +1286,128 @@ describe('OpenAPI formula (e2e)', () => {
       }
     );
 
+    it.only('should evaluate nested FIND formula on select field consistently', async () => {
+      const assignmentField = await createField(table1Id, {
+        name: '归属/对接',
+        type: FieldType.SingleSelect,
+        options: {
+          choices: [
+            { id: 'choice-bp', name: 'BP' },
+            { id: 'choice-tyh-1', name: 'TYH①' },
+            { id: 'choice-lwl', name: 'LWL' },
+            { id: 'choice-ella-1', name: 'Ella①' },
+            { id: 'choice-shop-1', name: 'shop①' },
+            { id: 'choice-lwl-plus', name: 'LWL+' },
+            { id: 'choice-ella-1-plus', name: 'Ella①+' },
+            { id: 'choice-shop-1-plus', name: 'shop①+' },
+            { id: 'choice-zjq', name: 'ZJQ' },
+            { id: 'choice-lk', name: 'LK' },
+            { id: 'choice-allen-2', name: 'Allen②' },
+            { id: 'choice-shop-2', name: 'shop②' },
+            { id: 'choice-zjq-plus', name: 'ZJQ+' },
+            { id: 'choice-allen-2-plus', name: 'Allen②+' },
+            { id: 'choice-shop-2-plus', name: 'shop②+' },
+            { id: 'choice-tyh-xf', name: 'TYH XF' },
+            { id: 'choice-tyh', name: 'TYH' },
+            { id: 'choice-xf', name: 'XF' },
+            { id: 'choice-lucy-3', name: 'Lucy③' },
+            { id: 'choice-shop-3', name: 'shop③' },
+            { id: 'choice-tyh-plus', name: 'TYH+' },
+            { id: 'choice-lucy-3-plus', name: 'Lucy③+' },
+            { id: 'choice-shop-3-plus', name: 'shop③+' },
+            { id: 'choice-jn', name: 'JN' },
+            { id: 'choice-jenny-4', name: 'Jenny④' },
+            { id: 'choice-jn-plus', name: 'JN+' },
+            { id: 'choice-jenny-4-plus', name: 'Jenny④+' },
+            { id: 'choice-other', name: 'Other' },
+          ],
+        } as ISelectFieldOptionsRo,
+      });
+
+      const expression = `IF(
+  OR(
+    FIND("BP", {${assignmentField.id}})
+  ),
+  "Young",
+  IF(
+    OR(
+      FIND("TYH①", {${assignmentField.id}}),
+      FIND("LWL", {${assignmentField.id}}),
+      FIND("Ella①", {${assignmentField.id}}),
+      FIND("shop①", {${assignmentField.id}}),
+      FIND("LWL+", {${assignmentField.id}}),
+      FIND("Ella①+", {${assignmentField.id}}),
+      FIND("shop①+", {${assignmentField.id}})
+    ),
+    "Ella",
+    IF(
+      OR(
+        FIND("ZJQ", {${assignmentField.id}}),
+        FIND("LK", {${assignmentField.id}}),
+        FIND("Allen②", {${assignmentField.id}}),
+        FIND("shop②", {${assignmentField.id}}),
+        FIND("ZJQ+", {${assignmentField.id}}),
+        FIND("Allen②+", {${assignmentField.id}}),
+        FIND("shop②+", {${assignmentField.id}})
+      ),
+      "Allen",
+      IF(
+        OR(
+          FIND("TYH XF", {${assignmentField.id}}),
+          FIND("TYH", {${assignmentField.id}}),
+          FIND("XF", {${assignmentField.id}}),
+          FIND("Lucy③", {${assignmentField.id}}),
+          FIND("shop③", {${assignmentField.id}}),
+          FIND("TYH+", {${assignmentField.id}}),
+          FIND("Lucy③+", {${assignmentField.id}}),
+          FIND("shop③+", {${assignmentField.id}})
+        ),
+        "Lucy",
+        IF(
+          OR(
+            FIND("JN", {${assignmentField.id}}),
+            FIND("Jenny④", {${assignmentField.id}}),
+            FIND("JN+", {${assignmentField.id}}),
+            FIND("Jenny④+", {${assignmentField.id}})
+          ),
+          "Jenny",
+          "未识别"
+        )
+      )
+    )
+  )
+)`;
+
+      await convertField(table1Id, formulaFieldRo.id, {
+        type: FieldType.Formula,
+        options: {
+          expression,
+        },
+      });
+
+      const cases: Array<{ value: string; expected: string }> = [
+        { value: 'BP', expected: 'Young' },
+        { value: 'TYH', expected: 'Lucy' },
+        { value: 'TYH XF', expected: 'Lucy' },
+        { value: 'ZJQ+', expected: 'Allen' },
+        { value: 'Jenny④', expected: 'Jenny' },
+        { value: 'Other', expected: '未识别' },
+      ];
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: cases.map(({ value }) => ({
+          fields: {
+            [assignmentField.name]: value,
+          },
+        })),
+      });
+
+      cases.forEach(({ expected }, index) => {
+        expect(records[index].fields[formulaFieldRo.name]).toEqual(expected);
+      });
+    });
+
     it('should concatenate date and text fields with ampersand', async () => {
       const followDateField = await createField(table1Id, {
         name: 'follow date',
