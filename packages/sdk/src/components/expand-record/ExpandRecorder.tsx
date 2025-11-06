@@ -74,37 +74,24 @@ export const ExpandRecorder = (props: IExpandRecorderProps) => {
     !!commentId || Boolean(showComment)
   );
 
-  const onRecordHistoryToggle = useCallback(
-    (visible?: boolean) => {
-      setCommentVisible(false);
-      setRecordHistoryVisible(visible ?? !recordHistoryVisible);
-    },
-    [setCommentVisible, setRecordHistoryVisible, recordHistoryVisible]
-  );
-
-  const onCommentToggle = useCallback(
-    (visible?: boolean) => {
-      setRecordHistoryVisible(false);
-      setCommentVisible(visible ?? !commentVisible);
-    },
-    [setRecordHistoryVisible, setCommentVisible, commentVisible]
-  );
-
   useEffect(() => {
     if (showHistory !== undefined) {
-      onRecordHistoryToggle(showHistory);
+      setCommentVisible(false);
+      setRecordHistoryVisible(showHistory);
     }
-  }, [showHistory, onRecordHistoryToggle]);
+  }, [showHistory, setCommentVisible, setRecordHistoryVisible]);
 
   useEffect(() => {
     if (commentId) {
-      onCommentToggle(true);
+      setRecordHistoryVisible(false);
+      setCommentVisible(true);
       return;
     }
     if (showComment !== undefined) {
-      onCommentToggle(showComment);
+      setRecordHistoryVisible(false);
+      setCommentVisible(showComment);
     }
-  }, [showComment, commentId, onCommentToggle]);
+  }, [showComment, commentId, setCommentVisible, setRecordHistoryVisible]);
 
   if (!recordId) {
     return <></>;
@@ -131,6 +118,16 @@ export const ExpandRecorder = (props: IExpandRecorderProps) => {
     const url = window.location.href;
     syncCopy(url);
     toast.success(t('expandRecord.copy'));
+  };
+
+  const onRecordHistoryToggle = () => {
+    setCommentVisible(false);
+    setRecordHistoryVisible(!recordHistoryVisible);
+  };
+
+  const onCommentToggle = () => {
+    setRecordHistoryVisible(false);
+    setCommentVisible(!commentVisible);
   };
 
   return (

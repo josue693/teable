@@ -10,7 +10,7 @@ import {
 } from '@teable/sdk/hooks';
 import type { AttachmentField, GalleryView, IFieldInstance } from '@teable/sdk/model';
 import { useRouter } from 'next/router';
-import { useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { useContext, useMemo, useState, type ReactNode } from 'react';
 import { GalleryContext } from './GalleryContext';
 
 export const GalleryProvider = ({ children }: { children: ReactNode }) => {

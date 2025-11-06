@@ -24,7 +24,7 @@ import {
 import type { KanbanView, IFieldInstance, AttachmentField } from '@teable/sdk/model';
 import { useRouter } from 'next/router';
 import type { ReactNode } from 'react';
-import { useCallback, useContext, useMemo, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import { UNCATEGORIZED_STACK_ID } from '../constant';
 import { KanbanContext } from './KanbanContext';
 
