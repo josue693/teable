@@ -71,6 +71,7 @@ export const ButtonEditor: FC<IButtonEditor> = (props) => {
                   recordId,
                   fieldId,
                   name: button.label,
+                  confirm: fieldOptions.confirm,
                 });
               }}
               className={cn('flex w-24 h-6', className)}

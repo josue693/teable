@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { getTableButtonClickChannel } from '@teable/core';
 import { buttonClick as buttonClickApi } from '@teable/openapi/src/record/button-click';
 import { shareViewButtonClick as shareViewButtonClickApi } from '@teable/openapi/src/share/view-button-click';
-import { sonner } from '@teable/ui-lib';
+import { sonner, useConfirm } from '@teable/ui-lib';
 import { isEmpty, get } from 'lodash';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from '../context/app/i18n';
@@ -27,6 +27,7 @@ export const useButtonClickStatus = (tableId: string, shareId?: string) => {
   const [statusMap, setStatusMap] = useState<Record<string, IButtonClickStatus>>({});
   const toastMapRef = useRef<Record<string, number | string | undefined>>({});
   const complatedMapRef = useRef<Record<string, boolean>>({});
+  const { confirm } = useConfirm();
   const { t } = useTranslation();
 
   const { mutateAsync: buttonClickFn } = useMutation({
@@ -164,7 +165,23 @@ export const useButtonClickStatus = (tableId: string, shareId?: string) => {
   }, [connection, presence, channel, setComplated]);
 
   const buttonClick = useCallback(
-    (ro: { tableId: string; recordId: string; fieldId: string; name: string }) => {
+    async (ro: {
+      tableId: string;
+      recordId: string;
+      fieldId: string;
+      name: string;
+      confirm?: boolean;
+    }) => {
+      if (ro.confirm) {
+        const confirmed = await confirm({
+          title: t('field.button.runAutomation'),
+          description: t('field.button.runAutomationConfirmTip', { name: ro.name }),
+          cancelText: t('common.cancel'),
+          confirmText: t('common.confirm'),
+        });
+        if (!confirmed) return;
+      }
+
       setRunning({
         runId: '',
         recordId: ro.recordId,
@@ -174,7 +191,7 @@ export const useButtonClickStatus = (tableId: string, shareId?: string) => {
       });
       return buttonClickFn(ro);
     },
-    [buttonClickFn, setRunning]
+    [buttonClickFn, setRunning, confirm, t]
   );
 
   return useMemo(() => {

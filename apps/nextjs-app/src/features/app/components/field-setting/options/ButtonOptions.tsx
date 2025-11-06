@@ -125,6 +125,17 @@ export const ButtonOptions = (props: {
           <div className="flex flex-col gap-2">
             <div className="flex h-8 items-center gap-2">
               <Switch
+                checked={Boolean(options?.confirm)}
+                onCheckedChange={(checked) => {
+                  onChange?.({ ...options, confirm: checked });
+                }}
+              />
+              <Label className="text-sm font-normal">
+                {t('table:field.default.button.clickConfirm')}
+              </Label>
+            </div>
+            <div className="flex h-8 items-center gap-2">
+              <Switch
                 checked={limitClickCount}
                 onCheckedChange={(checked) => {
                   setLimitClickCount(checked);

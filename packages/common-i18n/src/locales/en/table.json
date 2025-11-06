@@ -137,6 +137,7 @@
         "title": "Button",
         "label": "Button label",
         "color": "Button color",
+        "clickConfirm": "Confirm before clicking",
         "limitCount": "Limit clicks",
         "resetCount": "Allow reset",
         "maxCount": "Max clicks",

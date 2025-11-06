@@ -343,6 +343,10 @@
     "link": {
       "oneWay": "One Way",
       "twoWay": "Two Way"
+    },
+    "button": {
+      "runAutomation": "Run automation",
+      "runAutomationConfirmTip": "You are about to run {{name}}, please confirm whether to continue?"
     }
   },
   "permission": {

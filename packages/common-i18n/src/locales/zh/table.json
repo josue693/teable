@@ -138,6 +138,7 @@
         "title": "按钮",
         "label": "按钮文字",
         "color": "按钮颜色",
+        "clickConfirm": "点击前需要确认",
         "limitCount": "限制点击次数",
         "resetCount": "允许重置点击计数",
         "maxCount": "最大点击计数",

@@ -7,6 +7,7 @@ export const buttonFieldOptionsSchema = z.object({
   color: z.nativeEnum(Colors).openapi({ description: 'Button color' }),
   maxCount: z.number().optional().openapi({ description: 'Max count of button clicks' }),
   resetCount: z.boolean().optional().openapi({ description: 'Reset count' }),
+  confirm: z.boolean().optional().openapi({ description: 'Confirm before clicking' }),
   workflow: z
     .object({
       id: z

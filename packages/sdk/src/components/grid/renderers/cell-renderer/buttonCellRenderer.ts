@@ -42,6 +42,7 @@ const clickHandler = (cell: IButtonCell) => {
     recordId,
     fieldId,
     name: fieldOptions.label,
+    confirm: fieldOptions.confirm,
   });
 };
 

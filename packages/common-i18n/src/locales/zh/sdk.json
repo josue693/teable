@@ -357,6 +357,10 @@
     "link": {
       "oneWay": "单向",
       "twoWay": "双向"
+    },
+    "button": {
+      "runAutomation": "运行自动化",
+      "runAutomationConfirmTip": "你将要运行 {{name}}，请确认是否继续？"
     }
   },
   "permission": {
