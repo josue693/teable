@@ -31,6 +31,8 @@ import {
   DbFieldType,
   extractFieldReferenceId,
   getFieldReferenceTokenText,
+  FUNCTIONS,
+  Relationship,
 } from '@teable/core';
 import type {
   FormulaVisitor,
@@ -112,6 +114,39 @@ const BOOLEAN_FUNCTIONS = new Set<FunctionName>([
   FunctionName.Or,
   FunctionName.Not,
   FunctionName.Xor,
+]);
+
+const MULTI_VALUE_AGGREGATED_FUNCTIONS = new Set<FunctionName>([
+  FunctionName.DatetimeFormat,
+  FunctionName.Value,
+  FunctionName.Abs,
+  FunctionName.Datestr,
+  FunctionName.Timestr,
+  FunctionName.Day,
+  FunctionName.Month,
+  FunctionName.Year,
+  FunctionName.Weekday,
+  FunctionName.WeekNum,
+  FunctionName.Hour,
+  FunctionName.Minute,
+  FunctionName.Second,
+  FunctionName.FromNow,
+  FunctionName.ToNow,
+  FunctionName.Round,
+  FunctionName.RoundUp,
+  FunctionName.RoundDown,
+  FunctionName.Floor,
+  FunctionName.Ceiling,
+  FunctionName.Int,
+]);
+
+const MULTI_VALUE_FIELD_TYPES = new Set<FieldType>([
+  FieldType.Link,
+  FieldType.Attachment,
+  FieldType.MultipleSelect,
+  FieldType.User,
+  FieldType.CreatedBy,
+  FieldType.LastModifiedBy,
 ]);
 
 const STRING_FIELD_TYPES = new Set<FieldType>([
@@ -408,7 +443,13 @@ abstract class BaseSqlConversionVisitor<
     const rawName = ctx.func_name().text.toUpperCase();
     const fnName = normalizeFunctionNameAlias(rawName) as FunctionName;
     const exprContexts = ctx.expr();
-    const params = exprContexts.map((exprCtx) => exprCtx.accept(this));
+    let params = exprContexts.map((exprCtx) => exprCtx.accept(this));
+    params = this.normalizeFunctionParamsForMultiplicity(fnName, params, exprContexts);
+
+    const multiValueFormat = this.tryBuildMultiValueAggregator(fnName, params, exprContexts);
+    if (multiValueFormat) {
+      return multiValueFormat;
+    }
 
     return (
       match(fnName)
@@ -769,6 +810,391 @@ abstract class BaseSqlConversionVisitor<
       .otherwise((op) => {
         throw new Error(`Unsupported binary operator: ${op}`);
       });
+  }
+
+  private normalizeFunctionParamsForMultiplicity(
+    fnName: FunctionName,
+    params: string[],
+    exprContexts: ExprContext[]
+  ): string[] {
+    const funcMeta = FUNCTIONS[fnName];
+    if (!funcMeta) {
+      return params;
+    }
+
+    return params.map((paramSql, index) => {
+      if (funcMeta.acceptMultipleValue) {
+        return paramSql;
+      }
+
+      if (this.shouldPreserveMultiValueParam(fnName, exprContexts[index], index, paramSql)) {
+        return paramSql;
+      }
+
+      return this.reduceMultiFieldReferenceParam(exprContexts[index], paramSql);
+    });
+  }
+
+  private tryBuildMultiValueAggregator(
+    fnName: FunctionName,
+    params: string[],
+    exprContexts: ExprContext[]
+  ): string | null {
+    if (!exprContexts[0] || this.dialect?.driver !== DriverClient.Pg) {
+      return null;
+    }
+
+    const isMulti = this.isMultiValueExpr(exprContexts[0], params[0]);
+    if (!isMulti) {
+      return null;
+    }
+
+    switch (fnName) {
+      case FunctionName.DatetimeFormat: {
+        const formatExpr = params[1] ?? `'YYYY-MM-DD HH:mm'`;
+        return this.buildPgDatetimeFormatAggregator(params[0], formatExpr);
+      }
+      case FunctionName.Value:
+        return this.buildPgNumericAggregator(params[0], (scalarText) =>
+          this.formulaQuery.value(scalarText)
+        );
+      case FunctionName.Abs:
+        return this.buildPgNumericAggregator(params[0], (scalarText) =>
+          this.formulaQuery.abs(this.formulaQuery.value(scalarText))
+        );
+      case FunctionName.Datestr:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.datestr(scalar)
+        );
+      case FunctionName.Timestr:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.timestr(scalar)
+        );
+      case FunctionName.Day:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.day(scalar)
+        );
+      case FunctionName.Month:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.month(scalar)
+        );
+      case FunctionName.Year:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.year(scalar)
+        );
+      case FunctionName.Weekday:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.weekday(scalar)
+        );
+      case FunctionName.WeekNum:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.weekNum(scalar)
+        );
+      case FunctionName.Hour:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.hour(scalar)
+        );
+      case FunctionName.Minute:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.minute(scalar)
+        );
+      case FunctionName.Second:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.second(scalar)
+        );
+      case FunctionName.FromNow:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.fromNow(scalar)
+        );
+      case FunctionName.ToNow:
+        return this.buildPgDatetimeScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.toNow(scalar)
+        );
+      case FunctionName.Round:
+        return this.buildPgNumericScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.round(scalar, params[1] ?? '0')
+        );
+      case FunctionName.RoundUp:
+        return this.buildPgNumericScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.roundUp(scalar, params[1] ?? '0')
+        );
+      case FunctionName.RoundDown:
+        return this.buildPgNumericScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.roundDown(scalar, params[1] ?? '0')
+        );
+      case FunctionName.Floor:
+        return this.buildPgNumericScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.floor(scalar)
+        );
+      case FunctionName.Ceiling:
+        return this.buildPgNumericScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.ceiling(scalar)
+        );
+      case FunctionName.Int:
+        return this.buildPgNumericScalarAggregator(params[0], (scalar) =>
+          this.formulaQuery.int(scalar)
+        );
+      default:
+        return null;
+    }
+  }
+
+  private shouldPreserveMultiValueParam(
+    fnName: FunctionName,
+    exprCtx: ExprContext,
+    index: number,
+    paramSql: string
+  ): boolean {
+    if (MULTI_VALUE_AGGREGATED_FUNCTIONS.has(fnName) && index === 0) {
+      return true;
+    }
+
+    return this.isMultiValueExpr(exprCtx, paramSql);
+  }
+
+  private reduceMultiFieldReferenceParam(exprCtx: ExprContext, paramSql: string): string {
+    if (!this.isMultiValueExpr(exprCtx, paramSql)) {
+      return paramSql;
+    }
+
+    const fieldInfo = this.getFieldInfoFromExpr(exprCtx);
+    if (fieldInfo) {
+      return this.extractSingleValueFromMultiReference(paramSql, fieldInfo);
+    }
+    return paramSql;
+  }
+
+  private getFieldInfoFromExpr(exprCtx: ExprContext): FieldCore | undefined {
+    if (!exprCtx) {
+      return undefined;
+    }
+
+    if (exprCtx instanceof BracketsContext) {
+      return this.getFieldInfoFromExpr(exprCtx.expr());
+    }
+
+    if (exprCtx instanceof FieldReferenceCurlyContext) {
+      const normalizedFieldId = extractFieldReferenceId(exprCtx);
+      const rawToken = getFieldReferenceTokenText(exprCtx);
+      const fieldId = normalizedFieldId ?? rawToken?.slice(1, -1).trim() ?? '';
+      if (!fieldId) {
+        return undefined;
+      }
+      return this.context.table.getField(fieldId);
+    }
+
+    return undefined;
+  }
+
+  private isMultiValueField(fieldInfo?: FieldCore): boolean {
+    if (!fieldInfo) {
+      return false;
+    }
+
+    if ((fieldInfo as unknown as { isMultipleCellValue?: boolean }).isMultipleCellValue) {
+      return true;
+    }
+
+    if (fieldInfo.dbFieldType === DbFieldType.Json) {
+      return true;
+    }
+
+    if (MULTI_VALUE_FIELD_TYPES.has(fieldInfo.type as FieldType)) {
+      return true;
+    }
+
+    const lookupHolder = fieldInfo as unknown as {
+      isLookup?: boolean;
+      dbFieldName?: string;
+      lookupOptions?: { linkFieldId?: string };
+    };
+    if (
+      lookupHolder.isLookup === true ||
+      lookupHolder.dbFieldName?.startsWith('lookup_') ||
+      lookupHolder.dbFieldName?.startsWith('conditional_lookup_')
+    ) {
+      return true;
+    }
+
+    if (lookupHolder.lookupOptions?.linkFieldId) {
+      const linkField = this.context.table.getField(lookupHolder.lookupOptions.linkFieldId);
+      const linkIsMulti = this.isLinkFieldMulti(linkField as FieldCore | undefined);
+      if (linkIsMulti) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isLinkFieldMulti(linkField?: FieldCore): boolean {
+    if (!linkField) {
+      return false;
+    }
+    if ((linkField as unknown as { isMultipleCellValue?: boolean })?.isMultipleCellValue) {
+      return true;
+    }
+    const relationship = (
+      linkField as unknown as {
+        options?: { relationship?: Relationship };
+      }
+    ).options?.relationship;
+    if (!relationship) {
+      return false;
+    }
+    return relationship === Relationship.ManyMany || relationship === Relationship.OneMany;
+  }
+
+  private isMultiValueExpr(exprCtx: ExprContext, paramSql?: string): boolean {
+    const fieldInfo = this.getFieldInfoFromExpr(exprCtx);
+    if (this.isMultiValueField(fieldInfo)) {
+      return true;
+    }
+
+    if (paramSql) {
+      const normalized = paramSql.toLowerCase();
+      if (normalized.includes('lookup_') || normalized.includes('link_value')) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private extractSingleValueFromMultiReference(expr: string, fieldInfo: FieldCore): string {
+    if (!this.dialect) {
+      return expr;
+    }
+
+    switch (this.dialect.driver) {
+      case DriverClient.Pg:
+        return this.buildPgSingleValueExtractor(expr, fieldInfo);
+      case DriverClient.Sqlite:
+        return this.buildSqliteSingleValueExtractor(expr);
+      default:
+        return expr;
+    }
+  }
+
+  private buildSqliteSingleValueExtractor(expr: string): string {
+    // SQLite formulas already treat multi-value columns as JSON text during coercion.
+    // Returning the original expression keeps existing behaviour consistent.
+    return expr;
+  }
+
+  private buildPgSingleValueExtractor(expr: string, _fieldInfo: FieldCore): string {
+    const normalizedJson = this.normalizeMultiValueExprToJson(expr);
+
+    const firstElement = `(SELECT elem
+      FROM jsonb_array_elements(${normalizedJson}) WITH ORDINALITY AS t(elem, ord)
+      WHERE jsonb_typeof(elem) <> 'null'
+      ORDER BY ord
+      LIMIT 1
+    )`;
+
+    const scalarJson = `(CASE
+      WHEN ${normalizedJson} IS NULL THEN NULL::jsonb
+      WHEN jsonb_typeof(${normalizedJson}) = 'array' THEN ${firstElement}
+      ELSE ${normalizedJson}
+    END)`;
+
+    return `(CASE
+      WHEN ${scalarJson} IS NULL THEN NULL
+      WHEN jsonb_typeof(${scalarJson}) = 'object' THEN COALESCE(
+        ${scalarJson}->>'title',
+        ${scalarJson}->>'name',
+        (${scalarJson})::text
+      )
+      WHEN jsonb_typeof(${scalarJson}) = 'array' THEN NULL
+      ELSE ${scalarJson} #>> '{}'
+    END)`;
+  }
+
+  private normalizeMultiValueExprToJson(expr: string): string {
+    const baseExpr = `(${expr})`;
+    return `(CASE
+      WHEN ${baseExpr} IS NULL THEN NULL::jsonb
+      WHEN pg_typeof(${baseExpr}) = 'jsonb'::regtype THEN ${baseExpr}::jsonb
+      WHEN pg_typeof(${baseExpr}) = 'json'::regtype THEN ${baseExpr}::jsonb
+      WHEN pg_typeof(${baseExpr}) IN ('text', 'varchar', 'bpchar', 'character varying', 'unknown') THEN
+        CASE
+          WHEN NULLIF(BTRIM((${baseExpr})::text), '') IS NULL THEN NULL::jsonb
+          WHEN LEFT(BTRIM((${baseExpr})::text), 1) = '[' THEN (${baseExpr})::jsonb
+          ELSE jsonb_build_array(to_jsonb(${baseExpr}))
+        END
+      ELSE to_jsonb(${baseExpr})
+    END)`;
+  }
+
+  private extractJsonScalarText(elemRef: string): string {
+    return `(CASE
+      WHEN jsonb_typeof(${elemRef}) = 'object' THEN COALESCE(${elemRef}->>'title', ${elemRef}->>'name', ${elemRef} #>> '{}')
+      WHEN jsonb_typeof(${elemRef}) = 'array' THEN NULL
+      ELSE ${elemRef} #>> '{}'
+    END)`;
+  }
+
+  private buildPgNumericAggregator(
+    valueExpr: string,
+    buildNumericExpr: (scalarTextExpr: string) => string
+  ): string {
+    const normalizedJson = this.normalizeMultiValueExprToJson(valueExpr);
+    const scalarText = this.extractJsonScalarText('elem');
+    const numericExpr = buildNumericExpr(scalarText);
+    const formattedExpr = `(CASE WHEN ${numericExpr} IS NULL THEN NULL ELSE ${numericExpr} END)`;
+    const aggregated = this.dialect!.stringAggregate(formattedExpr, ', ', 'ord');
+    return `(CASE
+      WHEN ${normalizedJson} IS NULL THEN NULL
+      ELSE (
+        SELECT ${aggregated}
+        FROM jsonb_array_elements(${normalizedJson}) WITH ORDINALITY AS t(elem, ord)
+      )
+    END)`;
+  }
+
+  private buildPgDatetimeFormatAggregator(valueExpr: string, formatExpr: string): string {
+    return this.buildPgDatetimeScalarAggregator(valueExpr, (scalar) =>
+      this.formulaQuery.datetimeFormat(scalar, formatExpr)
+    );
+  }
+
+  private buildPgNumericScalarAggregator(
+    valueExpr: string,
+    buildScalarExpr: (numericScalar: string) => string
+  ): string {
+    const normalizedJson = this.normalizeMultiValueExprToJson(valueExpr);
+    const elementScalar = this.extractJsonScalarText('elem');
+    const sanitizedScalar = `NULLIF(${elementScalar}, '')`;
+    const numericScalar = this.formulaQuery.value(sanitizedScalar);
+    const computedExpr = buildScalarExpr(numericScalar);
+    const safeExpr = `(CASE WHEN ${numericScalar} IS NULL THEN NULL ELSE (${computedExpr})::text END)`;
+    const aggregated = this.dialect!.stringAggregate(safeExpr, ', ', 'ord');
+    return `(CASE
+      WHEN ${normalizedJson} IS NULL THEN NULL
+      ELSE (
+        SELECT ${aggregated}
+        FROM jsonb_array_elements(${normalizedJson}) WITH ORDINALITY AS t(elem, ord)
+      )
+    END)`;
+  }
+
+  private buildPgDatetimeScalarAggregator(
+    valueExpr: string,
+    buildScalarExpr: (sanitizedScalar: string) => string
+  ): string {
+    const normalizedJson = this.normalizeMultiValueExprToJson(valueExpr);
+    const elementScalar = this.extractJsonScalarText('elem');
+    const sanitizedScalar = `NULLIF(${elementScalar}, '')`;
+    const computedExpr = buildScalarExpr(sanitizedScalar);
+    const safeExpr = `(CASE WHEN ${sanitizedScalar} IS NULL THEN NULL ELSE (${computedExpr})::text END)`;
+    const aggregated = this.dialect!.stringAggregate(safeExpr, ', ', 'ord');
+    return `(CASE
+      WHEN ${normalizedJson} IS NULL THEN NULL
+      ELSE (
+        SELECT ${aggregated}
+        FROM jsonb_array_elements(${normalizedJson}) WITH ORDINALITY AS t(elem, ord)
+      )
+    END)`;
   }
 
   /**
