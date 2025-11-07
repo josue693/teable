@@ -9,15 +9,16 @@ import type {
   IConditionalRollupFieldOptions,
   IConditionalLookupOptions,
   FieldCore,
+  TableDomain,
 } from '@teable/core';
-import { DbFieldType, FieldType, isFieldReferenceValue } from '@teable/core';
+import { DbFieldType, DriverClient, FieldType, isFieldReferenceValue } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectModel } from 'nest-knexjs';
 import { InjectDbProvider } from '../../../../db-provider/db.provider';
 import { IDbProvider } from '../../../../db-provider/db.provider.interface';
 import type { ICellContext } from '../../../calculation/utils/changes';
-import { createFieldInstanceByRaw } from '../../../field/model/factory';
+import { TableDomainQueryService } from '../../../table-domain/table-domain-query.service';
 
 export interface ICellBasicContext {
   recordId: string;
@@ -54,16 +55,37 @@ export class ComputedDependencyCollectorService {
   private logger = new Logger(ComputedDependencyCollectorService.name);
   constructor(
     private readonly prismaService: PrismaService,
+    private readonly tableDomainQueryService: TableDomainQueryService,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
     @InjectDbProvider() private readonly dbProvider: IDbProvider
   ) {}
 
+  private async getTableDomain(tableId: string): Promise<TableDomain> {
+    return this.tableDomainQueryService.getTableDomainById(tableId);
+  }
+
+  private buildSortFieldAccessor(column: string): Knex.Raw {
+    if (this.dbProvider.driver === DriverClient.Pg) {
+      return this.knex.raw(`??::json->'sort'->>'fieldId'`, [column]);
+    }
+    return this.knex.raw(`json_extract(??, '$.sort.fieldId')`, [column]);
+  }
+
+  private applySortFieldFilter(
+    qb: Knex.QueryBuilder,
+    column: string,
+    values: readonly string[]
+  ): void {
+    if (!values.length) return;
+    const accessor = this.buildSortFieldAccessor(column);
+    const { sql, bindings } = accessor.toSQL();
+    const placeholders = values.map(() => '?').join(', ');
+    qb.whereRaw(`${sql} in (${placeholders})`, [...bindings, ...values]);
+  }
+
   private async getDbTableName(tableId: string): Promise<string> {
-    const { dbTableName } = await this.prismaService.txClient().tableMeta.findUniqueOrThrow({
-      where: { id: tableId },
-      select: { dbTableName: true },
-    });
-    return dbTableName;
+    const tableDomain = await this.getTableDomain(tableId);
+    return tableDomain.dbTableName;
   }
 
   private async getAllRecordIds(tableId: string): Promise<string[]> {
@@ -183,14 +205,13 @@ export class ComputedDependencyCollectorService {
       return new Map();
     }
 
-    const rows = await this.prismaService.txClient().field.findMany({
-      where: { tableId, id: { in: ids }, deletedTime: null },
-    });
-
+    const tableDomain = await this.getTableDomain(tableId);
     const map = new Map<string, FieldCore>();
-    for (const row of rows) {
-      const instance = createFieldInstanceByRaw(row) as unknown as FieldCore;
-      map.set(instance.id, instance);
+    for (const id of ids) {
+      const field = tableDomain.getField(id);
+      if (field) {
+        map.set(field.id, field);
+      }
     }
     return map;
   }
@@ -201,33 +222,43 @@ export class ComputedDependencyCollectorService {
     if (!sortFieldIds.length) return [];
 
     const prisma = this.prismaService.txClient();
-    const sortIdSet = new Set(sortFieldIds);
-    const results: Array<{ tableId: string; fieldId: string; sortFieldId: string }> = [];
+    const conditionalQuery = this.knex('field')
+      .select({
+        tableId: 'table_id',
+        fieldId: 'id',
+        sortFieldId: this.buildSortFieldAccessor('options'),
+      })
+      .whereNull('deleted_time')
+      .where('type', FieldType.ConditionalRollup)
+      .modify((qb) => this.applySortFieldFilter(qb, 'options', sortFieldIds));
+    const lookupQuery = this.knex('field')
+      .select({
+        tableId: 'table_id',
+        fieldId: 'id',
+        sortFieldId: this.buildSortFieldAccessor('lookup_options'),
+      })
+      .whereNull('deleted_time')
+      .where('is_conditional_lookup', true)
+      .modify((qb) => this.applySortFieldFilter(qb, 'lookup_options', sortFieldIds));
 
     const [conditionalRollups, conditionalLookups] = await Promise.all([
-      prisma.field.findMany({
-        where: { deletedTime: null, type: FieldType.ConditionalRollup },
-        select: { id: true, tableId: true, options: true },
-      }),
-      prisma.field.findMany({
-        where: { deletedTime: null, isConditionalLookup: true },
-        select: { id: true, tableId: true, lookupOptions: true },
-      }),
+      prisma.$queryRawUnsafe<Array<{ tableId: string; fieldId: string; sortFieldId: string }>>(
+        conditionalQuery.toQuery()
+      ),
+      prisma.$queryRawUnsafe<Array<{ tableId: string; fieldId: string; sortFieldId: string }>>(
+        lookupQuery.toQuery()
+      ),
     ]);
 
+    const results: Array<{ tableId: string; fieldId: string; sortFieldId: string }> = [];
     for (const row of conditionalRollups) {
-      const options = this.parseOptionsLoose<IConditionalRollupFieldOptions>(row.options);
-      const sortFieldId = options?.sort?.fieldId;
-      if (sortFieldId && sortIdSet.has(sortFieldId)) {
-        results.push({ tableId: row.tableId, fieldId: row.id, sortFieldId });
+      if (row.sortFieldId) {
+        results.push(row);
       }
     }
-
     for (const row of conditionalLookups) {
-      const options = this.parseOptionsLoose<IConditionalLookupOptions>(row.lookupOptions);
-      const sortFieldId = options?.sort?.fieldId;
-      if (sortFieldId && sortIdSet.has(sortFieldId)) {
-        results.push({ tableId: row.tableId, fieldId: row.id, sortFieldId });
+      if (row.sortFieldId) {
+        results.push(row);
       }
     }
 
@@ -243,17 +274,33 @@ export class ComputedDependencyCollectorService {
   /**
    * Resolve link field IDs among the provided field IDs and include their symmetric counterparts.
    */
-  private async resolveRelatedLinkFieldIds(fieldIds: string[]): Promise<string[]> {
+  private async resolveRelatedLinkFieldIds(
+    fieldIds: string[],
+    fieldToTableMap?: Map<string, string>
+  ): Promise<string[]> {
     if (!fieldIds.length) return [];
-    const rows = await this.prismaService.txClient().field.findMany({
-      where: { id: { in: fieldIds }, type: FieldType.Link, isLookup: null, deletedTime: null },
-      select: { id: true, options: true },
-    });
+    const groupedByTable = new Map<string, string[]>();
+    for (const fieldId of fieldIds) {
+      const tableId = fieldToTableMap?.get(fieldId);
+      if (!tableId) continue;
+      const bucket = groupedByTable.get(tableId);
+      if (bucket) {
+        bucket.push(fieldId);
+      } else {
+        groupedByTable.set(tableId, [fieldId]);
+      }
+    }
+
     const result = new Set<string>();
-    for (const r of rows) {
-      result.add(r.id);
-      const opts = this.parseOptionsLoose<{ symmetricFieldId?: string }>(r.options);
-      if (opts?.symmetricFieldId) result.add(opts.symmetricFieldId);
+    for (const [tableId, ids] of groupedByTable) {
+      const tableDomain = await this.getTableDomain(tableId);
+      for (const id of ids) {
+        const field = tableDomain.getField(id);
+        if (!field || field.type !== FieldType.Link || field.isLookup) continue;
+        result.add(field.id);
+        const opts = this.parseOptionsLoose<{ symmetricFieldId?: string }>(field.options);
+        if (opts?.symmetricFieldId) result.add(opts.symmetricFieldId);
+      }
     }
     return Array.from(result);
   }
@@ -360,15 +407,10 @@ export class ComputedDependencyCollectorService {
     if (!changedRecordIds.length) return [];
 
     // Fetch link fields on targetTableId that point to changedTableId
-    const linkFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        tableId: targetTableId,
-        type: FieldType.Link,
-        isLookup: null,
-        deletedTime: null,
-      },
-      select: { id: true, options: true },
-    });
+    const targetTableDomain = await this.getTableDomain(targetTableId);
+    const linkFields = targetTableDomain.fieldList.filter(
+      (field) => field.type === FieldType.Link && !field.isLookup
+    );
     // Build a UNION query across all matching link junction tables
     const selects = [] as Knex.QueryBuilder[];
     for (const lf of linkFields) {
@@ -717,68 +759,42 @@ export class ComputedDependencyCollectorService {
       return { link: linkAdj, conditionalRollup: conditionalRollupAdj };
     }
 
-    const linkFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        tableId: { in: tables },
-        type: FieldType.Link,
-        isLookup: null,
-        deletedTime: null,
-      },
-      select: { id: true, tableId: true, options: true },
-    });
+    for (const tableId of tables) {
+      const tableDomain = await this.getTableDomain(tableId);
+      for (const field of tableDomain.fieldList) {
+        if (field.type === FieldType.Link && !field.isLookup) {
+          const opts = this.parseLinkOptions(field.options);
+          const from = opts?.foreignTableId;
+          if (from) {
+            (linkAdj[from] ||= new Set<string>()).add(tableId);
+          }
+          continue;
+        }
 
-    for (const lf of linkFields) {
-      const opts = this.parseLinkOptions(lf.options);
-      if (!opts) continue;
-      const from = opts.foreignTableId;
-      const to = lf.tableId;
-      if (!from || !to) continue;
-      (linkAdj[from] ||= new Set<string>()).add(to);
-    }
+        if (field.type === FieldType.ConditionalRollup) {
+          const opts = this.parseOptionsLoose<IConditionalRollupFieldOptions>(field.options);
+          const foreignTableId = opts?.foreignTableId;
+          if (!foreignTableId) continue;
+          (conditionalRollupAdj[foreignTableId] ||= []).push({
+            tableId,
+            fieldId: field.id,
+            foreignTableId,
+            filter: opts?.filter ?? undefined,
+          });
+          continue;
+        }
 
-    const conditionalReferenceFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        tableId: { in: tables },
-        deletedTime: null,
-        OR: [
-          { type: FieldType.ConditionalRollup },
-          { AND: [{ isLookup: true }, { isConditionalLookup: true }] },
-        ],
-      },
-      select: {
-        id: true,
-        tableId: true,
-        options: true,
-        lookupOptions: true,
-        type: true,
-        isConditionalLookup: true,
-      },
-    });
-
-    for (const field of conditionalReferenceFields) {
-      if (field.type === FieldType.ConditionalRollup) {
-        const opts = this.parseOptionsLoose<IConditionalRollupFieldOptions>(field.options);
-        const foreignTableId = opts?.foreignTableId;
-        if (!foreignTableId) continue;
-        (conditionalRollupAdj[foreignTableId] ||= []).push({
-          tableId: field.tableId,
-          fieldId: field.id,
-          foreignTableId,
-          filter: opts?.filter ?? undefined,
-        });
-        continue;
-      }
-
-      if (field.isConditionalLookup) {
-        const opts = this.parseOptionsLoose<IConditionalLookupOptions>(field.lookupOptions);
-        const foreignTableId = opts?.foreignTableId;
-        if (!foreignTableId) continue;
-        (conditionalRollupAdj[foreignTableId] ||= []).push({
-          tableId: field.tableId,
-          fieldId: field.id,
-          foreignTableId,
-          filter: opts?.filter ?? undefined,
-        });
+        if (field.isConditionalLookup) {
+          const opts = this.parseOptionsLoose<IConditionalLookupOptions>(field.lookupOptions);
+          const foreignTableId = opts?.foreignTableId;
+          if (!foreignTableId) continue;
+          (conditionalRollupAdj[foreignTableId] ||= []).push({
+            tableId,
+            fieldId: field.id,
+            foreignTableId,
+            filter: opts?.filter ?? undefined,
+          });
+        }
       }
     }
 
@@ -797,14 +813,33 @@ export class ComputedDependencyCollectorService {
     if (!startFieldIds.length) return {};
 
     // Group starting fields by table and fetch minimal metadata
-    const startFields = await this.prismaService.txClient().field.findMany({
-      where: { id: { in: startFieldIds }, deletedTime: null },
-      select: { id: true, tableId: true, isComputed: true, isLookup: true, type: true },
-    });
-    const byTable = startFields.reduce<Record<string, string[]>>((acc, f) => {
-      (acc[f.tableId] ||= []).push(f.id);
-      return acc;
-    }, {});
+    const fieldToTableMap = new Map<string, string>();
+    const byTable: Record<string, string[]> = {};
+    const startFields: Array<{
+      id: string;
+      tableId: string;
+      isComputed?: boolean;
+      isLookup?: boolean;
+      type: FieldType;
+    }> = [];
+
+    for (const source of sources) {
+      if (!source.fieldIds?.length) continue;
+      const tableDomain = await this.getTableDomain(source.tableId);
+      for (const fieldId of source.fieldIds) {
+        const field = tableDomain.getField(fieldId);
+        if (!field) continue;
+        startFields.push({
+          id: field.id,
+          tableId: source.tableId,
+          isComputed: field.isComputed,
+          isLookup: field.isLookup,
+          type: field.type,
+        });
+        fieldToTableMap.set(field.id, source.tableId);
+        (byTable[source.tableId] ||= []).push(field.id);
+      }
+    }
 
     // 1) Dependent fields grouped by table
     const depByTable = await this.collectDependentFieldsByTable(startFieldIds);
@@ -833,7 +868,7 @@ export class ComputedDependencyCollectorService {
       }).fieldIds.add(fieldId);
     }
 
-    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(startFieldIds);
+    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(startFieldIds, fieldToTableMap);
     const fallbackLookupIds = new Set<string>();
     if (relatedLinkIds.length) {
       const byTable = await this.findLookupsByLinkIds(relatedLinkIds);
@@ -1067,6 +1102,8 @@ export class ComputedDependencyCollectorService {
 
     const changedFieldIds = Array.from(new Set(ctxs.map((c) => c.fieldId)));
     const changedRecordIds = Array.from(new Set(ctxs.map((c) => c.recordId)));
+    const fieldToTableMap = new Map<string, string>();
+    changedFieldIds.forEach((fid) => fieldToTableMap.set(fid, tableId));
 
     // 1) Transitive dependents grouped by table (SQL CTE + join field)
     const contextByRecord = ctxs.reduce<Map<string, ICellContext[]>>((map, ctx) => {
@@ -1079,7 +1116,7 @@ export class ComputedDependencyCollectorService {
       return map;
     }, new Map());
 
-    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(changedFieldIds);
+    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(changedFieldIds, fieldToTableMap);
     const traversalFieldIds = Array.from(new Set([...changedFieldIds, ...relatedLinkIds]));
 
     const depByTable = await this.collectDependentFieldsByTable(traversalFieldIds, excludeFieldIds);
@@ -1126,15 +1163,11 @@ export class ComputedDependencyCollectorService {
     // Include symmetric link fields (if any) on the foreign table so their values
     // are refreshed as well. The link fields themselves are already included by
     // SQL union in collectDependentFieldsByTable.
-    const linkFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        id: { in: changedFieldIds },
-        type: FieldType.Link,
-        isLookup: null,
-        deletedTime: null,
-      },
-      select: { id: true, tableId: true, options: true },
-    });
+    const changedFieldIdSet = new Set(changedFieldIds);
+    const currentTableDomain = await this.getTableDomain(tableId);
+    const linkFields = currentTableDomain.fieldList.filter(
+      (field) => changedFieldIdSet.has(field.id) && field.type === FieldType.Link && !field.isLookup
+    );
 
     // Record planned foreign recordIds per foreign table based on incoming link cell new/old values
     const plannedForeignRecordIds: Record<string, Set<string>> = {};
