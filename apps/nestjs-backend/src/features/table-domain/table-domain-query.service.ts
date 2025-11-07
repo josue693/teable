@@ -45,18 +45,6 @@ export class TableDomainQueryService {
     return tableMeta;
   }
 
-  private async getTableMetaByDbTableName(dbTableName: string) {
-    const tableMeta = await this.prismaService.txClient().tableMeta.findFirst({
-      where: { dbTableName, deletedTime: null },
-    });
-
-    if (!tableMeta) {
-      throw new NotFoundException(`Table with dbTableName ${dbTableName} not found`);
-    }
-
-    return tableMeta;
-  }
-
   private async getTableFields(tableId: string) {
     return this.prismaService.txClient().field.findMany({
       where: { tableId, deletedTime: null },

@@ -69,6 +69,10 @@ export class ComputedEvaluatorService {
     const excludeFieldIds = opts?.excludeFieldIds ?? new Set<string>();
     const globalPreferAutoNumberPaging = opts?.preferAutoNumberPaging === true;
     const entries = Object.entries(impact).filter(([, group]) => group.fieldIds.size);
+    const projectionByTable = entries.reduce<Record<string, string[]>>((acc, [tableId, group]) => {
+      acc[tableId] = Array.from(group.fieldIds);
+      return acc;
+    }, {});
 
     let totalOps = 0;
 
@@ -95,6 +99,7 @@ export class ComputedEvaluatorService {
         projection: Array.from(validFieldIdSet),
         rawProjection: true,
         preferRawFieldReferences: true,
+        projectionByTable,
         restrictRecordIds: builderRestrictRecordIds,
       });
 

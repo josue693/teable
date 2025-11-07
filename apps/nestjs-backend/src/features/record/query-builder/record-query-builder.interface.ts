@@ -26,6 +26,11 @@ export interface ICreateRecordQueryBuilderOptions {
   useQueryModel?: boolean;
   /** Limit SELECT to these field IDs (plus system columns) */
   projection?: string[];
+  /**
+   * Optional mapping of tableId -> fieldIds to further limit link/lookup CTE generation
+   * on related tables. If omitted, all dependent lookups on foreign tables are considered.
+   */
+  projectionByTable?: Record<string, string[]>;
   /** Optional pagination limit (take) */
   limit?: number;
   /** Optional pagination offset (skip) */

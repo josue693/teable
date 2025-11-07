@@ -136,7 +136,8 @@ class LinkCteScheduler {
     private readonly tables: Tables,
     private readonly state: IReadonlyQueryBuilderState,
     private readonly entryTable: TableDomain,
-    private readonly filteredMainFieldSet?: ReadonlySet<string>
+    private readonly filteredMainFieldSet?: ReadonlySet<string>,
+    private readonly filteredFieldSetsByTable?: ReadonlyMap<string, ReadonlySet<string>>
   ) {}
 
   registerProjectionFields(fields: FieldCore[]): void {
@@ -252,9 +253,15 @@ class LinkCteScheduler {
     let lookupFields = linkField.getLookupFields(scopeTable);
     let rollupFields = linkField.getRollupFields(scopeTable);
 
-    if (scopeTable.id === this.entryTable.id && this.filteredMainFieldSet) {
-      lookupFields = lookupFields.filter((f) => this.filteredMainFieldSet?.has(f.id));
-      rollupFields = rollupFields.filter((f) => this.filteredMainFieldSet?.has(f.id));
+    const scopedFilter =
+      this.filteredFieldSetsByTable?.get(scopeTable.id) ??
+      (scopeTable.id === this.entryTable.id ? this.filteredMainFieldSet : undefined);
+    if (scopedFilter && scopedFilter.size === 0) {
+      return new Map();
+    }
+    if (scopedFilter?.size) {
+      lookupFields = lookupFields.filter((f) => scopedFilter.has(f.id));
+      rollupFields = rollupFields.filter((f) => scopedFilter.has(f.id));
     }
 
     const nestedLinks = new Map<string, LinkFieldCore>();
@@ -1423,6 +1430,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
   private filteredIdSet?: Set<string>;
   private readonly projection?: string[];
   private readonly resolvedLinkKeys = new Set<string>();
+  private readonly filteredFieldSetsByTable?: ReadonlyMap<string, ReadonlySet<string>>;
 
   constructor(
     public readonly qb: Knex.QueryBuilder,
@@ -1430,11 +1438,13 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     private readonly tables: Tables,
     state: IMutableQueryBuilderState | undefined,
     private readonly dialect: IRecordQueryDialectProvider,
-    projection?: string[]
+    projection?: string[],
+    filteredFieldSetsByTable?: ReadonlyMap<string, ReadonlySet<string>>
   ) {
     this.state = state ?? new RecordQueryBuilderManager('table');
     this._table = tables.mustGetEntryTable();
     this.projection = projection;
+    this.filteredFieldSetsByTable = filteredFieldSetsByTable;
   }
 
   get table() {
@@ -1468,7 +1478,13 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
   }
 
   private createLinkCteScheduler(): LinkCteScheduler {
-    return new LinkCteScheduler(this.tables, this.state, this.table, this.filteredIdSet);
+    return new LinkCteScheduler(
+      this.tables,
+      this.state,
+      this.table,
+      this.filteredIdSet,
+      this.filteredFieldSetsByTable
+    );
   }
 
   private buildLinkCtesFromScheduler(scheduler: LinkCteScheduler): void {
