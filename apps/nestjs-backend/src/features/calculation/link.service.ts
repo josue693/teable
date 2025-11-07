@@ -142,9 +142,27 @@ export class LinkService {
     );
   }
 
-  private extractLinkTitle(value: unknown): string | undefined {
+  private formatTitleWithField(field: IFieldInstance, value: unknown): string | undefined {
+    try {
+      const formatted = field.cellValue2String(value);
+      if (typeof formatted === 'string' && formatted.trim().length > 0) {
+        return formatted;
+      }
+    } catch {
+      // Swallow formatting issues and fall back to generic extraction logic
+    }
+    return undefined;
+  }
+
+  private extractLinkTitle(value: unknown, field?: IFieldInstance): string | undefined {
     if (value == null) {
       return undefined;
+    }
+    if (field) {
+      const formatted = this.formatTitleWithField(field, value);
+      if (formatted) {
+        return formatted;
+      }
     }
     if (typeof value === 'string') {
       return value;
@@ -154,7 +172,7 @@ export class LinkService {
     }
     if (Array.isArray(value)) {
       const titles = value
-        .map((item) => this.extractLinkTitle(item))
+        .map((item) => this.extractLinkTitle(item, field))
         .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
       return titles.length ? titles.join(', ') : undefined;
     }
@@ -183,6 +201,7 @@ export class LinkService {
     sourceLookedFieldId: string;
     sourceRecordMap: IRecordMapByTableId['tableId'];
     foreignRecordMap: IRecordMapByTableId['tableId'];
+    sourceLookupField?: IFieldInstance;
   }) {
     const {
       fkItem,
@@ -191,6 +210,7 @@ export class LinkService {
       sourceLookedFieldId,
       foreignRecordMap,
       sourceRecordMap,
+      sourceLookupField,
     } = params;
     const oldKey = (fkItem.oldKey || []) as string[];
     const newKey = (fkItem.newKey || []) as string[];
@@ -219,9 +239,11 @@ export class LinkService {
 
     if (toAdd.length) {
       toAdd.forEach((foreignRecordId) => {
-        const sourceRecordTitle = this.extractLinkTitle(
-          sourceRecordMap[recordId][sourceLookedFieldId]
-        );
+        const lookupValue =
+          sourceLookedFieldId != null
+            ? sourceRecordMap[recordId]?.[sourceLookedFieldId]
+            : undefined;
+        const sourceRecordTitle = this.extractLinkTitle(lookupValue, sourceLookupField);
         const newForeignRecord = foreignRecordMap[foreignRecordId];
         if (!newForeignRecord) {
           throw new CustomHttpException(
@@ -259,6 +281,7 @@ export class LinkService {
     sourceLookedFieldId: string;
     sourceRecordMap: IRecordMapByTableId['tableId'];
     foreignRecordMap: IRecordMapByTableId['tableId'];
+    sourceLookupField?: IFieldInstance;
   }) {
     const {
       fkItem,
@@ -267,6 +290,7 @@ export class LinkService {
       sourceLookedFieldId,
       foreignRecordMap,
       sourceRecordMap,
+      sourceLookupField,
     } = params;
     const oldKey = (fkItem.oldKey || []) as string[];
     const newKey = fkItem.newKey as string | null;
@@ -294,9 +318,9 @@ export class LinkService {
     }
 
     if (newKey) {
-      const sourceRecordTitle = this.extractLinkTitle(
-        sourceRecordMap[recordId][sourceLookedFieldId]
-      );
+      const lookupValue =
+        sourceLookedFieldId != null ? sourceRecordMap[recordId]?.[sourceLookedFieldId] : undefined;
+      const sourceRecordTitle = this.extractLinkTitle(lookupValue, sourceLookupField);
       const newForeignRecord = foreignRecordMap[newKey];
       if (!newForeignRecord) {
         throw new CustomHttpException(
@@ -333,6 +357,7 @@ export class LinkService {
     sourceLookedFieldId: string;
     sourceRecordMap: IRecordMapByTableId['tableId'];
     foreignRecordMap: IRecordMapByTableId['tableId'];
+    sourceLookupField?: IFieldInstance;
   }) {
     const {
       fkItem,
@@ -341,6 +366,7 @@ export class LinkService {
       sourceLookedFieldId,
       foreignRecordMap,
       sourceRecordMap,
+      sourceLookupField,
     } = params;
 
     const oldKey = (fkItem.oldKey || []) as string[];
@@ -356,9 +382,9 @@ export class LinkService {
     }
 
     if (toAdd.length) {
-      const sourceRecordTitle = this.extractLinkTitle(
-        sourceRecordMap[recordId][sourceLookedFieldId]
-      );
+      const lookupValue =
+        sourceLookedFieldId != null ? sourceRecordMap[recordId]?.[sourceLookedFieldId] : undefined;
+      const sourceRecordTitle = this.extractLinkTitle(lookupValue, sourceLookupField);
 
       toAdd.forEach((foreignRecordId) => {
         foreignRecordMap[foreignRecordId][symmetricFieldId] = {
@@ -376,6 +402,7 @@ export class LinkService {
     sourceLookedFieldId: string;
     sourceRecordMap: IRecordMapByTableId['tableId'];
     foreignRecordMap: IRecordMapByTableId['tableId'];
+    sourceLookupField?: IFieldInstance;
   }) {
     const {
       fkItem,
@@ -384,6 +411,7 @@ export class LinkService {
       sourceLookedFieldId,
       foreignRecordMap,
       sourceRecordMap,
+      sourceLookupField,
     } = params;
 
     const oldKey = (fkItem.oldKey || []) as string[];
@@ -396,9 +424,9 @@ export class LinkService {
     }
 
     if (newKey) {
-      const sourceRecordTitle = this.extractLinkTitle(
-        sourceRecordMap[recordId][sourceLookedFieldId]
-      );
+      const lookupValue =
+        sourceLookedFieldId != null ? sourceRecordMap[recordId]?.[sourceLookedFieldId] : undefined;
+      const sourceRecordTitle = this.extractLinkTitle(lookupValue, sourceLookupField);
 
       foreignRecordMap[newKey][symmetricFieldId] = {
         id: recordId,
@@ -415,6 +443,7 @@ export class LinkService {
     foreignLookedFieldId: string;
     sourceRecordMap: IRecordMapByTableId['tableId'];
     foreignRecordMap: IRecordMapByTableId['tableId'];
+    foreignLookupField?: IFieldInstance;
   }) {
     const {
       newKey,
@@ -423,6 +452,7 @@ export class LinkService {
       foreignLookedFieldId,
       foreignRecordMap,
       sourceRecordMap,
+      foreignLookupField,
     } = params;
 
     if (!newKey) {
@@ -432,14 +462,17 @@ export class LinkService {
     if (Array.isArray(newKey)) {
       sourceRecordMap[recordId][linkFieldId] = newKey.map((key) => ({
         id: key,
-        title: this.extractLinkTitle(foreignRecordMap[key][foreignLookedFieldId]),
+        title: this.extractLinkTitle(
+          foreignLookedFieldId != null ? foreignRecordMap[key]?.[foreignLookedFieldId] : undefined,
+          foreignLookupField
+        ),
       }));
       return;
     }
 
-    const foreignRecordTitle = this.extractLinkTitle(
-      foreignRecordMap[newKey][foreignLookedFieldId]
-    );
+    const lookupValue =
+      foreignLookedFieldId != null ? foreignRecordMap[newKey]?.[foreignLookedFieldId] : undefined;
+    const foreignRecordTitle = this.extractLinkTitle(lookupValue, foreignLookupField);
     sourceRecordMap[recordId][linkFieldId] = { id: newKey, title: foreignRecordTitle };
   }
 
@@ -457,6 +490,10 @@ export class LinkService {
       const relationship = linkField.options.relationship;
       const foreignTableId = linkField.options.foreignTableId;
       const foreignLookedFieldId = linkField.options.lookupFieldId;
+      const foreignLookupField =
+        foreignLookedFieldId != null
+          ? fieldMapByTableId[foreignTableId]?.[foreignLookedFieldId]
+          : undefined;
 
       const sourceRecordMap = recordMapByTableId[tableId];
       const foreignRecordMap = recordMapByTableId[foreignTableId];
@@ -472,6 +509,7 @@ export class LinkService {
           foreignLookedFieldId,
           sourceRecordMap,
           foreignRecordMap,
+          foreignLookupField,
         });
 
         if (!symmetricFieldId) {
@@ -479,6 +517,10 @@ export class LinkService {
         }
         const symmetricField = fieldMapByTableId[foreignTableId][symmetricFieldId] as LinkFieldDto;
         const sourceLookedFieldId = symmetricField.options.lookupFieldId;
+        const sourceLookupField =
+          sourceLookedFieldId != null
+            ? fieldMapByTableId[tableId]?.[sourceLookedFieldId]
+            : undefined;
         const params = {
           fkItem,
           recordId,
@@ -486,6 +528,7 @@ export class LinkService {
           sourceLookedFieldId,
           sourceRecordMap,
           foreignRecordMap,
+          sourceLookupField,
         };
         if (relationship === Relationship.ManyMany) {
           this.updateForeignCellForManyMany(params);
@@ -849,6 +892,18 @@ export class LinkService {
       const recordLookupFieldsMap = recordMapByTableId[tableId];
       const recordIds = Object.keys(recordLookupFieldsMap);
       const dbFieldName2FieldId: { [dbFieldName: string]: string } = {};
+
+      for (const recordId of recordIds) {
+        const lookupFieldMap = recordLookupFieldsMap[recordId];
+        if (!lookupFieldMap) continue;
+        for (const fieldId of Object.keys(lookupFieldMap)) {
+          const field = fieldMapByTableId[tableId]?.[fieldId];
+          if (!field) continue;
+          for (const dbFieldName of field.dbFieldNames) {
+            dbFieldName2FieldId[dbFieldName] = fieldId;
+          }
+        }
+      }
 
       const { qb } = await this.recordQueryBuilder.createRecordQueryBuilder(
         tableId2DbTableName[tableId],
