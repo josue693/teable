@@ -1647,6 +1647,306 @@ describe('OpenAPI formula (e2e)', () => {
       }
     });
 
+    it('should format multi-value lookup dates with DATETIME_FORMAT', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'formula-lookup-datetime-format-foreign',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Milestone Date', type: FieldType.Date } as IFieldRo,
+        ],
+        records: [
+          { fields: { Title: 'Alpha', 'Milestone Date': '2023-10-11T16:00:00.000Z' } },
+          { fields: { Title: 'Beta', 'Milestone Date': '2023-10-11T16:00:00.000Z' } },
+        ],
+      });
+      let host: ITableFullVo | undefined;
+      try {
+        host = await createTable(baseId, {
+          name: 'formula-lookup-datetime-format-host',
+          fields: [{ name: 'Project', type: FieldType.SingleLineText } as IFieldRo],
+          records: [{ fields: { Project: 'Lookup timeline' } }],
+        });
+
+        const linkField = await createField(host.id, {
+          name: 'Related Milestones',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: foreign.id,
+          } as ILinkFieldOptionsRo,
+        } as IFieldRo);
+
+        const milestoneDateFieldId = foreign.fields.find(
+          (field) => field.name === 'Milestone Date'
+        )!.id;
+
+        const lookupField = await createField(host.id, {
+          name: 'Milestone Dates',
+          type: FieldType.Date,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: milestoneDateFieldId,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+          options: {
+            formatting: {
+              date: DateFormattingPreset.ISO,
+              time: TimeFormatting.None,
+              timeZone: 'Asia/Shanghai',
+            },
+          },
+        } as IFieldRo);
+
+        const formattedField = await createField(host.id, {
+          name: 'Milestone Day',
+          type: FieldType.Formula,
+          options: {
+            expression: `DATETIME_FORMAT({${lookupField.id}}, 'DD')`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const dayNumberField = await createField(host.id, {
+          name: 'Milestone Day Number',
+          type: FieldType.Formula,
+          options: {
+            expression: `DAY({${lookupField.id}}) & ''`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const dateStrField = await createField(host.id, {
+          name: 'Milestone DateStr',
+          type: FieldType.Formula,
+          options: {
+            expression: `DATESTR({${lookupField.id}})`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const timeStrField = await createField(host.id, {
+          name: 'Milestone TimeStr',
+          type: FieldType.Formula,
+          options: {
+            expression: `TIMESTR({${lookupField.id}})`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const monthField = await createField(host.id, {
+          name: 'Milestone Month',
+          type: FieldType.Formula,
+          options: {
+            expression: `MONTH({${lookupField.id}}) & ''`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const yearField = await createField(host.id, {
+          name: 'Milestone Year',
+          type: FieldType.Formula,
+          options: {
+            expression: `YEAR({${lookupField.id}}) & ''`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const weekDayField = await createField(host.id, {
+          name: 'Milestone Weekday',
+          type: FieldType.Formula,
+          options: {
+            expression: `WEEKDAY({${lookupField.id}}) & ''`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const weekNumField = await createField(host.id, {
+          name: 'Milestone Weeknum',
+          type: FieldType.Formula,
+          options: {
+            expression: `WEEKNUM({${lookupField.id}}) & ''`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const hourField = await createField(host.id, {
+          name: 'Milestone Hour',
+          type: FieldType.Formula,
+          options: {
+            expression: `HOUR({${lookupField.id}}) & ''`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const minuteField = await createField(host.id, {
+          name: 'Milestone Minute',
+          type: FieldType.Formula,
+          options: {
+            expression: `MINUTE({${lookupField.id}}) & ''`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const secondField = await createField(host.id, {
+          name: 'Milestone Second',
+          type: FieldType.Formula,
+          options: {
+            expression: `SECOND({${lookupField.id}}) & ''`,
+            timeZone: 'Asia/Shanghai',
+          },
+        } as IFieldRo);
+
+        const hostRecordId = host.records[0].id;
+        await updateRecordByApi(
+          host.id,
+          hostRecordId,
+          linkField.id,
+          foreign.records.map((record) => ({ id: record.id }))
+        );
+
+        const updatedRecord = await getRecord(host.id, hostRecordId);
+        expect(updatedRecord.data.fields[formattedField.name]).toEqual('12, 12');
+        expect(updatedRecord.data.fields[dayNumberField.name]).toEqual('12, 12');
+        expect(updatedRecord.data.fields[dateStrField.name]).toEqual('2023-10-12, 2023-10-12');
+        expect(updatedRecord.data.fields[timeStrField.name]).toEqual('00:00:00, 00:00:00');
+        expect(updatedRecord.data.fields[monthField.name]).toEqual('10, 10');
+        expect(updatedRecord.data.fields[yearField.name]).toEqual('2023, 2023');
+        expect(updatedRecord.data.fields[weekDayField.name]).toEqual('4, 4');
+        expect(updatedRecord.data.fields[weekNumField.name]).toEqual('41, 41');
+        expect(updatedRecord.data.fields[hourField.name]).toEqual('0, 0');
+        expect(updatedRecord.data.fields[minuteField.name]).toEqual('0, 0');
+        expect(updatedRecord.data.fields[secondField.name]).toEqual('0, 0');
+      } finally {
+        if (host) {
+          await permanentDeleteTable(baseId, host.id);
+        }
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
+    it('should format multi-value lookup numbers with VALUE', async () => {
+      const foreign = await createTable(baseId, {
+        name: 'formula-lookup-value-foreign',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          { name: 'Budget', type: FieldType.Number } as IFieldRo,
+        ],
+        records: [
+          { fields: { Title: 'Phase A', Budget: 1200.45 } },
+          { fields: { Title: 'Phase B', Budget: 3400.51 } },
+        ],
+      });
+      let host: ITableFullVo | undefined;
+      try {
+        host = await createTable(baseId, {
+          name: 'formula-lookup-value-host',
+          fields: [{ name: 'Project', type: FieldType.SingleLineText } as IFieldRo],
+          records: [{ fields: { Project: 'Budget run' } }],
+        });
+
+        const linkField = await createField(host.id, {
+          name: 'Related Budgets',
+          type: FieldType.Link,
+          options: {
+            relationship: Relationship.ManyMany,
+            foreignTableId: foreign.id,
+          } as ILinkFieldOptionsRo,
+        } as IFieldRo);
+
+        const budgetFieldId = foreign.fields.find((field) => field.name === 'Budget')!.id;
+
+        const lookupField = await createField(host.id, {
+          name: 'Budget Lookup',
+          type: FieldType.Number,
+          isLookup: true,
+          lookupOptions: {
+            foreignTableId: foreign.id,
+            lookupFieldId: budgetFieldId,
+            linkFieldId: linkField.id,
+          } as ILookupOptionsRo,
+        } as IFieldRo);
+
+        const formattedField = await createField(host.id, {
+          name: 'Budget Value Formula',
+          type: FieldType.Formula,
+          options: {
+            expression: `VALUE({${lookupField.id}}) & ''`,
+          },
+        } as IFieldRo);
+
+        const roundedField = await createField(host.id, {
+          name: 'Budget Rounded',
+          type: FieldType.Formula,
+          options: {
+            expression: `ROUND({${lookupField.id}}, 0) & ''`,
+          },
+        } as IFieldRo);
+
+        const roundUpField = await createField(host.id, {
+          name: 'Budget RoundUp',
+          type: FieldType.Formula,
+          options: {
+            expression: `ROUNDUP({${lookupField.id}}, 0) & ''`,
+          },
+        } as IFieldRo);
+
+        const roundDownField = await createField(host.id, {
+          name: 'Budget RoundDown',
+          type: FieldType.Formula,
+          options: {
+            expression: `ROUNDDOWN({${lookupField.id}}, 0) & ''`,
+          },
+        } as IFieldRo);
+
+        const floorField = await createField(host.id, {
+          name: 'Budget Floor',
+          type: FieldType.Formula,
+          options: {
+            expression: `FLOOR({${lookupField.id}}) & ''`,
+          },
+        } as IFieldRo);
+
+        const ceilingField = await createField(host.id, {
+          name: 'Budget Ceiling',
+          type: FieldType.Formula,
+          options: {
+            expression: `CEILING({${lookupField.id}}) & ''`,
+          },
+        } as IFieldRo);
+
+        const intField = await createField(host.id, {
+          name: 'Budget Int',
+          type: FieldType.Formula,
+          options: {
+            expression: `INT({${lookupField.id}}) & ''`,
+          },
+        } as IFieldRo);
+
+        const hostRecordId = host.records[0].id;
+        await updateRecordByApi(
+          host.id,
+          hostRecordId,
+          linkField.id,
+          foreign.records.map((record) => ({ id: record.id }))
+        );
+
+        const updatedRecord = await getRecord(host.id, hostRecordId);
+        expect(updatedRecord.data.fields[formattedField.name]).toEqual('1200.45, 3400.51');
+        expect(updatedRecord.data.fields[roundedField.name]).toEqual('1200, 3401');
+        expect(updatedRecord.data.fields[roundUpField.name]).toEqual('1201, 3401');
+        expect(updatedRecord.data.fields[roundDownField.name]).toEqual('1200, 3400');
+        expect(updatedRecord.data.fields[floorField.name]).toEqual('1200, 3400');
+        expect(updatedRecord.data.fields[ceilingField.name]).toEqual('1201, 3401');
+        expect(updatedRecord.data.fields[intField.name]).toEqual('1200, 3400');
+      } finally {
+        if (host) {
+          await permanentDeleteTable(baseId, host.id);
+        }
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    });
+
     it('should evaluate formulas referencing lookup formulas', async () => {
       const foreign = await createTable(baseId, {
         name: 'formula-lookup-formula-foreign',

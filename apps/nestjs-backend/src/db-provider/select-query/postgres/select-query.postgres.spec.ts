@@ -1,5 +1,12 @@
 /* eslint-disable sonarjs/no-duplicate-string */
-import { CellValueType, DbFieldType, FieldType, TableDomain } from '@teable/core';
+import {
+  CellValueType,
+  DateFormattingPreset,
+  DbFieldType,
+  FieldType,
+  TableDomain,
+  TimeFormatting,
+} from '@teable/core';
 import type { IFieldVo } from '@teable/core';
 import knex from 'knex';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -505,5 +512,113 @@ describe('Select formula string branch normalization', () => {
     const sql = provider.convertFormulaToSelectQuery(formula, buildContext());
 
     expect(sql).toContain('ELSE ("main"."json_col")::text');
+  });
+});
+
+describe('Select formula multi-value parameter coercion', () => {
+  const knexClient = knex({ client: 'pg' });
+  const provider = new PostgresProvider(knexClient);
+
+  const multiDateFieldVo: IFieldVo = {
+    id: 'fldMultiDate001',
+    name: 'Multi Date',
+    type: FieldType.Date,
+    options: {
+      formatting: {
+        date: DateFormattingPreset.ISO,
+        time: TimeFormatting.None,
+        timeZone: 'Asia/Shanghai',
+      },
+    },
+    dbFieldName: 'multi_date_col',
+    dbFieldType: DbFieldType.DateTime,
+    cellValueType: CellValueType.DateTime,
+    isLookup: false,
+    isComputed: false,
+    isMultipleCellValue: true,
+  };
+
+  const multiNumberFieldVo: IFieldVo = {
+    id: 'fldMultiNumber001',
+    name: 'Multi Number',
+    type: FieldType.Number,
+    options: {
+      precision: 2,
+    },
+    dbFieldName: 'multi_number_col',
+    dbFieldType: DbFieldType.Real,
+    cellValueType: CellValueType.Number,
+    isLookup: false,
+    isComputed: false,
+    isMultipleCellValue: true,
+  };
+
+  const multiTextFieldVo: IFieldVo = {
+    id: 'fldMultiText001',
+    name: 'Multi Text',
+    type: FieldType.SingleLineText,
+    options: {},
+    dbFieldName: 'multi_text_col',
+    dbFieldType: DbFieldType.Text,
+    cellValueType: CellValueType.String,
+    isLookup: false,
+    isComputed: false,
+    isMultipleCellValue: true,
+  };
+
+  const multiDateField = createFieldInstanceByVo(multiDateFieldVo);
+  const multiNumberField = createFieldInstanceByVo(multiNumberFieldVo);
+  const multiTextField = createFieldInstanceByVo(multiTextFieldVo);
+
+  const table = new TableDomain({
+    id: 'tblMultiParams',
+    name: 'Multi Params Table',
+    dbTableName: 'multi_params_table',
+    lastModifiedTime: '1970-01-01T00:00:00.000Z',
+    fields: [multiDateField, multiNumberField, multiTextField],
+  });
+
+  const buildContext = (): ISelectFormulaConversionContext => ({
+    table,
+    tableAlias: 'main',
+    selectionMap: new Map<string, IFieldSelectName>([
+      [multiDateField.id, '"main"."multi_date_col"'],
+      [multiNumberField.id, '"main"."multi_number_col"'],
+      [multiTextField.id, '"main"."multi_text_col"'],
+    ]),
+    timeZone: 'UTC',
+    preferRawFieldReferences: true,
+  });
+
+  const expectFormatterReducer = (sql: string) => {
+    expect(sql).toContain('jsonb_array_elements');
+    expect(sql.toUpperCase()).toContain('STRING_AGG');
+  };
+
+  it('coerces multi-value lookup dates before datetime functions', () => {
+    const sql = provider.convertFormulaToSelectQuery(
+      `DATETIME_FORMAT({${multiDateField.id}}, 'DD')`,
+      buildContext()
+    );
+
+    expectFormatterReducer(sql as string);
+  });
+
+  it('coerces multi-value lookup numbers before numeric functions', () => {
+    const sql = provider.convertFormulaToSelectQuery(
+      `VALUE({${multiNumberField.id}})`,
+      buildContext()
+    );
+
+    expectFormatterReducer(sql as string);
+  });
+
+  it('coerces multi-value lookup text before VALUE()', () => {
+    const sql = provider.convertFormulaToSelectQuery(
+      `VALUE({${multiTextField.id}})`,
+      buildContext()
+    );
+
+    expectFormatterReducer(sql as string);
   });
 });
