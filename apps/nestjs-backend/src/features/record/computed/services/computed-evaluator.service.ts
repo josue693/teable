@@ -83,19 +83,25 @@ export class ComputedEvaluatorService {
       const impactedFieldIds = new Set(requestedFieldIds.filter((fid) => validFieldIdSet.has(fid)));
       if (!impactedFieldIds.size) continue;
 
+      const recordIds = Array.from(group.recordIds);
       const dbTableName = await this.getDbTableName(tableId);
+      const builderRestrictRecordIds =
+        !preferAutoNumberPaging && recordIds.length > 0 && recordIds.length <= recordIdBatchSize
+          ? recordIds
+          : undefined;
+
       const { qb, alias } = await this.recordQueryBuilder.createRecordQueryBuilder(dbTableName, {
         tableId,
         projection: Array.from(validFieldIdSet),
         rawProjection: true,
         preferRawFieldReferences: true,
+        restrictRecordIds: builderRestrictRecordIds,
       });
 
       const idCol = alias ? `${alias}.__id` : '__id';
       const orderCol = alias ? `${alias}.${AUTO_NUMBER_FIELD_NAME}` : AUTO_NUMBER_FIELD_NAME;
       const baseQb = qb.clone();
 
-      const recordIds = Array.from(group.recordIds);
       const paginationContext = this.createPaginationContext({
         tableId,
         recordIds,
@@ -235,8 +241,8 @@ export class ComputedEvaluatorService {
       baseQueryBuilder,
       idColumn,
       orderColumn,
-      updateRecords: (qb) =>
-        this.recordComputedUpdateService.updateFromSelect(tableId, qb, fieldInstances),
+      updateRecords: (qb, options) =>
+        this.recordComputedUpdateService.updateFromSelect(tableId, qb, fieldInstances, options),
     };
   }
 }

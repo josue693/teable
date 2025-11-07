@@ -159,6 +159,7 @@ export interface IDbProvider {
     subQuery: Knex.QueryBuilder;
     dbFieldNames: string[];
     returningDbFieldNames?: string[];
+    restrictRecordIds?: string[];
   }): string;
 
   aggregationQuery(

@@ -457,8 +457,16 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
     subQuery: Knex.QueryBuilder;
     dbFieldNames: string[];
     returningDbFieldNames?: string[];
+    restrictRecordIds?: string[];
   }): string {
-    const { dbTableName, idFieldName, subQuery, dbFieldNames, returningDbFieldNames } = params;
+    const {
+      dbTableName,
+      idFieldName,
+      subQuery,
+      dbFieldNames,
+      returningDbFieldNames,
+      restrictRecordIds,
+    } = params;
     const alias = '__s';
     const updateColumns = dbFieldNames.reduce<{ [key: string]: unknown }>((acc, name) => {
       acc[name] = this.knex.ref(`${alias}.${name}`);
@@ -476,10 +484,16 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
       // Unqualified reference to target table column to avoid FROM-clause issues
       this.knex.raw('?? - 1 as __prev_version', [`${dbTableName}.__version`]),
     ];
-    const query = this.knex(dbTableName)
+    const builder = this.knex(dbTableName)
       .update(updateColumns)
       .updateFrom(fromRaw)
-      .where(`${dbTableName}.${idFieldName}`, this.knex.ref(`${alias}.${idFieldName}`))
+      .where(`${dbTableName}.${idFieldName}`, this.knex.ref(`${alias}.${idFieldName}`));
+
+    if (restrictRecordIds?.length) {
+      builder.whereIn(`${dbTableName}.${idFieldName}`, restrictRecordIds);
+    }
+
+    const query = builder
       // Returning is supported on Postgres; qualify to avoid ambiguity with FROM subquery
       .returning(returningAll as unknown as [])
       .toQuery();

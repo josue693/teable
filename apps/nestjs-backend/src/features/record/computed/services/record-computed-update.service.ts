@@ -96,7 +96,8 @@ export class RecordComputedUpdateService {
   async updateFromSelect(
     tableId: string,
     qb: Knex.QueryBuilder,
-    fields: IFieldInstance[]
+    fields: IFieldInstance[],
+    opts?: { restrictRecordIds?: string[] }
   ): Promise<Array<{ __id: string; __version: number } & Record<string, unknown>>> {
     const dbTableName = await this.getDbTableName(tableId);
 
@@ -120,12 +121,21 @@ export class RecordComputedUpdateService {
       new Set([...returningNames, AUTO_NUMBER_FIELD_NAME])
     );
 
+    const restrictRecordIdsRaw = opts?.restrictRecordIds?.filter(
+      (id): id is string => typeof id === 'string' && id.length > 0
+    );
+    const restrictRecordIds =
+      restrictRecordIdsRaw && restrictRecordIdsRaw.length
+        ? Array.from(new Set(restrictRecordIdsRaw))
+        : undefined;
+
     const sql = this.dbProvider.updateFromSelectSql({
       dbTableName,
       idFieldName: '__id',
       subQuery: qb,
       dbFieldNames: columnNames,
       returningDbFieldNames: returningWithAutoNumber,
+      restrictRecordIds,
     });
     this.logger.debug('updateFromSelect SQL:', sql);
     try {
