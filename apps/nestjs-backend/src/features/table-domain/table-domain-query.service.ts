@@ -2,7 +2,9 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { TableDomain, Tables } from '@teable/core';
 import type { FieldCore } from '@teable/core';
 import type { Field, TableMeta } from '@teable/db-main-prisma';
-import { PrismaService } from '@teable/db-main-prisma';
+import { ClsService } from 'nestjs-cls';
+import type { IClsStore } from '../../types/cls';
+import { DataLoaderService } from '../data-loader/data-loader.service';
 import { rawField2FieldObj, createFieldInstanceByVo } from '../field/model/factory';
 
 /**
@@ -12,7 +14,10 @@ import { rawField2FieldObj, createFieldInstanceByVo } from '../field/model/facto
  */
 @Injectable()
 export class TableDomainQueryService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(
+    private readonly dataLoaderService: DataLoaderService,
+    private readonly cls: ClsService<IClsStore>
+  ) {}
 
   /**
    * Get a complete table domain object by table ID
@@ -24,6 +29,7 @@ export class TableDomainQueryService {
    * @throws NotFoundException - If table is not found or has been deleted
    */
   async getTableDomainById(tableId: string): Promise<TableDomain> {
+    this.enableTableDomainDataLoader();
     const tableMeta = await this.getTableMetaById(tableId);
     const fieldRaws = await this.getTableFields(tableMeta.id);
     return this.buildTableDomain(tableMeta, fieldRaws);
@@ -34,9 +40,7 @@ export class TableDomainQueryService {
    * @private
    */
   private async getTableMetaById(tableId: string) {
-    const tableMeta = await this.prismaService.txClient().tableMeta.findFirst({
-      where: { id: tableId, deletedTime: null },
-    });
+    const [tableMeta] = (await this.dataLoaderService.table.loadByIds([tableId])) as TableMeta[];
 
     if (!tableMeta) {
       throw new NotFoundException(`Table with ID ${tableId} not found`);
@@ -46,19 +50,38 @@ export class TableDomainQueryService {
   }
 
   private async getTableFields(tableId: string) {
-    return this.prismaService.txClient().field.findMany({
-      where: { tableId, deletedTime: null },
-      orderBy: [
-        {
-          isPrimary: {
-            sort: 'asc',
-            nulls: 'last',
-          },
-        },
-        { order: 'asc' },
-        { createdTime: 'asc' },
-      ],
+    const fields = await this.dataLoaderService.field.load(tableId);
+    return this.sortFieldRaws(fields as Field[]);
+  }
+
+  private sortFieldRaws(fieldRaws: Field[]): Field[] {
+    return [...fieldRaws].sort((a, b) => {
+      const primaryDiff = this.comparePrimaryRank(a.isPrimary, b.isPrimary);
+      if (primaryDiff !== 0) {
+        return primaryDiff;
+      }
+
+      const orderDiff = (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER);
+      if (orderDiff !== 0) {
+        return orderDiff;
+      }
+
+      return a.createdTime.getTime() - b.createdTime.getTime();
     });
+  }
+
+  private comparePrimaryRank(valueA?: boolean | null, valueB?: boolean | null) {
+    const rank = (value?: boolean | null) => {
+      if (value === true) {
+        return 0;
+      }
+      if (value === false) {
+        return 1;
+      }
+      return 2;
+    };
+
+    return rank(valueA) - rank(valueB);
   }
 
   private buildTableDomain(tableMeta: TableMeta, fieldRaws: Field[]): TableDomain {
@@ -129,5 +152,14 @@ export class TableDomainQueryService {
     }
 
     return tables;
+  }
+
+  private enableTableDomainDataLoader() {
+    const cacheKeys = this.cls.get('dataLoaderCache.cacheKeys') ?? [];
+    const requiredKeys: ('table' | 'field')[] = ['table', 'field'];
+    const missingKeys = requiredKeys.filter((key) => !cacheKeys.includes(key));
+    if (missingKeys.length) {
+      this.cls.set('dataLoaderCache.cacheKeys', [...cacheKeys, ...missingKeys]);
+    }
   }
 }

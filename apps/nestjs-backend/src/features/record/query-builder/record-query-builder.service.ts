@@ -145,7 +145,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
         hasSearch: options.hasSearch,
         restrictRecordIds: options.restrictRecordIds,
       });
-      this.buildFieldCtes(qb, tables, state, options.projection, options.projectionByTable);
+      this.buildFieldCtes(qb, tables, state, options.projection);
     }
 
     return { qb, alias, table, state };
@@ -275,68 +275,20 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     qb: Knex.QueryBuilder,
     tables: Tables | undefined,
     state: IMutableQueryBuilderState,
-    projection?: string[],
-    projectionByTable?: Record<string, string[]>
+    projection?: string[]
   ): void {
     if (!tables) {
       return;
     }
-    const filteredFieldSetsByTable = this.buildFilteredFieldMap(
-      tables,
-      projection,
-      projectionByTable
-    );
     const visitor = new FieldCteVisitor(
       qb,
       this.dbProvider,
       tables,
       state,
       this.dialect,
-      projection,
-      filteredFieldSetsByTable
+      projection
     );
     visitor.build();
-  }
-
-  private buildFilteredFieldMap(
-    tables: Tables,
-    projection?: string[],
-    projectionByTable?: Record<string, string[]>
-  ): ReadonlyMap<string, ReadonlySet<string>> | undefined {
-    let map: Map<string, Set<string>> | undefined;
-
-    if (projectionByTable) {
-      for (const [tableId, ids] of Object.entries(projectionByTable)) {
-        if (!Array.isArray(ids) || !ids.length) continue;
-        for (const id of ids) {
-          if (typeof id !== 'string' || !id.length) continue;
-          if (!map) {
-            map = new Map();
-          }
-          const set = map.get(tableId) ?? new Set<string>();
-          set.add(id);
-          map.set(tableId, set);
-        }
-      }
-    }
-
-    if (projection?.length) {
-      const entryTableId = tables.mustGetEntryTable().id;
-      if (!map) {
-        map = new Map();
-      }
-      const entrySet = map.get(entryTableId) ?? new Set<string>();
-      for (const id of projection) {
-        if (typeof id === 'string' && id.length) {
-          entrySet.add(id);
-        }
-      }
-      if (entrySet.size) {
-        map.set(entryTableId, entrySet);
-      }
-    }
-
-    return map;
   }
 
   // eslint-disable-next-line sonarjs/cognitive-complexity
