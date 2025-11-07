@@ -26,8 +26,31 @@ const parseOtelHeaders = (headerStr?: string) => {
 
 const headers = parseOtelHeaders(process.env.OTEL_EXPORTER_OTLP_HEADERS);
 
+const isDevelopment = process.env.NODE_ENV !== 'production';
+
+// Development fallbacks so local tracing/logging works without manual env setup.
+const devOtelDefaults = {
+  OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318/v1/traces',
+  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: 'http://localhost:4318/v1/logs',
+  OTEL_TRACES_SAMPLER: 'always_on',
+  OTEL_SERVICE_NAME: 'teable',
+  OTEL_SAMPLER_RATIO: '1.0',
+} as const;
+
+type DevOtelKey = keyof typeof devOtelDefaults;
+
+const resolveDevDefault = (key: DevOtelKey) => {
+  return process.env[key] ?? (isDevelopment ? devOtelDefaults[key] : undefined);
+};
+
+const traceEndpoint = resolveDevDefault('OTEL_EXPORTER_OTLP_ENDPOINT');
+const logEndpoint = resolveDevDefault('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT');
+const samplerRatioEnv = resolveDevDefault('OTEL_SAMPLER_RATIO');
+const traceSamplerSetting = resolveDevDefault('OTEL_TRACES_SAMPLER');
+const serviceName = resolveDevDefault('OTEL_SERVICE_NAME') || 'teable';
+
 const traceExporterOptions = {
-  url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+  url: traceEndpoint,
   headers: {
     'Content-Type': 'application/x-protobuf',
     ...headers,
@@ -39,7 +62,7 @@ const traceExporter = traceExporterOptions.url
   : undefined;
 
 const logExporterOptions = {
-  url: process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+  url: logEndpoint,
   headers: {
     'Content-Type': 'application/x-protobuf',
     ...headers,
@@ -50,14 +73,22 @@ const logExporter = logExporterOptions.url ? new OTLPLogExporter(logExporterOpti
 
 const { BatchLogRecordProcessor } = opentelemetry.logs;
 
-const { ParentBasedSampler, TraceIdRatioBasedSampler } = opentelemetry.node;
+const { AlwaysOnSampler, ParentBasedSampler, TraceIdRatioBasedSampler } = opentelemetry.node;
+
+const parsedSamplerRatio = Number(samplerRatioEnv);
+const samplerRatio = Number.isFinite(parsedSamplerRatio) ? parsedSamplerRatio : 0.1;
+const resolvedTraceSampler = traceSamplerSetting?.toLowerCase();
+const sampler =
+  resolvedTraceSampler === 'always_on'
+    ? new AlwaysOnSampler()
+    : new ParentBasedSampler({
+        root: new TraceIdRatioBasedSampler(samplerRatio),
+      });
 
 const otelSDK = new opentelemetry.NodeSDK({
   traceExporter,
   logRecordProcessors: logExporter ? [new BatchLogRecordProcessor(logExporter)] : [],
-  sampler: new ParentBasedSampler({
-    root: new TraceIdRatioBasedSampler(Number(process.env.OTEL_SAMPLER_RATIO) || 0.1),
-  }),
+  sampler,
   instrumentations: [
     new HttpInstrumentation({
       ignoreIncomingRequestHook: (request) => {
@@ -80,7 +111,7 @@ const otelSDK = new opentelemetry.NodeSDK({
     new PinoInstrumentation(),
   ],
   resource: resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'teable',
+    [ATTR_SERVICE_NAME]: serviceName,
     [ATTR_SERVICE_VERSION]: process.env.BUILD_VERSION,
   }),
 });

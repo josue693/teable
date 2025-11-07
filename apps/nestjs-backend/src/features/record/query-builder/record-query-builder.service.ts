@@ -172,6 +172,7 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       builder: options.builder,
       useQueryModel: options.useQueryModel,
       projection: options.projection,
+      projectionByTable: options.projectionByTable,
       limit: options.limit,
       offset: options.offset,
       filter,

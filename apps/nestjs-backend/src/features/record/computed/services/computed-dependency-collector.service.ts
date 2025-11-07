@@ -9,15 +9,16 @@ import type {
   IConditionalRollupFieldOptions,
   IConditionalLookupOptions,
   FieldCore,
+  TableDomain,
 } from '@teable/core';
-import { DbFieldType, FieldType, isFieldReferenceValue } from '@teable/core';
+import { DbFieldType, DriverClient, FieldType, isFieldReferenceValue } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectModel } from 'nest-knexjs';
 import { InjectDbProvider } from '../../../../db-provider/db.provider';
 import { IDbProvider } from '../../../../db-provider/db.provider.interface';
 import type { ICellContext } from '../../../calculation/utils/changes';
-import { createFieldInstanceByRaw } from '../../../field/model/factory';
+import { TableDomainQueryService } from '../../../table-domain/table-domain-query.service';
 
 export interface ICellBasicContext {
   recordId: string;
@@ -46,6 +47,10 @@ interface IConditionalRollupAdjacencyEdge {
   filter?: IFilter | null;
 }
 
+interface ICollectorExecutionContext {
+  getTableDomain(tableId: string): Promise<TableDomain>;
+}
+
 const ALL_RECORDS = Symbol('ALL_RECORDS');
 const MAX_CONDITIONAL_ROLLUP_SAMPLE = 10_000;
 
@@ -54,20 +59,64 @@ export class ComputedDependencyCollectorService {
   private logger = new Logger(ComputedDependencyCollectorService.name);
   constructor(
     private readonly prismaService: PrismaService,
+    private readonly tableDomainQueryService: TableDomainQueryService,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
     @InjectDbProvider() private readonly dbProvider: IDbProvider
   ) {}
 
-  private async getDbTableName(tableId: string): Promise<string> {
-    const { dbTableName } = await this.prismaService.txClient().tableMeta.findUniqueOrThrow({
-      where: { id: tableId },
-      select: { dbTableName: true },
-    });
-    return dbTableName;
+  private createExecutionContext(): ICollectorExecutionContext {
+    const cache = new Map<string, Promise<TableDomain>>();
+    return {
+      getTableDomain: (tableId: string) => {
+        let promise = cache.get(tableId);
+        if (!promise) {
+          promise = this.tableDomainQueryService.getTableDomainById(tableId);
+          cache.set(tableId, promise);
+        }
+        return promise;
+      },
+    };
   }
 
-  private async getAllRecordIds(tableId: string): Promise<string[]> {
-    const dbTable = await this.getDbTableName(tableId);
+  private async getTableDomain(
+    tableId: string,
+    ctx?: ICollectorExecutionContext
+  ): Promise<TableDomain> {
+    if (ctx) {
+      return ctx.getTableDomain(tableId);
+    }
+    return this.tableDomainQueryService.getTableDomainById(tableId);
+  }
+
+  private buildSortFieldAccessor(column: string): Knex.Raw {
+    if (this.dbProvider.driver === DriverClient.Pg) {
+      return this.knex.raw(`??::json->'sort'->>'fieldId'`, [column]);
+    }
+    return this.knex.raw(`json_extract(??, '$.sort.fieldId')`, [column]);
+  }
+
+  private applySortFieldFilter(
+    qb: Knex.QueryBuilder,
+    column: string,
+    values: readonly string[]
+  ): void {
+    if (!values.length) return;
+    const accessor = this.buildSortFieldAccessor(column);
+    const { sql, bindings } = accessor.toSQL();
+    const placeholders = values.map(() => '?').join(', ');
+    qb.whereRaw(`${sql} in (${placeholders})`, [...bindings, ...values]);
+  }
+
+  private async getDbTableName(tableId: string, ctx?: ICollectorExecutionContext): Promise<string> {
+    const tableDomain = await this.getTableDomain(tableId, ctx);
+    return tableDomain.dbTableName;
+  }
+
+  private async getAllRecordIds(
+    tableId: string,
+    ctx?: ICollectorExecutionContext
+  ): Promise<string[]> {
+    const dbTable = await this.getDbTableName(tableId, ctx);
     const { schema, table } = this.splitDbTableName(dbTable);
     const qb = (schema ? this.knex.withSchema(schema) : this.knex).select('__id').from(table);
     const rows = await this.prismaService
@@ -176,21 +225,21 @@ export class ComputedDependencyCollectorService {
 
   private async loadFieldInstances(
     tableId: string,
-    fieldIds: Iterable<string>
+    fieldIds: Iterable<string>,
+    ctx?: ICollectorExecutionContext
   ): Promise<Map<string, FieldCore>> {
     const ids = Array.from(new Set(Array.from(fieldIds).filter(Boolean)));
     if (!ids.length) {
       return new Map();
     }
 
-    const rows = await this.prismaService.txClient().field.findMany({
-      where: { tableId, id: { in: ids }, deletedTime: null },
-    });
-
+    const tableDomain = await this.getTableDomain(tableId, ctx);
     const map = new Map<string, FieldCore>();
-    for (const row of rows) {
-      const instance = createFieldInstanceByRaw(row) as unknown as FieldCore;
-      map.set(instance.id, instance);
+    for (const id of ids) {
+      const field = tableDomain.getField(id);
+      if (field) {
+        map.set(field.id, field);
+      }
     }
     return map;
   }
@@ -201,33 +250,43 @@ export class ComputedDependencyCollectorService {
     if (!sortFieldIds.length) return [];
 
     const prisma = this.prismaService.txClient();
-    const sortIdSet = new Set(sortFieldIds);
-    const results: Array<{ tableId: string; fieldId: string; sortFieldId: string }> = [];
+    const conditionalQuery = this.knex('field')
+      .select({
+        tableId: 'table_id',
+        fieldId: 'id',
+        sortFieldId: this.buildSortFieldAccessor('options'),
+      })
+      .whereNull('deleted_time')
+      .where('type', FieldType.ConditionalRollup)
+      .modify((qb) => this.applySortFieldFilter(qb, 'options', sortFieldIds));
+    const lookupQuery = this.knex('field')
+      .select({
+        tableId: 'table_id',
+        fieldId: 'id',
+        sortFieldId: this.buildSortFieldAccessor('lookup_options'),
+      })
+      .whereNull('deleted_time')
+      .where('is_conditional_lookup', true)
+      .modify((qb) => this.applySortFieldFilter(qb, 'lookup_options', sortFieldIds));
 
     const [conditionalRollups, conditionalLookups] = await Promise.all([
-      prisma.field.findMany({
-        where: { deletedTime: null, type: FieldType.ConditionalRollup },
-        select: { id: true, tableId: true, options: true },
-      }),
-      prisma.field.findMany({
-        where: { deletedTime: null, isConditionalLookup: true },
-        select: { id: true, tableId: true, lookupOptions: true },
-      }),
+      prisma.$queryRawUnsafe<Array<{ tableId: string; fieldId: string; sortFieldId: string }>>(
+        conditionalQuery.toQuery()
+      ),
+      prisma.$queryRawUnsafe<Array<{ tableId: string; fieldId: string; sortFieldId: string }>>(
+        lookupQuery.toQuery()
+      ),
     ]);
 
+    const results: Array<{ tableId: string; fieldId: string; sortFieldId: string }> = [];
     for (const row of conditionalRollups) {
-      const options = this.parseOptionsLoose<IConditionalRollupFieldOptions>(row.options);
-      const sortFieldId = options?.sort?.fieldId;
-      if (sortFieldId && sortIdSet.has(sortFieldId)) {
-        results.push({ tableId: row.tableId, fieldId: row.id, sortFieldId });
+      if (row.sortFieldId) {
+        results.push(row);
       }
     }
-
     for (const row of conditionalLookups) {
-      const options = this.parseOptionsLoose<IConditionalLookupOptions>(row.lookupOptions);
-      const sortFieldId = options?.sort?.fieldId;
-      if (sortFieldId && sortIdSet.has(sortFieldId)) {
-        results.push({ tableId: row.tableId, fieldId: row.id, sortFieldId });
+      if (row.sortFieldId) {
+        results.push(row);
       }
     }
 
@@ -243,17 +302,34 @@ export class ComputedDependencyCollectorService {
   /**
    * Resolve link field IDs among the provided field IDs and include their symmetric counterparts.
    */
-  private async resolveRelatedLinkFieldIds(fieldIds: string[]): Promise<string[]> {
+  private async resolveRelatedLinkFieldIds(
+    fieldIds: string[],
+    fieldToTableMap?: Map<string, string>,
+    ctx?: ICollectorExecutionContext
+  ): Promise<string[]> {
     if (!fieldIds.length) return [];
-    const rows = await this.prismaService.txClient().field.findMany({
-      where: { id: { in: fieldIds }, type: FieldType.Link, isLookup: null, deletedTime: null },
-      select: { id: true, options: true },
-    });
+    const groupedByTable = new Map<string, string[]>();
+    for (const fieldId of fieldIds) {
+      const tableId = fieldToTableMap?.get(fieldId);
+      if (!tableId) continue;
+      const bucket = groupedByTable.get(tableId);
+      if (bucket) {
+        bucket.push(fieldId);
+      } else {
+        groupedByTable.set(tableId, [fieldId]);
+      }
+    }
+
     const result = new Set<string>();
-    for (const r of rows) {
-      result.add(r.id);
-      const opts = this.parseOptionsLoose<{ symmetricFieldId?: string }>(r.options);
-      if (opts?.symmetricFieldId) result.add(opts.symmetricFieldId);
+    for (const [tableId, ids] of groupedByTable) {
+      const tableDomain = await this.getTableDomain(tableId, ctx);
+      for (const id of ids) {
+        const field = tableDomain.getField(id);
+        if (!field || field.type !== FieldType.Link || field.isLookup) continue;
+        result.add(field.id);
+        const opts = this.parseOptionsLoose<{ symmetricFieldId?: string }>(field.options);
+        if (opts?.symmetricFieldId) result.add(opts.symmetricFieldId);
+      }
     }
     return Array.from(result);
   }
@@ -355,20 +431,16 @@ export class ComputedDependencyCollectorService {
   private async getLinkedRecordIds(
     targetTableId: string,
     changedTableId: string,
-    changedRecordIds: string[]
+    changedRecordIds: string[],
+    ctx?: ICollectorExecutionContext
   ): Promise<string[]> {
     if (!changedRecordIds.length) return [];
 
     // Fetch link fields on targetTableId that point to changedTableId
-    const linkFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        tableId: targetTableId,
-        type: FieldType.Link,
-        isLookup: null,
-        deletedTime: null,
-      },
-      select: { id: true, options: true },
-    });
+    const targetTableDomain = await this.getTableDomain(targetTableId, ctx);
+    const linkFields = targetTableDomain.fieldList.filter(
+      (field) => field.type === FieldType.Link && !field.isLookup
+    );
     // Build a UNION query across all matching link junction tables
     const selects = [] as Knex.QueryBuilder[];
     for (const lf of linkFields) {
@@ -396,7 +468,8 @@ export class ComputedDependencyCollectorService {
   private async getConditionalRollupImpactedRecordIds(
     edge: IConditionalRollupAdjacencyEdge,
     foreignRecordIds: string[],
-    changeContextMap?: Map<string, ICellContext[]>
+    changeContextMap?: Map<string, ICellContext[]>,
+    ctx?: ICollectorExecutionContext
   ): Promise<string[] | typeof ALL_RECORDS> {
     if (!foreignRecordIds.length) {
       return [];
@@ -428,12 +501,16 @@ export class ComputedDependencyCollectorService {
     }
 
     const uniqueHostFieldIds = Array.from(new Set(hostFieldRefs.map((ref) => ref.fieldId)));
-    const hostFieldMap = await this.loadFieldInstances(edge.tableId, uniqueHostFieldIds);
+    const hostFieldMap = await this.loadFieldInstances(edge.tableId, uniqueHostFieldIds, ctx);
     if (hostFieldMap.size !== uniqueHostFieldIds.length) {
       return ALL_RECORDS;
     }
 
-    const foreignFieldMap = await this.loadFieldInstances(edge.foreignTableId, foreignFieldIds);
+    const foreignFieldMap = await this.loadFieldInstances(
+      edge.foreignTableId,
+      foreignFieldIds,
+      ctx
+    );
     if (foreignFieldMap.size !== foreignFieldIds.size) {
       return ALL_RECORDS;
     }
@@ -459,8 +536,8 @@ export class ComputedDependencyCollectorService {
       return ALL_RECORDS;
     }
 
-    const hostTableName = await this.getDbTableName(edge.tableId);
-    const foreignTableName = await this.getDbTableName(edge.foreignTableId);
+    const hostTableName = await this.getDbTableName(edge.tableId, ctx);
+    const foreignTableName = await this.getDbTableName(edge.foreignTableId, ctx);
 
     const hostAlias = '__host';
     const foreignAlias = '__foreign';
@@ -706,7 +783,10 @@ export class ComputedDependencyCollectorService {
   /**
    * Build adjacency maps for link and conditional rollup relationships among the supplied tables.
    */
-  private async getAdjacencyMaps(tables: string[]): Promise<{
+  private async getAdjacencyMaps(
+    tables: string[],
+    ctx?: ICollectorExecutionContext
+  ): Promise<{
     link: Record<string, Set<string>>;
     conditionalRollup: Record<string, IConditionalRollupAdjacencyEdge[]>;
   }> {
@@ -717,68 +797,42 @@ export class ComputedDependencyCollectorService {
       return { link: linkAdj, conditionalRollup: conditionalRollupAdj };
     }
 
-    const linkFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        tableId: { in: tables },
-        type: FieldType.Link,
-        isLookup: null,
-        deletedTime: null,
-      },
-      select: { id: true, tableId: true, options: true },
-    });
+    for (const tableId of tables) {
+      const tableDomain = await this.getTableDomain(tableId, ctx);
+      for (const field of tableDomain.fieldList) {
+        if (field.type === FieldType.Link && !field.isLookup) {
+          const opts = this.parseLinkOptions(field.options);
+          const from = opts?.foreignTableId;
+          if (from) {
+            (linkAdj[from] ||= new Set<string>()).add(tableId);
+          }
+          continue;
+        }
 
-    for (const lf of linkFields) {
-      const opts = this.parseLinkOptions(lf.options);
-      if (!opts) continue;
-      const from = opts.foreignTableId;
-      const to = lf.tableId;
-      if (!from || !to) continue;
-      (linkAdj[from] ||= new Set<string>()).add(to);
-    }
+        if (field.type === FieldType.ConditionalRollup) {
+          const opts = this.parseOptionsLoose<IConditionalRollupFieldOptions>(field.options);
+          const foreignTableId = opts?.foreignTableId;
+          if (!foreignTableId) continue;
+          (conditionalRollupAdj[foreignTableId] ||= []).push({
+            tableId,
+            fieldId: field.id,
+            foreignTableId,
+            filter: opts?.filter ?? undefined,
+          });
+          continue;
+        }
 
-    const conditionalReferenceFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        tableId: { in: tables },
-        deletedTime: null,
-        OR: [
-          { type: FieldType.ConditionalRollup },
-          { AND: [{ isLookup: true }, { isConditionalLookup: true }] },
-        ],
-      },
-      select: {
-        id: true,
-        tableId: true,
-        options: true,
-        lookupOptions: true,
-        type: true,
-        isConditionalLookup: true,
-      },
-    });
-
-    for (const field of conditionalReferenceFields) {
-      if (field.type === FieldType.ConditionalRollup) {
-        const opts = this.parseOptionsLoose<IConditionalRollupFieldOptions>(field.options);
-        const foreignTableId = opts?.foreignTableId;
-        if (!foreignTableId) continue;
-        (conditionalRollupAdj[foreignTableId] ||= []).push({
-          tableId: field.tableId,
-          fieldId: field.id,
-          foreignTableId,
-          filter: opts?.filter ?? undefined,
-        });
-        continue;
-      }
-
-      if (field.isConditionalLookup) {
-        const opts = this.parseOptionsLoose<IConditionalLookupOptions>(field.lookupOptions);
-        const foreignTableId = opts?.foreignTableId;
-        if (!foreignTableId) continue;
-        (conditionalRollupAdj[foreignTableId] ||= []).push({
-          tableId: field.tableId,
-          fieldId: field.id,
-          foreignTableId,
-          filter: opts?.filter ?? undefined,
-        });
+        if (field.isConditionalLookup) {
+          const opts = this.parseOptionsLoose<IConditionalLookupOptions>(field.lookupOptions);
+          const foreignTableId = opts?.foreignTableId;
+          if (!foreignTableId) continue;
+          (conditionalRollupAdj[foreignTableId] ||= []).push({
+            tableId,
+            fieldId: field.id,
+            foreignTableId,
+            filter: opts?.filter ?? undefined,
+          });
+        }
       }
     }
 
@@ -793,18 +847,38 @@ export class ComputedDependencyCollectorService {
    * - Propagates recordIds across link relationships via junction tables.
    */
   async collectForFieldChanges(sources: IFieldChangeSource[]): Promise<IComputedImpactByTable> {
+    const execCtx = this.createExecutionContext();
     const startFieldIds = Array.from(new Set(sources.flatMap((s) => s.fieldIds || [])));
     if (!startFieldIds.length) return {};
 
     // Group starting fields by table and fetch minimal metadata
-    const startFields = await this.prismaService.txClient().field.findMany({
-      where: { id: { in: startFieldIds }, deletedTime: null },
-      select: { id: true, tableId: true, isComputed: true, isLookup: true, type: true },
-    });
-    const byTable = startFields.reduce<Record<string, string[]>>((acc, f) => {
-      (acc[f.tableId] ||= []).push(f.id);
-      return acc;
-    }, {});
+    const fieldToTableMap = new Map<string, string>();
+    const byTable: Record<string, string[]> = {};
+    const startFields: Array<{
+      id: string;
+      tableId: string;
+      isComputed?: boolean;
+      isLookup?: boolean;
+      type: FieldType;
+    }> = [];
+
+    for (const source of sources) {
+      if (!source.fieldIds?.length) continue;
+      const tableDomain = await this.getTableDomain(source.tableId, execCtx);
+      for (const fieldId of source.fieldIds) {
+        const field = tableDomain.getField(fieldId);
+        if (!field) continue;
+        startFields.push({
+          id: field.id,
+          tableId: source.tableId,
+          isComputed: field.isComputed,
+          isLookup: field.isLookup,
+          type: field.type,
+        });
+        fieldToTableMap.set(field.id, source.tableId);
+        (byTable[source.tableId] ||= []).push(field.id);
+      }
+    }
 
     // 1) Dependent fields grouped by table
     const depByTable = await this.collectDependentFieldsByTable(startFieldIds);
@@ -833,7 +907,11 @@ export class ComputedDependencyCollectorService {
       }).fieldIds.add(fieldId);
     }
 
-    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(startFieldIds);
+    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(
+      startFieldIds,
+      fieldToTableMap,
+      execCtx
+    );
     const fallbackLookupIds = new Set<string>();
     if (relatedLinkIds.length) {
       const byTable = await this.findLookupsByLinkIds(relatedLinkIds);
@@ -878,8 +956,10 @@ export class ComputedDependencyCollectorService {
 
     // 3) Build adjacency among impacted + origin tables and propagate via links
     const tablesForAdjacency = Array.from(new Set([...Object.keys(impact), ...originTableIds]));
-    const { link: linkAdj, conditionalRollup: referenceAdj } =
-      await this.getAdjacencyMaps(tablesForAdjacency);
+    const { link: linkAdj, conditionalRollup: referenceAdj } = await this.getAdjacencyMaps(
+      tablesForAdjacency,
+      execCtx
+    );
 
     const queue: string[] = [...originTableIds];
     const expandedAllRecords = new Set<string>();
@@ -910,7 +990,7 @@ export class ComputedDependencyCollectorService {
         });
         shouldMaterializeAllRecords = linkTargets.length > 0 || edgesRequiringIds.length > 0;
         if (shouldMaterializeAllRecords) {
-          const ids = await this.getAllRecordIds(src);
+          const ids = await this.getAllRecordIds(src, execCtx);
           currentIds = ids;
           recordSets[src] = new Set(ids);
         }
@@ -919,8 +999,12 @@ export class ComputedDependencyCollectorService {
       }
       if (!currentIds.length && shouldMaterializeAllRecords) continue;
 
-      for (const dst of linkTargets) {
-        const linked = await this.getLinkedRecordIds(dst, src, currentIds);
+      const linkPromises = linkTargets.map(async (dst) => {
+        const linked = await this.getLinkedRecordIds(dst, src, currentIds, execCtx);
+        return { dst, linked };
+      });
+      const linkResults = await Promise.all(linkPromises);
+      for (const { dst, linked } of linkResults) {
         if (!linked.length) continue;
         const existingDst = recordSets[dst];
         if (existingDst === ALL_RECORDS) {
@@ -941,21 +1025,43 @@ export class ComputedDependencyCollectorService {
         if (added) queue.push(dst);
       }
 
+      const eagerReferenceMatches: Array<{
+        edge: IConditionalRollupAdjacencyEdge;
+        matched: typeof ALL_RECORDS;
+      }> = [];
+      const referencePromises: Array<
+        Promise<{ edge: IConditionalRollupAdjacencyEdge; matched: string[] | typeof ALL_RECORDS }>
+      > = [];
       for (const edge of referenceEdges) {
         const targetGroup = impact[edge.tableId];
         if (!targetGroup || !targetGroup.fieldIds.has(edge.fieldId)) continue;
-        let matched: string[] | typeof ALL_RECORDS;
         if (
           rawSet === ALL_RECORDS &&
           (!shouldMaterializeAllRecords ||
             recordSets[edge.tableId] === ALL_RECORDS ||
             edge.tableId === src)
         ) {
-          matched = ALL_RECORDS;
-        } else {
-          if (!currentIds.length) continue;
-          matched = await this.getConditionalRollupImpactedRecordIds(edge, currentIds);
+          eagerReferenceMatches.push({ edge, matched: ALL_RECORDS });
+          continue;
         }
+        if (!currentIds.length) continue;
+        referencePromises.push(
+          this.getConditionalRollupImpactedRecordIds(edge, currentIds, undefined, execCtx).then(
+            (matched) => ({
+              edge,
+              matched,
+            })
+          )
+        );
+      }
+
+      const referenceResults = [
+        ...eagerReferenceMatches,
+        ...(await Promise.all(referencePromises)),
+      ];
+      for (const { edge, matched } of referenceResults) {
+        const targetGroup = impact[edge.tableId];
+        if (!targetGroup || !targetGroup.fieldIds.has(edge.fieldId)) continue;
         if (matched === ALL_RECORDS) {
           targetGroup.preferAutoNumberPaging = true;
           if (recordSets[edge.tableId] !== ALL_RECORDS) {
@@ -1063,10 +1169,13 @@ export class ComputedDependencyCollectorService {
     ctxs: ICellContext[],
     excludeFieldIds?: string[]
   ): Promise<IComputedImpactByTable> {
+    const execCtx = this.createExecutionContext();
     if (!ctxs.length) return {};
 
     const changedFieldIds = Array.from(new Set(ctxs.map((c) => c.fieldId)));
     const changedRecordIds = Array.from(new Set(ctxs.map((c) => c.recordId)));
+    const fieldToTableMap = new Map<string, string>();
+    changedFieldIds.forEach((fid) => fieldToTableMap.set(fid, tableId));
 
     // 1) Transitive dependents grouped by table (SQL CTE + join field)
     const contextByRecord = ctxs.reduce<Map<string, ICellContext[]>>((map, ctx) => {
@@ -1079,7 +1188,11 @@ export class ComputedDependencyCollectorService {
       return map;
     }, new Map());
 
-    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(changedFieldIds);
+    const relatedLinkIds = await this.resolveRelatedLinkFieldIds(
+      changedFieldIds,
+      fieldToTableMap,
+      execCtx
+    );
     const traversalFieldIds = Array.from(new Set([...changedFieldIds, ...relatedLinkIds]));
 
     const depByTable = await this.collectDependentFieldsByTable(traversalFieldIds, excludeFieldIds);
@@ -1126,15 +1239,11 @@ export class ComputedDependencyCollectorService {
     // Include symmetric link fields (if any) on the foreign table so their values
     // are refreshed as well. The link fields themselves are already included by
     // SQL union in collectDependentFieldsByTable.
-    const linkFields = await this.prismaService.txClient().field.findMany({
-      where: {
-        id: { in: changedFieldIds },
-        type: FieldType.Link,
-        isLookup: null,
-        deletedTime: null,
-      },
-      select: { id: true, tableId: true, options: true },
-    });
+    const changedFieldIdSet = new Set(changedFieldIds);
+    const currentTableDomain = await this.getTableDomain(tableId, execCtx);
+    const linkFields = currentTableDomain.fieldList.filter(
+      (field) => changedFieldIdSet.has(field.id) && field.type === FieldType.Link && !field.isLookup
+    );
 
     // Record planned foreign recordIds per foreign table based on incoming link cell new/old values
     const plannedForeignRecordIds: Record<string, Set<string>> = {};
@@ -1203,8 +1312,10 @@ export class ComputedDependencyCollectorService {
     }
     // Build adjacency restricted to impacted tables + origin
     const impactedTables = Array.from(new Set([...Object.keys(impact), tableId]));
-    const { link: linkAdj, conditionalRollup: referenceAdj } =
-      await this.getAdjacencyMaps(impactedTables);
+    const { link: linkAdj, conditionalRollup: referenceAdj } = await this.getAdjacencyMaps(
+      impactedTables,
+      execCtx
+    );
 
     // BFS-like propagation over table graph
     const queue: string[] = [tableId];
@@ -1236,7 +1347,7 @@ export class ComputedDependencyCollectorService {
         });
         shouldMaterializeAllRecords = linkTargets.length > 0 || edgesRequiringIds.length > 0;
         if (shouldMaterializeAllRecords) {
-          const ids = await this.getAllRecordIds(src);
+          const ids = await this.getAllRecordIds(src, execCtx);
           currentIds = ids;
           recordSets[src] = new Set(ids);
         }
@@ -1245,8 +1356,12 @@ export class ComputedDependencyCollectorService {
       }
       if (!currentIds.length && shouldMaterializeAllRecords) continue;
 
-      for (const dst of linkTargets) {
-        const linked = await this.getLinkedRecordIds(dst, src, currentIds);
+      const linkPromises = linkTargets.map(async (dst) => {
+        const linked = await this.getLinkedRecordIds(dst, src, currentIds, execCtx);
+        return { dst, linked };
+      });
+      const linkResults = await Promise.all(linkPromises);
+      for (const { dst, linked } of linkResults) {
         if (!linked.length) continue;
         const existingDst = recordSets[dst];
         if (existingDst === ALL_RECORDS) {
@@ -1267,25 +1382,44 @@ export class ComputedDependencyCollectorService {
         if (added) queue.push(dst);
       }
 
+      const eagerReferenceMatches: Array<{
+        edge: IConditionalRollupAdjacencyEdge;
+        matched: typeof ALL_RECORDS;
+      }> = [];
+      const referencePromises: Array<
+        Promise<{ edge: IConditionalRollupAdjacencyEdge; matched: string[] | typeof ALL_RECORDS }>
+      > = [];
       for (const edge of referenceEdges) {
         const targetGroup = impact[edge.tableId];
         if (!targetGroup || !targetGroup.fieldIds.has(edge.fieldId)) continue;
-        let matched: string[] | typeof ALL_RECORDS;
         if (
           rawSet === ALL_RECORDS &&
           (!shouldMaterializeAllRecords ||
             recordSets[edge.tableId] === ALL_RECORDS ||
             edge.tableId === src)
         ) {
-          matched = ALL_RECORDS;
-        } else {
-          if (!currentIds.length) continue;
-          matched = await this.getConditionalRollupImpactedRecordIds(
-            edge,
-            currentIds,
-            src === tableId ? contextByRecord : undefined
-          );
+          eagerReferenceMatches.push({ edge, matched: ALL_RECORDS });
+          continue;
         }
+        if (!currentIds.length) continue;
+        const context = src === tableId ? contextByRecord : undefined;
+        referencePromises.push(
+          this.getConditionalRollupImpactedRecordIds(edge, currentIds, context, execCtx).then(
+            (matched) => ({
+              edge,
+              matched,
+            })
+          )
+        );
+      }
+
+      const referenceResults = [
+        ...eagerReferenceMatches,
+        ...(await Promise.all(referencePromises)),
+      ];
+      for (const { edge, matched } of referenceResults) {
+        const targetGroup = impact[edge.tableId];
+        if (!targetGroup || !targetGroup.fieldIds.has(edge.fieldId)) continue;
         if (matched === ALL_RECORDS) {
           targetGroup.preferAutoNumberPaging = true;
           if (recordSets[edge.tableId] !== ALL_RECORDS) {
