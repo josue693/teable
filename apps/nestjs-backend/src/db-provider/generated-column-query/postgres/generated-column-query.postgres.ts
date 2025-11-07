@@ -131,6 +131,10 @@ export class GeneratedColumnQueryPostgres extends GeneratedColumnQueryAbstract {
           WHEN 'number' THEN (${jsonExpr}) #>> '{}'
           WHEN 'boolean' THEN (${jsonExpr}) #>> '{}'
           WHEN 'null' THEN NULL
+          WHEN 'array' THEN COALESCE((
+            SELECT STRING_AGG(elem.value, ', ' ORDER BY elem.ordinality)
+            FROM jsonb_array_elements_text(${jsonExpr}) WITH ORDINALITY AS elem(value, ordinality)
+          ), '')
           ELSE (${jsonExpr})::text
         END`;
   }

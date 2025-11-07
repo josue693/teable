@@ -2720,6 +2720,48 @@ describe('OpenAPI formula (e2e)', () => {
       expect(concatValue).toBe('4Readymedium4xxxxxxx');
     });
 
+    it('should compare multi select values against literals inside IF branches', async () => {
+      const equalityFormula = await createField(table1Id, {
+        name: 'if-multi-select-equals',
+        type: FieldType.Formula,
+        options: {
+          expression: `IF({${multiSelectFieldRo.id}} = "Alpha", 1, 2)`,
+        },
+      });
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [multiSelectFieldRo.name]: ['Alpha'],
+            },
+          },
+        ],
+      });
+      const recordId = records[0].id;
+
+      const readValue = async () => {
+        const record = await getRecord(table1Id, recordId);
+        return record.data.fields[equalityFormula.name];
+      };
+
+      let value = await readValue();
+      expect(value).toBe(1);
+
+      await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [multiSelectFieldRo.name]: ['Beta'],
+          },
+        },
+      });
+
+      value = await readValue();
+      expect(value).toBe(2);
+    });
+
     it('should evaluate SWITCH formulas with numeric branches and blank literals', async () => {
       const statusField = await createField(table1Id, {
         name: 'switch-select',
