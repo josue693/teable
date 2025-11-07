@@ -1,7 +1,7 @@
 import type { IRecord } from '@teable/core';
 import { deleteRecord } from '@teable/openapi';
 import { sonner } from '@teable/ui-lib';
-import { useCallback, useEffect, type FC, type PropsWithChildren } from 'react';
+import { useEffect, useState, type FC, type PropsWithChildren } from 'react';
 import { useLocalStorage } from 'react-use';
 import { LocalStorageKeys } from '../../config/local-storage-keys';
 import { StandaloneViewProvider, ViewProvider } from '../../context';
@@ -64,10 +64,7 @@ export const ExpandRecorder = (props: IExpandRecorderProps) => {
   const editable = Boolean(permission['record|update']);
   const canRead = Boolean(permission['record|read']);
   const canDelete = Boolean(permission['record|delete']);
-  const [recordHistoryVisible, setRecordHistoryVisible] = useLocalStorage<boolean>(
-    LocalStorageKeys.RecordHistoryVisible,
-    Boolean(showHistory)
-  );
+  const [recordHistoryVisible, setRecordHistoryVisible] = useState<boolean>(Boolean(showHistory));
 
   const [commentVisible, setCommentVisible] = useLocalStorage<boolean>(
     LocalStorageKeys.CommentVisible,
