@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { INestApplication } from '@nestjs/common';
 import type { IFieldRo, IFieldVo } from '@teable/core';
@@ -189,6 +190,151 @@ describe('Link/Formula circular dependency regression (e2e)', () => {
       }
       if (salesTable) {
         await permanentDeleteTable(baseId, salesTable.id);
+      }
+    }
+  });
+
+  it('avoids forward CTE joins when lookups bounce across symmetric links', async () => {
+    let hostTable: ITableFullVo | undefined;
+    let foreignTable: ITableFullVo | undefined;
+
+    try {
+      hostTable = await createTable(baseId, {
+        name: 'Forward CTE Host',
+        fields: [
+          {
+            name: 'Host Name',
+            type: FieldType.SingleLineText,
+          },
+        ],
+        records: [
+          {
+            fields: {
+              'Host Name': 'Alpha',
+            },
+          },
+        ],
+      });
+
+      foreignTable = await createTable(baseId, {
+        name: 'Forward CTE Foreign',
+        fields: [
+          {
+            name: 'Foreign Title',
+            type: FieldType.SingleLineText,
+          },
+        ],
+        records: [
+          {
+            fields: {
+              'Foreign Title': 'Beacon',
+            },
+          },
+        ],
+      });
+
+      const hostToForeignLink = await createField(hostTable.id, {
+        name: 'Foreign Link',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: foreignTable.id,
+        },
+      });
+
+      let foreignToHostLink: IFieldVo | undefined;
+      for (let attempt = 0; attempt < 5 && !foreignToHostLink; attempt++) {
+        // Wait for symmetric link creation to finish.
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const foreignFields = await getFields(foreignTable.id);
+        foreignToHostLink = foreignFields.find(
+          (field) =>
+            field.type === FieldType.Link &&
+            (field.options as { symmetricFieldId?: string })?.symmetricFieldId ===
+              hostToForeignLink.id
+        );
+      }
+
+      expect(foreignToHostLink).toBeDefined();
+      // eslint-disable-next-line no-console
+      console.log(
+        'link ids',
+        hostToForeignLink.id,
+        (hostToForeignLink.options as { symmetricFieldId?: string }).symmetricFieldId,
+        foreignToHostLink?.id,
+        (foreignToHostLink?.options as { symmetricFieldId?: string })?.symmetricFieldId
+      );
+      // Debug field ids for diagnosing CTE ordering issues
+      // eslint-disable-next-line no-console
+      console.log(
+        'hostToForeignLink',
+        hostToForeignLink.id,
+        'foreignToHostLink',
+        foreignToHostLink?.id
+      );
+
+      const foreignTitleFieldId = foreignTable.fields.find((f) => f.name === 'Foreign Title')!.id;
+
+      const hostLookupOfForeign = await createField(hostTable.id, {
+        name: 'Foreign Title Lookup',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: foreignTable.id,
+          linkFieldId: hostToForeignLink.id,
+          lookupFieldId: foreignTitleFieldId,
+        },
+      } as unknown as IFieldRo);
+
+      const foreignLookupOfHostLookup = await createField(foreignTable.id, {
+        name: 'Host Lookup Mirror',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: hostTable.id,
+          linkFieldId: foreignToHostLink!.id,
+          lookupFieldId: hostLookupOfForeign.id,
+        },
+      } as unknown as IFieldRo);
+
+      const hostRoundTripLookup = await createField(hostTable.id, {
+        name: 'Round Trip Title',
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: foreignTable.id,
+          linkFieldId: hostToForeignLink.id,
+          lookupFieldId: foreignLookupOfHostLookup.id,
+        },
+      } as unknown as IFieldRo);
+
+      await updateRecordByApi(hostTable.id, hostTable.records[0].id, hostToForeignLink.id, {
+        id: foreignTable.records[0].id,
+      });
+      // eslint-disable-next-line no-console
+      console.log(
+        'hostLookupOfForeign',
+        hostLookupOfForeign.id,
+        'foreignLookupOfHostLookup',
+        foreignLookupOfHostLookup.id,
+        'hostRoundTripLookup',
+        hostRoundTripLookup.id
+      );
+
+      const hostRecords = await getRecords(hostTable.id, { fieldKeyType: FieldKeyType.Id });
+      // eslint-disable-next-line no-console
+      console.log('host record fields', hostRecords.records[0].fields);
+      expect(hostRecords.records).toHaveLength(1);
+      const roundTripValue = hostRecords.records[0].fields[hostRoundTripLookup.id];
+      expect(typeof roundTripValue).toBe('string');
+      expect(roundTripValue).toBe('Beacon');
+    } finally {
+      if (hostTable) {
+        await permanentDeleteTable(baseId, hostTable.id);
+      }
+      if (foreignTable) {
+        await permanentDeleteTable(baseId, foreignTable.id);
       }
     }
   });

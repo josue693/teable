@@ -33,7 +33,7 @@ import type {
   IRecordSelectionMap,
   IMutableQueryBuilderState,
 } from './record-query-builder.interface';
-import { getTableAliasFromTable } from './record-query-builder.util';
+import { getTableAliasFromTable, makeScopedLinkCteKey } from './record-query-builder.util';
 import type { IRecordQueryDialectProvider } from './record-query-dialect.interface';
 
 /**
@@ -206,22 +206,25 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
       // For regular lookup fields, use the corresponding link field CTE
       if (field.lookupOptions && isLinkLookupOptions(field.lookupOptions)) {
         const { linkFieldId } = field.lookupOptions;
-        if (linkFieldId && fieldCteMap.has(linkFieldId)) {
-          const cteName = fieldCteMap.get(linkFieldId)!;
-          const flattenedExpr = this.dialect.flattenLookupCteValue(
-            cteName,
-            field.id,
-            !!field.isMultipleCellValue,
-            field.dbFieldType
-          );
-          if (flattenedExpr) {
-            this.state.setSelection(field.id, flattenedExpr);
-            return this.qb.client.raw(flattenedExpr);
+        if (linkFieldId) {
+          const scopedKey = makeScopedLinkCteKey(this.table, linkFieldId);
+          if (fieldCteMap.has(scopedKey)) {
+            const cteName = fieldCteMap.get(scopedKey)!;
+            const flattenedExpr = this.dialect.flattenLookupCteValue(
+              cteName,
+              field.id,
+              !!field.isMultipleCellValue,
+              field.dbFieldType
+            );
+            if (flattenedExpr) {
+              this.state.setSelection(field.id, flattenedExpr);
+              return this.qb.client.raw(flattenedExpr);
+            }
+            // Default: return CTE column directly
+            const rawExpression = this.qb.client.raw(`??."lookup_${field.id}"`, [cteName]);
+            this.state.setSelection(field.id, `"${cteName}"."lookup_${field.id}"`);
+            return rawExpression;
           }
-          // Default: return CTE column directly
-          const rawExpression = this.qb.client.raw(`??."lookup_${field.id}"`, [cteName]);
-          this.state.setSelection(field.id, `"${cteName}"."lookup_${field.id}"`);
-          return rawExpression;
         }
       }
 
@@ -356,7 +359,8 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
     }
 
     const fieldCteMap = this.state.getFieldCteMap();
-    if (!fieldCteMap?.has(field.id)) {
+    const scopedKey = makeScopedLinkCteKey(this.table, field.id);
+    if (!fieldCteMap?.has(scopedKey)) {
       // If we are selecting from a materialized view, the view already exposes
       // the projected column for this field, so select the physical column.
       if (this.shouldSelectRaw()) {
@@ -378,7 +382,7 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
       return raw;
     }
 
-    const cteName = fieldCteMap.get(field.id)!;
+    const cteName = fieldCteMap.get(scopedKey)!;
     // Return Raw expression for selecting from CTE
     const rawExpression = this.qb.client.raw(`??."link_value"`, [cteName]);
     // For WHERE clauses, store the CTE column reference
@@ -409,8 +413,8 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
     }
 
     const linkLookupOptions = field.lookupOptions;
-
-    if (!fieldCteMap?.has(linkLookupOptions.linkFieldId)) {
+    const scopedKey = makeScopedLinkCteKey(this.table, linkLookupOptions.linkFieldId);
+    if (!fieldCteMap?.has(scopedKey)) {
       if (this.rawProjection) {
         const columnSelector = this.getColumnSelector(field);
         this.state.setSelection(field.id, columnSelector);
@@ -444,7 +448,7 @@ export class FieldSelectVisitor implements IFieldVisitor<IFieldSelectName> {
       this.state.setSelection(field.id, nullExpr);
       return this.qb.client.raw(nullExpr);
     }
-    const cteName = fieldCteMap.get(linkLookupOptions.linkFieldId)!;
+    const cteName = fieldCteMap.get(scopedKey)!;
 
     // Return Raw expression for selecting pre-computed rollup value from link CTE
     const rawExpression = this.qb.client.raw(`??."rollup_${field.id}"`, [cteName]);
