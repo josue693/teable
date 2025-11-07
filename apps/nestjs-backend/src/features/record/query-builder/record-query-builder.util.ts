@@ -25,11 +25,6 @@ export function getLinkUsesJunctionTable(field: LinkFieldCore): boolean {
   );
 }
 
-export function makeScopedLinkCteKey(tableOrId: TableDomain | string, linkFieldId: string): string {
-  const tableId = typeof tableOrId === 'string' ? tableOrId : tableOrId.id;
-  return `${tableId}:${linkFieldId}`;
-}
-
 /**
  * Compute a minimal, ordered field list based on a projection of field IDs.
  * - Always respects `table.fields.ordered` ordering.

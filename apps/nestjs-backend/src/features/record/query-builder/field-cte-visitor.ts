@@ -81,7 +81,6 @@ import {
   getTableAliasFromTable,
   getOrderedFieldsByProjection,
   isDateLikeField,
-  makeScopedLinkCteKey,
 } from './record-query-builder.util';
 import type { IRecordQueryDialectProvider } from './record-query-dialect.interface';
 
@@ -113,300 +112,6 @@ const SUPPORTED_EQUALITY_RESIDUAL_OPERATORS = new Set<string>([
 ]);
 
 const JSON_AGG_FUNCTIONS = new Set(['array_compact', 'array_unique']);
-
-interface ILinkCteNode {
-  table: TableDomain;
-  linkField: LinkFieldCore;
-  dependencies: Map<string, LinkFieldCore>;
-}
-
-class LinkCteScheduler {
-  private readonly roots: Array<{ table: TableDomain; linkField: LinkFieldCore }> = [];
-  private readonly registeredRootKeys = new Set<string>();
-  private readonly visiting = new Set<string>();
-  private readonly visited = new Set<string>();
-  private readonly pathStack: Array<{
-    key: string;
-    node: { table: TableDomain; linkField: LinkFieldCore };
-  }> = [];
-  private readonly ordered: ILinkCteNode[] = [];
-  private planned = false;
-
-  constructor(
-    private readonly tables: Tables,
-    private readonly state: IReadonlyQueryBuilderState,
-    private readonly entryTable: TableDomain,
-    private readonly filteredMainFieldSet?: ReadonlySet<string>,
-    private readonly filteredFieldSetsByTable?: ReadonlyMap<string, ReadonlySet<string>>
-  ) {}
-
-  registerProjectionFields(fields: FieldCore[]): void {
-    for (const field of fields) {
-      this.registerFieldDependencies(field);
-    }
-  }
-
-  addRoot(table: TableDomain, linkField?: LinkFieldCore | null): void {
-    if (!linkField || linkField.hasError) {
-      return;
-    }
-    const key = this.getLinkNodeKey(table, linkField);
-    if (this.registeredRootKeys.has(key)) {
-      return;
-    }
-    this.registeredRootKeys.add(key);
-    this.roots.push({ table, linkField });
-  }
-
-  plan(): ILinkCteNode[] {
-    if (this.planned) {
-      return this.ordered;
-    }
-    for (const root of this.roots) {
-      this.visit(root.table, root.linkField);
-    }
-    this.planned = true;
-    return this.ordered;
-  }
-
-  private visit(table: TableDomain, linkField: LinkFieldCore): void {
-    if (this.state.hasFieldCte(makeScopedLinkCteKey(table, linkField.id))) {
-      return;
-    }
-    const key = this.getLinkNodeKey(table, linkField);
-    if (this.visited.has(key)) {
-      return;
-    }
-    if (this.visiting.has(key)) {
-      const cycleStartIndex = this.pathStack.findIndex((entry) => entry.key === key);
-      const cyclePath = this.pathStack
-        .slice(cycleStartIndex)
-        .map((entry) => entry.node.linkField.name);
-      cyclePath.push(linkField.name);
-      throw new Error(`Detected circular link dependency: ${cyclePath.join(' -> ')}`);
-    }
-
-    this.visiting.add(key);
-    this.pathStack.push({ key, node: { table, linkField } });
-
-    const localDependencies = this.collectLocalDependencies(table, linkField);
-    for (const dep of localDependencies.values()) {
-      this.visit(table, dep);
-    }
-
-    const dependencies = this.collectLinkDependencies(table, linkField);
-    const foreignTable = this.tables.getLinkForeignTable(linkField);
-    if (foreignTable) {
-      for (const dep of dependencies.values()) {
-        this.visit(foreignTable, dep);
-      }
-    }
-
-    this.pathStack.pop();
-    this.visiting.delete(key);
-    this.visited.add(key);
-    this.ordered.push({ table, linkField, dependencies });
-  }
-
-  private registerFieldDependencies(field: FieldCore): void {
-    const linkFields = field.getLinkFields(this.entryTable) ?? [];
-    for (const lf of linkFields) {
-      this.addRoot(this.entryTable, lf);
-    }
-    if (field.type === FieldType.Link) {
-      const linkField = field as LinkFieldCore;
-      this.addRoot(this.entryTable, linkField);
-      const symmetricId = (linkField.options as ILinkFieldOptions)?.symmetricFieldId;
-      const foreignTableId = linkField.options?.foreignTableId;
-      if (symmetricId && foreignTableId) {
-        const foreignTable = this.tables.getTable(foreignTableId);
-        const symmetricField = foreignTable?.getField(symmetricId) as LinkFieldCore | undefined;
-        if (foreignTable && symmetricField) {
-          this.addRoot(foreignTable, symmetricField);
-        }
-      }
-    }
-    if (field.isLookup) {
-      const lookupLinkId = getLinkFieldId(field.lookupOptions);
-      if (lookupLinkId) {
-        const lookupLink = this.entryTable.getField(lookupLinkId) as LinkFieldCore | undefined;
-        if (lookupLink) {
-          this.addRoot(this.entryTable, lookupLink);
-        }
-      }
-    }
-  }
-
-  private getLinkNodeKey(table: TableDomain, linkField: LinkFieldCore): string {
-    return `${table.id}:${linkField.id}`;
-  }
-
-  private collectLinkDependencies(
-    scopeTable: TableDomain,
-    linkField: LinkFieldCore
-  ): Map<string, LinkFieldCore> {
-    const foreignTable = this.tables.getLinkForeignTable(linkField);
-    if (!foreignTable) {
-      return new Map();
-    }
-
-    let lookupFields = linkField.getLookupFields(scopeTable);
-    let rollupFields = linkField.getRollupFields(scopeTable);
-
-    const scopedFilter =
-      this.filteredFieldSetsByTable?.get(scopeTable.id) ??
-      (scopeTable.id === this.entryTable.id ? this.filteredMainFieldSet : undefined);
-    if (scopedFilter && scopedFilter.size === 0) {
-      return new Map();
-    }
-    if (scopedFilter?.size) {
-      lookupFields = lookupFields.filter((f) => scopedFilter.has(f.id));
-      rollupFields = rollupFields.filter((f) => scopedFilter.has(f.id));
-    }
-
-    const nestedLinks = new Map<string, LinkFieldCore>();
-    const ensureLinkDependency = (candidate?: LinkFieldCore | null) => {
-      if (!candidate?.id || candidate.id === linkField.id) {
-        return;
-      }
-      const symmetricId = (candidate.options as ILinkFieldOptions)?.symmetricFieldId;
-      if (symmetricId && symmetricId === linkField.id && scopeTable.id !== this.entryTable.id) {
-        return;
-      }
-      if (!nestedLinks.has(candidate.id)) {
-        nestedLinks.set(candidate.id, candidate);
-      }
-    };
-
-    const collectFromField = (field: FieldCore | undefined, visited: Set<string> = new Set()) => {
-      if (!field || visited.has(field.id)) {
-        return;
-      }
-      visited.add(field.id);
-
-      if (field.type === FieldType.Link) {
-        ensureLinkDependency(field as LinkFieldCore);
-        const symmetric = (field.options as ILinkFieldOptions | undefined)?.symmetricFieldId;
-        if (symmetric) {
-          const symmetricField = this.entryTable.getField(symmetric) as LinkFieldCore | undefined;
-          if (symmetricField) {
-            ensureLinkDependency(symmetricField);
-          }
-        }
-      }
-
-      const viaLookupId = getLinkFieldId(field.lookupOptions);
-      if (viaLookupId) {
-        const nestedLinkField = foreignTable.getField(viaLookupId) as LinkFieldCore | undefined;
-        ensureLinkDependency(nestedLinkField);
-      }
-
-      const directLinks = field.getLinkFields(foreignTable);
-      for (const lf of directLinks) {
-        ensureLinkDependency(lf);
-      }
-
-      const maybeGetReferenceFields = (
-        field as unknown as {
-          getReferenceFields?: (table: TableDomain) => FieldCore[];
-        }
-      ).getReferenceFields;
-      if (typeof maybeGetReferenceFields === 'function') {
-        const referencedFields = maybeGetReferenceFields.call(field, foreignTable) ?? [];
-        for (const refField of referencedFields) {
-          collectFromField(refField, visited);
-        }
-      }
-    };
-
-    const addDependenciesFromLookup = (lookupField: FieldCore) => {
-      const target = lookupField.getForeignLookupField(foreignTable);
-      if (target) {
-        collectFromField(target);
-      } else {
-        const nestedId = lookupField.lookupOptions?.lookupFieldId;
-        const nestedField = nestedId ? foreignTable.getField(nestedId) : undefined;
-        if (nestedField?.type === FieldType.Link) {
-          ensureLinkDependency(nestedField as LinkFieldCore);
-        }
-      }
-    };
-
-    const addDependenciesFromRollup = (rollupField: FieldCore) => {
-      const target = rollupField.getForeignLookupField(foreignTable);
-      if (target) {
-        collectFromField(target);
-      } else {
-        const nestedId = rollupField.lookupOptions?.lookupFieldId;
-        const nestedField = nestedId ? foreignTable.getField(nestedId) : undefined;
-        if (nestedField?.type === FieldType.Link) {
-          ensureLinkDependency(nestedField as LinkFieldCore);
-        }
-      }
-    };
-
-    for (const lookupField of lookupFields) {
-      addDependenciesFromLookup(lookupField);
-    }
-    for (const rollupField of rollupFields) {
-      addDependenciesFromRollup(rollupField);
-    }
-
-    collectFromField(linkField.getForeignLookupField(foreignTable));
-    return nestedLinks;
-  }
-
-  private collectLocalDependencies(
-    scopeTable: TableDomain,
-    linkField: LinkFieldCore
-  ): Map<string, LinkFieldCore> {
-    const locals = new Map<string, LinkFieldCore>();
-    if (!linkField.isLookup) {
-      return locals;
-    }
-    const sourceLinkId = getLinkFieldId(linkField.lookupOptions);
-    if (!sourceLinkId || sourceLinkId === linkField.id) {
-      return locals;
-    }
-    const sourceLink = scopeTable.getField(sourceLinkId) as LinkFieldCore | undefined;
-    if (sourceLink && !sourceLink.hasError) {
-      locals.set(sourceLink.id, sourceLink);
-    }
-    return locals;
-  }
-}
-
-class ScopedSelectionStateWithCteFilter extends ScopedSelectionState {
-  private filtered?: ReadonlyMap<string, string>;
-
-  constructor(
-    base: IReadonlyQueryBuilderState,
-    private readonly blocked: ReadonlySet<string>
-  ) {
-    super(base);
-  }
-
-  override getFieldCteMap(): ReadonlyMap<string, string> {
-    if (!this.blocked?.size) {
-      return super.getFieldCteMap();
-    }
-    if (!this.filtered) {
-      const baseMap = super.getFieldCteMap();
-      if (!baseMap.size) {
-        this.filtered = baseMap;
-      } else {
-        const filtered = new Map<string, string>();
-        for (const [fieldId, cteName] of baseMap) {
-          if (!this.blocked.has(fieldId)) {
-            filtered.set(fieldId, cteName);
-          }
-        }
-        this.filtered = filtered;
-      }
-    }
-    return this.filtered;
-  }
-}
 
 function parseRollupFunctionName(expression: string): string {
   const match = expression.match(/^(\w+)\(\{values\}\)$/);
@@ -444,50 +149,13 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     private readonly joinedCtes?: Set<string>, // Track which CTEs are already JOINed in current scope
     private readonly isSingleValueRelationshipContext: boolean = false, // In ManyOne/OneOne CTEs, avoid aggregates
     private readonly foreignAliasOverride?: string,
-    private readonly currentLinkFieldId?: string,
-    private readonly resolvedLinkKeys?: ReadonlySet<string>
+    private readonly currentLinkFieldId?: string
   ) {}
   private get fieldCteMap() {
     return this.state.getFieldCteMap();
   }
-
-  private hasLinkCte(table: TableDomain, linkFieldId: string): boolean {
-    const key = makeScopedLinkCteKey(table, linkFieldId);
-    if (!this.fieldCteMap.has(key)) {
-      return false;
-    }
-    if (this.resolvedLinkKeys && !this.resolvedLinkKeys.has(key)) {
-      return false;
-    }
-    return true;
-  }
-
-  private getLinkCteName(table: TableDomain, linkFieldId: string): string | undefined {
-    return this.fieldCteMap.get(makeScopedLinkCteKey(table, linkFieldId));
-  }
-
-  private buildBlockedKeySet(table: TableDomain, linkFieldId: string): Set<string> {
-    const blocked = new Set<string>([makeScopedLinkCteKey(table, linkFieldId)]);
-    if (this.currentLinkFieldId) {
-      blocked.add(makeScopedLinkCteKey(this.table, this.currentLinkFieldId));
-    }
-    return blocked;
-  }
-
   private getForeignAlias(): string {
     return this.foreignAliasOverride || getTableAliasFromTable(this.foreignTable);
-  }
-
-  private isSymmetricToCurrentLink(table: TableDomain, linkFieldId: string): boolean {
-    if (!this.currentLinkFieldId) {
-      return false;
-    }
-    const linkField = table.getField(linkFieldId) as LinkFieldCore | undefined;
-    if (!linkField) {
-      return false;
-    }
-    const symmetricId = (linkField.options as ILinkFieldOptions | undefined)?.symmetricFieldId;
-    return symmetricId === this.currentLinkFieldId;
   }
   private getJsonAggregationFunction(fieldReference: string): string {
     return this.dialect.jsonAggregateNonNull(fieldReference);
@@ -674,30 +342,16 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     }
 
     const qb = this.qb.client.queryBuilder();
-    const createSelectVisitor = (blocked?: ReadonlySet<string>) => {
-      const scopedState =
-        blocked && blocked.size
-          ? new ScopedSelectionStateWithCteFilter(this.state, blocked)
-          : new ScopedSelectionState(this.state);
-      return new FieldSelectVisitor(
-        qb,
-        this.dbProvider,
-        this.foreignTable,
-        scopedState,
-        this.dialect,
-        undefined,
-        true,
-        true
-      );
-    };
-    const selectVisitor = createSelectVisitor();
-
-    const evaluateFieldExpression = (target: FieldCore, blocked?: ReadonlySet<string>): string => {
-      const visitorInstance =
-        blocked && blocked.size ? createSelectVisitor(blocked) : selectVisitor;
-      const result = target.accept(visitorInstance);
-      return typeof result === 'string' ? result : result.toSQL().sql;
-    };
+    const selectVisitor = new FieldSelectVisitor(
+      qb,
+      this.dbProvider,
+      this.foreignTable,
+      new ScopedSelectionState(this.state),
+      this.dialect,
+      undefined,
+      true,
+      true
+    );
 
     const foreignAlias = this.getForeignAlias();
     const targetLookupField = field.getForeignLookupField(this.foreignTable);
@@ -705,14 +359,14 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     if (!targetLookupField) {
       // Try to fetch via the CTE of the foreign link if present
       const nestedLinkFieldId = getLinkFieldId(field.lookupOptions);
+      const fieldCteMap = this.state.getFieldCteMap();
       // Guard against self-referencing the CTE being defined (would require WITH RECURSIVE)
       if (
         nestedLinkFieldId &&
-        !this.isSymmetricToCurrentLink(this.table, nestedLinkFieldId) &&
-        this.hasLinkCte(this.table, nestedLinkFieldId) &&
+        fieldCteMap.has(nestedLinkFieldId) &&
         nestedLinkFieldId !== this.currentLinkFieldId
       ) {
-        const nestedCteName = this.getLinkCteName(this.table, nestedLinkFieldId)!;
+        const nestedCteName = fieldCteMap.get(nestedLinkFieldId)!;
         // Check if this CTE is JOINed in current scope
         if (this.joinedCtes?.has(nestedLinkFieldId)) {
           const linkExpr = `"${nestedCteName}"."link_value"`;
@@ -738,12 +392,9 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     // If the target is a Link field, read its link_value from the JOINed CTE or subquery
     if (targetLookupField.type === FieldType.Link) {
       const nestedLinkFieldId = (targetLookupField as LinkFieldCore).id;
-      if (
-        !this.isSymmetricToCurrentLink(this.foreignTable, nestedLinkFieldId) &&
-        this.hasLinkCte(this.foreignTable, nestedLinkFieldId) &&
-        nestedLinkFieldId !== this.currentLinkFieldId
-      ) {
-        const nestedCteName = this.getLinkCteName(this.foreignTable, nestedLinkFieldId)!;
+      const fieldCteMap = this.state.getFieldCteMap();
+      if (fieldCteMap.has(nestedLinkFieldId) && nestedLinkFieldId !== this.currentLinkFieldId) {
+        const nestedCteName = fieldCteMap.get(nestedLinkFieldId)!;
         // Check if this CTE is JOINed in current scope
         if (this.joinedCtes?.has(nestedLinkFieldId)) {
           const linkExpr = `"${nestedCteName}"."link_value"`;
@@ -753,6 +404,7 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
               ? this.getJsonAggregationFunction(linkExpr)
               : linkExpr;
         } else {
+          // Fallback to subquery if CTE not JOINed in current scope
           const linkExpr = `((SELECT link_value FROM "${nestedCteName}" WHERE "${nestedCteName}"."main_record_id" = "${foreignAlias}"."${ID_FIELD_NAME}"))`;
           return this.isSingleValueRelationshipContext
             ? linkExpr
@@ -761,13 +413,8 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
               : linkExpr;
         }
       }
-      const blocked = this.buildBlockedKeySet(this.foreignTable, nestedLinkFieldId);
-      const fallbackExpr = evaluateFieldExpression(targetLookupField, blocked);
-      return this.isSingleValueRelationshipContext
-        ? fallbackExpr
-        : field.isMultipleCellValue
-          ? this.getJsonAggregationFunction(fallbackExpr)
-          : fallbackExpr;
+      // If self-referencing or missing, return NULL
+      return this.dialect.typedNullFor(field.dbFieldType);
     }
 
     // If the target is a Rollup field, read its precomputed rollup value from the link CTE
@@ -776,8 +423,8 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
       const rollupLinkField = rollupField.getLinkField(this.foreignTable);
       if (rollupLinkField) {
         const nestedLinkFieldId = rollupLinkField.id;
-        if (this.hasLinkCte(this.foreignTable, nestedLinkFieldId)) {
-          const nestedCteName = this.getLinkCteName(this.foreignTable, nestedLinkFieldId)!;
+        if (this.fieldCteMap.has(nestedLinkFieldId)) {
+          const nestedCteName = this.fieldCteMap.get(nestedLinkFieldId)!;
           let expr: string;
           if (this.joinedCtes?.has(nestedLinkFieldId)) {
             expr = `"${nestedCteName}"."rollup_${rollupField.id}"`;
@@ -790,38 +437,35 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
               ? this.getJsonAggregationFunction(expr)
               : expr;
         }
-        const blocked = this.buildBlockedKeySet(this.foreignTable, nestedLinkFieldId);
-        const expr = evaluateFieldExpression(targetLookupField, blocked);
-        return this.isSingleValueRelationshipContext
-          ? expr
-          : field.isMultipleCellValue
-            ? this.getJsonAggregationFunction(expr)
-            : expr;
       }
-      return evaluateFieldExpression(targetLookupField);
     }
 
     // If the target is itself a lookup, reference its precomputed value from the JOINed CTE or subquery
     let expression: string;
     if (targetLookupField.isLookup) {
       const nestedLinkFieldId = getLinkFieldId(targetLookupField.lookupOptions);
-      if (
-        nestedLinkFieldId &&
-        !this.isSymmetricToCurrentLink(this.foreignTable, nestedLinkFieldId) &&
-        this.hasLinkCte(this.foreignTable, nestedLinkFieldId) &&
-        nestedLinkFieldId !== this.currentLinkFieldId
-      ) {
-        const nestedCteName = this.getLinkCteName(this.foreignTable, nestedLinkFieldId)!;
-        if (this.joinedCtes?.has(nestedLinkFieldId)) {
-          expression = `"${nestedCteName}"."lookup_${targetLookupField.id}"`;
+      const fieldCteMap = this.state.getFieldCteMap();
+      // Prefer nested CTE if available; otherwise, derive CTE name and use subquery
+      if (nestedLinkFieldId) {
+        const nestedCteName = fieldCteMap.get(nestedLinkFieldId);
+        if (nestedCteName) {
+          if (this.joinedCtes?.has(nestedLinkFieldId)) {
+            expression = `"${nestedCteName}"."lookup_${targetLookupField.id}"`;
+          } else {
+            expression = `((SELECT "lookup_${targetLookupField.id}" FROM "${nestedCteName}" WHERE "${nestedCteName}"."main_record_id" = "${foreignAlias}"."${ID_FIELD_NAME}"))`;
+          }
         } else {
-          expression = `((SELECT "lookup_${targetLookupField.id}" FROM "${nestedCteName}" WHERE "${nestedCteName}"."main_record_id" = "${foreignAlias}"."${ID_FIELD_NAME}"))`;
+          // No pre-generated CTE available for this nested lookup; fall back to the raw expression
+          const targetFieldResult = targetLookupField.accept(selectVisitor);
+          expression =
+            typeof targetFieldResult === 'string'
+              ? targetFieldResult
+              : targetFieldResult.toSQL().sql;
         }
-      } else if (nestedLinkFieldId) {
-        const blocked = this.buildBlockedKeySet(this.foreignTable, nestedLinkFieldId);
-        expression = evaluateFieldExpression(targetLookupField, blocked);
       } else {
-        expression = evaluateFieldExpression(targetLookupField);
+        const targetFieldResult = targetLookupField.accept(selectVisitor);
+        expression =
+          typeof targetFieldResult === 'string' ? targetFieldResult : targetFieldResult.toSQL().sql;
       }
     } else {
       const targetFieldResult = targetLookupField.accept(selectVisitor);
@@ -892,11 +536,11 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
           // Prefer order from link CTE's JSON array (preserves insertion order)
           if (
             linkForOrderingId &&
-            fieldCteMap.has(makeScopedLinkCteKey(this.table, linkForOrderingId)) &&
+            fieldCteMap.has(linkForOrderingId) &&
             this.joinedCtes?.has(linkForOrderingId) &&
             linkForOrderingId !== this.currentLinkFieldId
           ) {
-            const cteName = fieldCteMap.get(makeScopedLinkCteKey(this.table, linkForOrderingId))!;
+            const cteName = fieldCteMap.get(linkForOrderingId)!;
             const exprForInner = expression.replaceAll(`"${this.getForeignAlias()}"`, '"f"');
             return `(
               SELECT CASE WHEN COUNT(*) > 0
@@ -983,11 +627,11 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
       // Prefer order from link CTE JSON array
       if (
         linkForOrderingId &&
-        fieldCteMap.has(makeScopedLinkCteKey(this.table, linkForOrderingId)) &&
+        fieldCteMap.has(linkForOrderingId) &&
         this.joinedCtes?.has(linkForOrderingId) &&
         linkForOrderingId !== this.currentLinkFieldId
       ) {
-        const cteName = fieldCteMap.get(makeScopedLinkCteKey(this.table, linkForOrderingId))!;
+        const cteName = fieldCteMap.get(linkForOrderingId)!;
         const exprForInner = expression.replaceAll(`"${this.getForeignAlias()}"`, '"f"');
         const subForInner = sub.replaceAll(`"${this.getForeignAlias()}"`, '"f"');
         return `(
@@ -1228,8 +872,21 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
 
         if (isMultiValue) {
           // For SQLite, build a correlated, ordered subquery to ensure deterministic ordering
+          const mainAlias = getTableAliasFromTable(this.table);
+          const foreignDb = this.foreignTable.dbTableName;
           const usesJunctionTable = getLinkUsesJunctionTable(field);
           const hasOrderColumn = field.getHasOrderColumn();
+
+          const innerIdRef = `"f"."${ID_FIELD_NAME}"`;
+          const innerTitleExpr = formattedSelectionExpression.replaceAll(
+            `"${foreignTableAlias}"`,
+            '"f"'
+          );
+          const innerRawExpr = rawSelectionExpression.replaceAll(`"${foreignTableAlias}"`, '"f"');
+          const innerJson = `CASE WHEN ${innerRawExpr} IS NOT NULL THEN json_object('id', ${innerIdRef}, 'title', ${innerTitleExpr}) ELSE json_object('id', ${innerIdRef}) END`;
+          const innerFilter = linkFilterSub
+            ? `(EXISTS ${linkFilterSub.replaceAll(`"${foreignTableAlias}"`, '"f"')})`
+            : '1=1';
 
           const opts = field.options as ILinkFieldOptions;
           return (
@@ -1276,36 +933,18 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
 
     const qb = this.qb.client.queryBuilder();
     const scopedState = new ScopedSelectionState(this.state);
-    const foreignAlias = this.getForeignAlias();
     const selectVisitor = new FieldSelectVisitor(
       qb,
       this.dbProvider,
       this.foreignTable,
       scopedState,
       this.dialect,
-      foreignAlias,
+      this.getForeignAlias(),
       true,
       false
     );
 
-    const evaluateFieldExpression = (target: FieldCore, blocked?: ReadonlySet<string>): string => {
-      const visitor =
-        blocked && blocked.size
-          ? new FieldSelectVisitor(
-              qb,
-              this.dbProvider,
-              this.foreignTable,
-              new ScopedSelectionStateWithCteFilter(this.state, blocked),
-              this.dialect,
-              foreignAlias,
-              true,
-              false
-            )
-          : selectVisitor;
-      const result = target.accept(visitor);
-      return typeof result === 'string' ? result : result.toSQL().sql;
-    };
-
+    const foreignAlias = this.getForeignAlias();
     const targetLookupField = field.getForeignLookupField(this.foreignTable);
     if (!targetLookupField) {
       return this.dialect.typedNullFor(field.dbFieldType);
@@ -1324,8 +963,8 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
     let expression: string;
     const nestedLinkFieldId = getLinkFieldId(targetLookupField.lookupOptions);
     if (nestedLinkFieldId) {
-      if (this.hasLinkCte(this.foreignTable, nestedLinkFieldId)) {
-        const nestedCteName = this.getLinkCteName(this.foreignTable, nestedLinkFieldId)!;
+      if (this.fieldCteMap.has(nestedLinkFieldId)) {
+        const nestedCteName = this.fieldCteMap.get(nestedLinkFieldId)!;
         const columnName = targetLookupField.isLookup
           ? `lookup_${targetLookupField.id}`
           : targetLookupField.type === FieldType.Rollup
@@ -1336,14 +975,20 @@ class FieldCteSelectionVisitor implements IFieldVisitor<IFieldSelectName> {
           if (this.joinedCtes?.has(nestedLinkFieldId)) {
             expression = `"${nestedCteName}"."${columnName}"`;
           } else {
+            // Fallback to subquery if CTE not JOINed in current scope
             expression = `((SELECT "${columnName}" FROM "${nestedCteName}" WHERE "${nestedCteName}"."main_record_id" = "${foreignAlias}"."${ID_FIELD_NAME}"))`;
           }
         } else {
-          const blocked = this.buildBlockedKeySet(this.foreignTable, nestedLinkFieldId);
-          expression = evaluateFieldExpression(targetLookupField, blocked);
+          const targetFieldResult = targetLookupField.accept(selectVisitor);
+          expression =
+            typeof targetFieldResult === 'string'
+              ? targetFieldResult
+              : targetFieldResult.toSQL().sql;
         }
       } else {
-        expression = evaluateFieldExpression(targetLookupField);
+        const targetFieldResult = targetLookupField.accept(selectVisitor);
+        expression =
+          typeof targetFieldResult === 'string' ? targetFieldResult : targetFieldResult.toSQL().sql;
       }
     } else {
       const targetFieldResult = targetLookupField.accept(selectVisitor);
@@ -1427,10 +1072,10 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
   private readonly state: IMutableQueryBuilderState;
   private readonly conditionalRollupGenerationStack = new Set<string>();
   private readonly conditionalLookupGenerationStack = new Set<string>();
+  private readonly linkCteGenerationStack = new Set<string>();
+  private readonly pendingLinkCteNames = new Map<string, string>();
   private filteredIdSet?: Set<string>;
   private readonly projection?: string[];
-  private readonly resolvedLinkKeys = new Set<string>();
-  private readonly filteredFieldSetsByTable?: ReadonlyMap<string, ReadonlySet<string>>;
 
   constructor(
     public readonly qb: Knex.QueryBuilder,
@@ -1438,13 +1083,11 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     private readonly tables: Tables,
     state: IMutableQueryBuilderState | undefined,
     private readonly dialect: IRecordQueryDialectProvider,
-    projection?: string[],
-    filteredFieldSetsByTable?: ReadonlyMap<string, ReadonlySet<string>>
+    projection?: string[]
   ) {
     this.state = state ?? new RecordQueryBuilderManager('table');
     this._table = tables.mustGetEntryTable();
     this.projection = projection;
-    this.filteredFieldSetsByTable = filteredFieldSetsByTable;
   }
 
   get table() {
@@ -1455,47 +1098,8 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     return this.state.getFieldCteMap();
   }
 
-  private makeLinkCteKey(scopeTable: TableDomain, linkFieldId: string): string {
-    return makeScopedLinkCteKey(scopeTable, linkFieldId);
-  }
-
-  private hasLinkFieldCte(scopeTable: TableDomain, linkFieldId: string): boolean {
-    return this.state.hasFieldCte(this.makeLinkCteKey(scopeTable, linkFieldId));
-  }
-
-  private getLinkFieldCte(scopeTable: TableDomain, linkFieldId: string): string | undefined {
-    return this.state.getCteName(this.makeLinkCteKey(scopeTable, linkFieldId));
-  }
-
-  private setLinkFieldCte(
-    scopeTable: TableDomain,
-    linkField: LinkFieldCore,
-    cteName: string
-  ): void {
-    const key = this.makeLinkCteKey(scopeTable, linkField.id);
-    this.state.setFieldCte(key, cteName);
-    this.resolvedLinkKeys.add(key);
-  }
-
-  private createLinkCteScheduler(): LinkCteScheduler {
-    return new LinkCteScheduler(
-      this.tables,
-      this.state,
-      this.table,
-      this.filteredIdSet,
-      this.filteredFieldSetsByTable
-    );
-  }
-
-  private buildLinkCtesFromScheduler(scheduler: LinkCteScheduler): void {
-    const plan = scheduler.plan();
-    for (const node of plan) {
-      this.buildLinkCteScope(node.table, node.linkField, node.dependencies);
-    }
-  }
-
   private getCteNameForField(fieldId: string): string | undefined {
-    return this.state.getCteName(fieldId);
+    return this.state.getCteName(fieldId) ?? this.pendingLinkCteNames.get(fieldId);
   }
 
   private getBaseIdSubquery(): Knex.QueryBuilder | undefined {
@@ -1529,214 +1133,25 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     }
   }
 
-  private buildLinkCteScope(
-    scopeTable: TableDomain,
-    linkField: LinkFieldCore,
-    nestedLinks: Map<string, LinkFieldCore> = new Map()
+  private ensureLinkDependencyForScope(
+    candidate: LinkFieldCore | null | undefined,
+    foreignTable: TableDomain,
+    currentLinkFieldId: string,
+    nestedJoins: Set<string>
   ): void {
-    if (this.hasLinkFieldCte(scopeTable, linkField.id)) {
-      if (scopeTable.id === this.table.id) {
-        const existing = this.getLinkFieldCte(scopeTable, linkField.id);
-        if (existing) {
-          this.ensureLinkCteJoined(existing);
-        }
-      }
+    if (!candidate?.id || candidate.id === currentLinkFieldId) {
       return;
     }
-
-    const foreignTable = this.tables.getLinkForeignTable(linkField);
-    if (!foreignTable) {
+    if (this.linkCteGenerationStack.has(candidate.id)) {
+      nestedJoins.add(candidate.id);
       return;
     }
-
-    const cteName = FieldCteVisitor.generateCTENameForField(scopeTable, linkField);
-    const usesJunctionTable = getLinkUsesJunctionTable(linkField);
-    const options = linkField.options as ILinkFieldOptions;
-    const mainAlias = getTableAliasFromTable(scopeTable);
-    const foreignAlias = getTableAliasFromTable(foreignTable);
-    const foreignAliasUsed = foreignAlias === mainAlias ? `${foreignAlias}_f` : foreignAlias;
-    const { fkHostTableName, selfKeyName, foreignKeyName, relationship } = options;
-    const isMainScope = scopeTable.id === this.table.id;
-
-    let lookupFields = linkField.getLookupFields(scopeTable);
-    let rollupFields = linkField.getRollupFields(scopeTable);
-    if (isMainScope && this.filteredIdSet) {
-      lookupFields = lookupFields.filter((f) => this.filteredIdSet?.has(f.id));
-      rollupFields = rollupFields.filter((f) => this.filteredIdSet?.has(f.id));
+    if (!this.fieldCteMap.has(candidate.id)) {
+      this.generateLinkFieldCteForTable(foreignTable, candidate);
     }
-
-    const ensureConditionalComputedCteForField = (targetField?: FieldCore) => {
-      if (!targetField) {
-        return;
-      }
-      if (targetField.type === FieldType.ConditionalRollup && !targetField.isLookup) {
-        this.generateConditionalRollupFieldCteForScope(
-          foreignTable,
-          targetField as ConditionalRollupFieldCore
-        );
-      }
-      if (targetField.isConditionalLookup) {
-        const opts = targetField.getConditionalLookupOptions?.();
-        if (opts) {
-          this.generateConditionalLookupFieldCteForScope(foreignTable, targetField, opts);
-        }
-      }
-    };
-
-    const addConditionalTargets = (fields: FieldCore[]) => {
-      for (const field of fields) {
-        const target = field.getForeignLookupField(foreignTable);
-        if (target) {
-          ensureConditionalComputedCteForField(target);
-        }
-      }
-    };
-
-    addConditionalTargets(lookupFields);
-    addConditionalTargets(rollupFields);
-    ensureConditionalComputedCteForField(linkField.getForeignLookupField(foreignTable));
-
-    this.qb.with(cteName, (cqb) => {
-      const joinedCtesInScope = new Set(nestedLinks.keys());
-
-      const visitor = new FieldCteSelectionVisitor(
-        cqb,
-        this.dbProvider,
-        this.dialect,
-        scopeTable,
-        foreignTable,
-        this.state,
-        joinedCtesInScope,
-        usesJunctionTable || relationship === Relationship.OneMany ? false : true,
-        foreignAliasUsed,
-        linkField.id,
-        this.resolvedLinkKeys
-      );
-      const linkValue = linkField.accept(visitor);
-
-      cqb.select(`${mainAlias}.${ID_FIELD_NAME} as main_record_id`);
-      const linkValueExpr =
-        this.dbProvider.driver === DriverClient.Pg ? `${linkValue}::jsonb` : `${linkValue}`;
-      cqb.select(cqb.client.raw(`${linkValueExpr} as link_value`));
-
-      for (const lookupField of lookupFields) {
-        const lookupVisitor = new FieldCteSelectionVisitor(
-          cqb,
-          this.dbProvider,
-          this.dialect,
-          scopeTable,
-          foreignTable,
-          this.state,
-          joinedCtesInScope,
-          usesJunctionTable || relationship === Relationship.OneMany ? false : true,
-          foreignAliasUsed,
-          linkField.id,
-          this.resolvedLinkKeys
-        );
-        const lookupValue = lookupField.accept(lookupVisitor);
-        cqb.select(cqb.client.raw(`${lookupValue} as "lookup_${lookupField.id}"`));
-      }
-
-      for (const rollupField of rollupFields) {
-        const rollupVisitor = new FieldCteSelectionVisitor(
-          cqb,
-          this.dbProvider,
-          this.dialect,
-          scopeTable,
-          foreignTable,
-          this.state,
-          joinedCtesInScope,
-          usesJunctionTable || relationship === Relationship.OneMany ? false : true,
-          foreignAliasUsed,
-          linkField.id,
-          this.resolvedLinkKeys
-        );
-        const rollupValue = rollupField.accept(rollupVisitor);
-        const value = typeof rollupValue === 'string' ? rollupValue : rollupValue.toQuery();
-        const castedRollupValue = this.castExpressionForDbType(value, rollupField);
-        cqb.select(cqb.client.raw(`${castedRollupValue} as "rollup_${rollupField.id}"`));
-      }
-
-      const joinNestedLinkCtes = () => {
-        for (const nestedLinkFieldId of nestedLinks.keys()) {
-          const nestedCteName = this.getLinkFieldCte(foreignTable, nestedLinkFieldId);
-          if (!nestedCteName) {
-            continue;
-          }
-          cqb.leftJoin(
-            nestedCteName,
-            `${nestedCteName}.main_record_id`,
-            `${foreignAliasUsed}.__id`
-          );
-        }
-      };
-
-      if (usesJunctionTable) {
-        this.fromTableWithRestriction(cqb, scopeTable, mainAlias);
-        cqb
-          .leftJoin(
-            `${fkHostTableName} as ${JUNCTION_ALIAS}`,
-            `${mainAlias}.__id`,
-            `${JUNCTION_ALIAS}.${selfKeyName}`
-          )
-          .leftJoin(
-            `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
-            `${JUNCTION_ALIAS}.${foreignKeyName}`,
-            `${foreignAliasUsed}.__id`
-          );
-        joinNestedLinkCtes();
-        cqb.groupBy(`${mainAlias}.__id`);
-
-        if (this.dbProvider.driver === DriverClient.Sqlite) {
-          if (linkField.getHasOrderColumn()) {
-            const ordCol = `${JUNCTION_ALIAS}.${linkField.getOrderColumnName()}`;
-            cqb.orderByRaw(`(CASE WHEN ${ordCol} IS NULL THEN 0 ELSE 1 END) ASC`);
-            cqb.orderBy(ordCol, 'asc');
-          }
-          cqb.orderBy(`${JUNCTION_ALIAS}.__id`, 'asc');
-        }
-      } else if (relationship === Relationship.OneMany) {
-        this.fromTableWithRestriction(cqb, scopeTable, mainAlias);
-        cqb.leftJoin(
-          `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
-          `${mainAlias}.__id`,
-          `${foreignAliasUsed}.${selfKeyName}`
-        );
-        joinNestedLinkCtes();
-        cqb.groupBy(`${mainAlias}.__id`);
-
-        if (this.dbProvider.driver === DriverClient.Sqlite) {
-          if (linkField.getHasOrderColumn()) {
-            cqb.orderByRaw(
-              `(CASE WHEN ${foreignAliasUsed}.${selfKeyName}_order IS NULL THEN 0 ELSE 1 END) ASC`
-            );
-            cqb.orderBy(`${foreignAliasUsed}.${selfKeyName}_order`, 'asc');
-          }
-          cqb.orderBy(`${foreignAliasUsed}.__id`, 'asc');
-        }
-      } else if (relationship === Relationship.ManyOne || relationship === Relationship.OneOne) {
-        const isForeignKeyInMainTable = fkHostTableName === scopeTable.dbTableName;
-        this.fromTableWithRestriction(cqb, scopeTable, mainAlias);
-        if (isForeignKeyInMainTable) {
-          cqb.leftJoin(
-            `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
-            `${mainAlias}.${foreignKeyName}`,
-            `${foreignAliasUsed}.__id`
-          );
-        } else {
-          cqb.leftJoin(
-            `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
-            `${foreignAliasUsed}.${selfKeyName}`,
-            `${mainAlias}.__id`
-          );
-        }
-        joinNestedLinkCtes();
-      }
-    });
-
-    this.setLinkFieldCte(scopeTable, linkField, cteName);
-    if (isMainScope) {
-      this.ensureLinkCteJoined(cteName);
+    // Only join nested CTEs that were successfully generated or are currently being generated.
+    if (this.fieldCteMap.has(candidate.id) || this.pendingLinkCteNames.has(candidate.id)) {
+      nestedJoins.add(candidate.id);
     }
   }
 
@@ -2429,12 +1844,18 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     const list = getOrderedFieldsByProjection(this.table, this.projection) as FieldCore[];
     this.filteredIdSet = new Set(list.map((f) => f.id));
 
-    const linkScheduler = this.createLinkCteScheduler();
-    linkScheduler.registerProjectionFields(list);
-
-    this.buildLinkCtesFromScheduler(linkScheduler);
-
+    // Ensure CTEs for any link fields that are dependencies of the projected fields.
+    // This allows selecting lookup/rollup values even when the link fields themselves
+    // are not part of the projection.
     for (const field of list) {
+      const linkFields = field.getLinkFields(this.table);
+      for (const lf of linkFields) {
+        if (!lf) continue;
+        if (!this.state.getFieldCteMap().has(lf.id)) {
+          this.generateLinkFieldCte(lf);
+        }
+      }
+
       if (field.isConditionalLookup) {
         const options = field.getConditionalLookupOptions?.();
         if (options) {
@@ -2449,19 +1870,727 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
   }
 
   private generateLinkFieldCte(linkField: LinkFieldCore): void {
-    const existingCteName = this.getLinkFieldCte(this.table, linkField.id);
-    if (existingCteName) {
-      this.ensureLinkCteJoined(existingCteName);
+    // Avoid defining the same CTE multiple times in a single WITH clause
+    if (this.state.getFieldCteMap().has(linkField.id)) {
       return;
     }
+    if (this.linkCteGenerationStack.has(linkField.id)) {
+      return;
+    }
+    const foreignTable = this.tables.getLinkForeignTable(linkField);
+    // Skip CTE generation if foreign table is missing (e.g., deleted)
+    if (!foreignTable) {
+      return;
+    }
+    const cteName = FieldCteVisitor.generateCTENameForField(this.table, linkField);
+    const usesJunctionTable = getLinkUsesJunctionTable(linkField);
+    const options = linkField.options as ILinkFieldOptions;
+    const mainAlias = getTableAliasFromTable(this.table);
+    const foreignAlias = getTableAliasFromTable(foreignTable);
+    const foreignAliasUsed = foreignAlias === mainAlias ? `${foreignAlias}_f` : foreignAlias;
+    const { fkHostTableName, selfKeyName, foreignKeyName, relationship } = options;
 
-    const scheduler = this.createLinkCteScheduler();
-    scheduler.addRoot(this.table, linkField);
-    this.buildLinkCtesFromScheduler(scheduler);
+    this.linkCteGenerationStack.add(linkField.id);
+    this.pendingLinkCteNames.set(linkField.id, cteName);
 
-    const finalCteName = this.getLinkFieldCte(this.table, linkField.id);
-    if (finalCteName) {
-      this.ensureLinkCteJoined(finalCteName);
+    try {
+      const buildLinkCte = () => {
+        // Determine which lookup/rollup fields are actually needed from this link
+        // NOTE: We intentionally do not filter by the projection (filteredIdSet). A lookup that
+        // is not part of the direct projection can still be an intermediate dependency for
+        // another lookup/rollup selected via a different table. Filtering here can therefore
+        // omit required CTE columns, leading to generated SQL that references non-existent
+        const lookupFields = linkField.getLookupFields(this.table);
+        const rollupFields = linkField.getRollupFields(this.table);
+
+        // Pre-generate nested CTEs limited to selected lookup/rollup dependencies
+        this.generateNestedForeignCtesIfNeeded(
+          this.table,
+          foreignTable,
+          linkField,
+          new Set(lookupFields.map((f) => f.id)),
+          new Set(rollupFields.map((f) => f.id))
+        );
+
+        // Hard guarantee: if any main-table lookup targets a foreign-table lookup, ensure the
+        // foreign link CTE used by that target lookup is generated before referencing it.
+        for (const lk of lookupFields) {
+          const target = lk.getForeignLookupField(foreignTable);
+          const nestedLinkId = target ? getLinkFieldId(target.lookupOptions) : undefined;
+          if (nestedLinkId) {
+            const nestedLink = foreignTable.getField(nestedLinkId) as LinkFieldCore | undefined;
+            if (nestedLink && !this.state.getFieldCteMap().has(nestedLink.id)) {
+              this.generateLinkFieldCteForTable(foreignTable, nestedLink);
+            }
+          }
+        }
+
+        // Collect all nested link dependencies that need to be JOINed
+        const nestedJoins = new Set<string>();
+
+        const ensureConditionalComputedCteForField = (targetField?: FieldCore) => {
+          if (!targetField) {
+            return;
+          }
+          if (targetField.type === FieldType.ConditionalRollup && !targetField.isLookup) {
+            this.generateConditionalRollupFieldCteForScope(
+              foreignTable,
+              targetField as ConditionalRollupFieldCore
+            );
+          }
+          if (targetField.isConditionalLookup) {
+            const options = targetField.getConditionalLookupOptions?.();
+            if (options) {
+              this.generateConditionalLookupFieldCteForScope(foreignTable, targetField, options);
+            }
+          }
+        };
+
+        const ensureLinkDependency = (linkFieldCore?: LinkFieldCore | null) =>
+          this.ensureLinkDependencyForScope(linkFieldCore, foreignTable, linkField.id, nestedJoins);
+
+        const collectLinkDependencies = (
+          field: FieldCore | undefined,
+          visited: Set<string> = new Set()
+        ) => {
+          if (!field || visited.has(field.id)) {
+            return;
+          }
+          visited.add(field.id);
+
+          ensureConditionalComputedCteForField(field);
+
+          if (field.type === FieldType.Link) {
+            ensureLinkDependency(field as LinkFieldCore);
+          }
+
+          const viaLookupId = getLinkFieldId(field.lookupOptions);
+          if (viaLookupId) {
+            const nestedLinkField = foreignTable.getField(viaLookupId) as LinkFieldCore | undefined;
+            ensureLinkDependency(nestedLinkField);
+          }
+
+          const directLinks = field.getLinkFields(foreignTable);
+          for (const lf of directLinks) {
+            ensureLinkDependency(lf);
+          }
+
+          const maybeGetReferenceFields = (
+            field as unknown as {
+              getReferenceFields?: (table: TableDomain) => FieldCore[];
+            }
+          ).getReferenceFields;
+          if (typeof maybeGetReferenceFields === 'function') {
+            const referencedFields = maybeGetReferenceFields.call(field, foreignTable) ?? [];
+            for (const refField of referencedFields) {
+              collectLinkDependencies(refField, visited);
+            }
+          }
+        };
+
+        // Helper: add dependent link fields from a target field
+        const addDepLinksFromTarget = (field: FieldCore) => {
+          const targetField = field.getForeignLookupField(foreignTable);
+          if (!targetField) return;
+          collectLinkDependencies(targetField);
+        };
+
+        // Check lookup fields: collect all dependent link fields
+        for (const lookupField of lookupFields) {
+          addDepLinksFromTarget(lookupField);
+        }
+
+        // Check rollup fields: collect all dependent link fields
+        for (const rollupField of rollupFields) {
+          addDepLinksFromTarget(rollupField);
+        }
+
+        addDepLinksFromTarget(linkField);
+
+        this.qb
+          // eslint-disable-next-line sonarjs/cognitive-complexity
+          .with(cteName, (cqb) => {
+            // Create set of JOINed CTEs for this scope
+            const joinedCtesInScope = new Set(nestedJoins);
+
+            const visitor = new FieldCteSelectionVisitor(
+              cqb,
+              this.dbProvider,
+              this.dialect,
+              this.table,
+              foreignTable,
+              this.state,
+              joinedCtesInScope,
+              usesJunctionTable || relationship === Relationship.OneMany ? false : true,
+              foreignAliasUsed,
+              linkField.id
+            );
+            const linkValue = linkField.accept(visitor);
+
+            cqb.select(`${mainAlias}.${ID_FIELD_NAME} as main_record_id`);
+            // Ensure jsonb type on Postgres to avoid type mismatch (e.g., NULL defaults)
+            const linkValueExpr =
+              this.dbProvider.driver === DriverClient.Pg ? `${linkValue}::jsonb` : `${linkValue}`;
+            cqb.select(cqb.client.raw(`${linkValueExpr} as link_value`));
+
+            for (const lookupField of lookupFields) {
+              const visitor = new FieldCteSelectionVisitor(
+                cqb,
+                this.dbProvider,
+                this.dialect,
+                this.table,
+                foreignTable,
+                this.state,
+                joinedCtesInScope,
+                usesJunctionTable || relationship === Relationship.OneMany ? false : true,
+                foreignAliasUsed,
+                linkField.id
+              );
+              const lookupValue = lookupField.accept(visitor);
+              cqb.select(cqb.client.raw(`${lookupValue} as "lookup_${lookupField.id}"`));
+            }
+
+            for (const rollupField of rollupFields) {
+              const visitor = new FieldCteSelectionVisitor(
+                cqb,
+                this.dbProvider,
+                this.dialect,
+                this.table,
+                foreignTable,
+                this.state,
+                joinedCtesInScope,
+                usesJunctionTable || relationship === Relationship.OneMany ? false : true,
+                foreignAliasUsed,
+                linkField.id
+              );
+              const rollupValue = rollupField.accept(visitor);
+              cqb.select(cqb.client.raw(`${rollupValue} as "rollup_${rollupField.id}"`));
+            }
+
+            if (usesJunctionTable) {
+              this.fromTableWithRestriction(cqb, this.table, mainAlias);
+              cqb
+                .leftJoin(
+                  `${fkHostTableName} as ${JUNCTION_ALIAS}`,
+                  `${mainAlias}.__id`,
+                  `${JUNCTION_ALIAS}.${selfKeyName}`
+                )
+                .leftJoin(
+                  `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+                  `${JUNCTION_ALIAS}.${foreignKeyName}`,
+                  `${foreignAliasUsed}.__id`
+                );
+
+              // Add LEFT JOINs to nested CTEs
+              for (const nestedLinkFieldId of nestedJoins) {
+                const nestedCteName = this.getCteNameForField(nestedLinkFieldId);
+                if (!nestedCteName) {
+                  continue;
+                }
+                cqb.leftJoin(
+                  nestedCteName,
+                  `${nestedCteName}.main_record_id`,
+                  `${foreignAliasUsed}.__id`
+                );
+              }
+
+              // Removed global application of all lookup/rollup filters: we now apply per-field filters only at selection time
+
+              cqb.groupBy(`${mainAlias}.__id`);
+
+              // For SQLite, add ORDER BY at query level since json_group_array doesn't support internal ordering
+              if (this.dbProvider.driver === DriverClient.Sqlite) {
+                cqb.orderBy(`${JUNCTION_ALIAS}.__id`);
+              }
+            } else if (relationship === Relationship.OneMany) {
+              // For non-one-way OneMany relationships, foreign key is stored in the foreign table
+              // No junction table needed
+
+              this.fromTableWithRestriction(cqb, this.table, mainAlias);
+              cqb.leftJoin(
+                `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+                `${mainAlias}.__id`,
+                `${foreignAliasUsed}.${selfKeyName}`
+              );
+
+              // Add LEFT JOINs to nested CTEs
+              for (const nestedLinkFieldId of nestedJoins) {
+                const nestedCteName = this.getCteNameForField(nestedLinkFieldId);
+                if (!nestedCteName) {
+                  continue;
+                }
+                cqb.leftJoin(
+                  nestedCteName,
+                  `${nestedCteName}.main_record_id`,
+                  `${foreignAliasUsed}.__id`
+                );
+              }
+
+              // Removed global application of all lookup/rollup filters
+
+              cqb.groupBy(`${mainAlias}.__id`);
+
+              // For SQLite, add ORDER BY at query level (NULLS FIRST + stable tie-breaker)
+              if (this.dbProvider.driver === DriverClient.Sqlite) {
+                if (linkField.getHasOrderColumn()) {
+                  cqb.orderByRaw(
+                    `(CASE WHEN ${foreignAliasUsed}.${selfKeyName}_order IS NULL THEN 0 ELSE 1 END) ASC`
+                  );
+                  cqb.orderBy(`${foreignAliasUsed}.${selfKeyName}_order`, 'asc');
+                }
+                // Always tie-break by record id for deterministic order
+                cqb.orderBy(`${foreignAliasUsed}.__id`, 'asc');
+              }
+            } else if (
+              relationship === Relationship.ManyOne ||
+              relationship === Relationship.OneOne
+            ) {
+              // Direct join for many-to-one and one-to-one relationships
+              // No GROUP BY needed for single-value relationships
+
+              // For OneOne and ManyOne relationships, the foreign key is always stored in fkHostTableName
+              // But we need to determine the correct join condition based on which table we're querying from
+              const isForeignKeyInMainTable = fkHostTableName === this.table.dbTableName;
+
+              this.fromTableWithRestriction(cqb, this.table, mainAlias);
+
+              if (isForeignKeyInMainTable) {
+                // Foreign key is stored in the main table (original field case)
+                // Join: main_table.foreign_key_column = foreign_table.__id
+                cqb.leftJoin(
+                  `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+                  `${mainAlias}.${foreignKeyName}`,
+                  `${foreignAliasUsed}.__id`
+                );
+              } else {
+                // Foreign key is stored in the foreign table (symmetric field case)
+                // Join: foreign_table.foreign_key_column = main_table.__id
+                // Note: for symmetric fields, selfKeyName and foreignKeyName are swapped
+                cqb.leftJoin(
+                  `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+                  `${foreignAliasUsed}.${selfKeyName}`,
+                  `${mainAlias}.__id`
+                );
+              }
+
+              // Removed global application of all lookup/rollup filters
+
+              // Add LEFT JOINs to nested CTEs for single-value relationships
+              for (const nestedLinkFieldId of nestedJoins) {
+                const nestedCteName = this.getCteNameForField(nestedLinkFieldId);
+                if (!nestedCteName) {
+                  continue;
+                }
+                cqb.leftJoin(
+                  nestedCteName,
+                  `${nestedCteName}.main_record_id`,
+                  `${foreignAliasUsed}.__id`
+                );
+              }
+            }
+          });
+
+        if (!this.state.isCteJoined(cteName)) {
+          this.qb.leftJoin(cteName, `${mainAlias}.${ID_FIELD_NAME}`, `${cteName}.main_record_id`);
+          this.state.markCteJoined(cteName);
+        }
+      };
+
+      buildLinkCte();
+      this.state.setFieldCte(linkField.id, cteName);
+    } finally {
+      this.linkCteGenerationStack.delete(linkField.id);
+      this.pendingLinkCteNames.delete(linkField.id);
+    }
+  }
+
+  /**
+   * Generate CTEs for foreign table's dependent link fields if any of the lookup/rollup targets
+   * on the current link field point to lookup fields in the foreign table.
+   * This ensures multi-layer lookup/rollup can reference precomputed values via nested CTEs.
+   */
+  private generateNestedForeignCtesIfNeeded(
+    mainTable: TableDomain,
+    foreignTable: TableDomain,
+    mainToForeignLinkField: LinkFieldCore,
+    limitLookupIds?: Set<string>,
+    limitRollupIds?: Set<string>
+  ): void {
+    const nestedLinkFields = new Map<string, LinkFieldCore>();
+    const ensureConditionalComputedCte = (table: TableDomain, targetField?: FieldCore) => {
+      if (!targetField) return;
+      if (targetField.type === FieldType.ConditionalRollup && !targetField.isLookup) {
+        this.generateConditionalRollupFieldCteForScope(
+          table,
+          targetField as ConditionalRollupFieldCore
+        );
+      }
+      if (targetField.isConditionalLookup) {
+        const options = targetField.getConditionalLookupOptions?.();
+        if (options) {
+          this.generateConditionalLookupFieldCteForScope(table, targetField, options);
+        }
+      }
+    };
+
+    // Collect lookup fields on main table that depend on this link
+    let lookupFields = mainToForeignLinkField.getLookupFields(mainTable);
+    if (limitLookupIds) {
+      lookupFields = lookupFields.filter((f) => limitLookupIds.has(f.id));
+    }
+    for (const lookupField of lookupFields) {
+      const target = lookupField.getForeignLookupField(foreignTable);
+      if (target) {
+        ensureConditionalComputedCte(foreignTable, target);
+        if (target.type === FieldType.Link) {
+          const lf = target as LinkFieldCore;
+          if (!nestedLinkFields.has(lf.id)) nestedLinkFields.set(lf.id, lf);
+        }
+        for (const lf of target.getLinkFields(foreignTable)) {
+          if (!nestedLinkFields.has(lf.id)) nestedLinkFields.set(lf.id, lf);
+        }
+      } else {
+        const nestedId = lookupField.lookupOptions?.lookupFieldId;
+        const nestedField = nestedId ? foreignTable.getField(nestedId) : undefined;
+        if (
+          nestedField &&
+          nestedField.type === FieldType.Link &&
+          !nestedLinkFields.has(nestedField.id)
+        ) {
+          nestedLinkFields.set(nestedField.id, nestedField as LinkFieldCore);
+        }
+        ensureConditionalComputedCte(foreignTable, nestedField);
+      }
+    }
+
+    // Collect rollup fields on main table that depend on this link
+    let rollupFields = mainToForeignLinkField.getRollupFields(mainTable);
+    if (limitRollupIds) {
+      rollupFields = rollupFields.filter((f) => limitRollupIds.has(f.id));
+    }
+    for (const rollupField of rollupFields) {
+      const target = rollupField.getForeignLookupField(foreignTable);
+      if (target) {
+        ensureConditionalComputedCte(foreignTable, target);
+        if (target.type === FieldType.Link) {
+          const lf = target as LinkFieldCore;
+          if (!nestedLinkFields.has(lf.id)) nestedLinkFields.set(lf.id, lf);
+        }
+        for (const lf of target.getLinkFields(foreignTable)) {
+          if (!nestedLinkFields.has(lf.id)) nestedLinkFields.set(lf.id, lf);
+        }
+      } else {
+        const nestedId = rollupField.lookupOptions?.lookupFieldId;
+        const nestedField = nestedId ? foreignTable.getField(nestedId) : undefined;
+        if (
+          nestedField &&
+          nestedField.type === FieldType.Link &&
+          !nestedLinkFields.has(nestedField.id)
+        ) {
+          nestedLinkFields.set(nestedField.id, nestedField as LinkFieldCore);
+        }
+        ensureConditionalComputedCte(foreignTable, nestedField);
+      }
+    }
+
+    // Generate CTEs for each nested link field on the foreign table if not already generated
+    for (const [nestedLinkFieldId, nestedLinkFieldCore] of nestedLinkFields) {
+      if (this.state.getFieldCteMap().has(nestedLinkFieldId)) continue;
+      this.generateLinkFieldCteForTable(foreignTable, nestedLinkFieldCore);
+    }
+  }
+
+  /**
+   * Generate CTE for a link field using the provided table as the "main" table context.
+   * This is used to build nested CTEs for foreign tables.
+   */
+  // eslint-disable-next-line sonarjs/cognitive-complexity
+  private generateLinkFieldCteForTable(table: TableDomain, linkField: LinkFieldCore): void {
+    if (this.fieldCteMap.has(linkField.id)) {
+      return;
+    }
+    if (this.linkCteGenerationStack.has(linkField.id)) {
+      return;
+    }
+    const foreignTable = this.tables.getLinkForeignTable(linkField);
+    if (!foreignTable) {
+      return;
+    }
+    const cteName = FieldCteVisitor.generateCTENameForField(table, linkField);
+    const usesJunctionTable = getLinkUsesJunctionTable(linkField);
+    const options = linkField.options as ILinkFieldOptions;
+    const mainAlias = getTableAliasFromTable(table);
+    const foreignAlias = getTableAliasFromTable(foreignTable);
+    const foreignAliasUsed = foreignAlias === mainAlias ? `${foreignAlias}_f` : foreignAlias;
+    const { fkHostTableName, selfKeyName, foreignKeyName, relationship } = options;
+
+    this.linkCteGenerationStack.add(linkField.id);
+    this.pendingLinkCteNames.set(linkField.id, cteName);
+
+    try {
+      const buildForeignLinkCte = () => {
+        // Ensure deeper nested dependencies for this nested link are also generated
+        this.generateNestedForeignCtesIfNeeded(table, foreignTable, linkField);
+
+        // Collect all nested link dependencies that need to be JOINed
+        const nestedJoins = new Set<string>();
+        const lookupFields = linkField.getLookupFields(table);
+        const rollupFields = linkField.getRollupFields(table);
+        if (this.filteredIdSet) {
+          // filteredIdSet belongs to the main table. For nested tables, we cannot filter
+          // by main-table projection IDs; keep all nested lookup/rollup columns to ensure correctness.
+        }
+
+        const ensureConditionalComputedCteForField = (targetField?: FieldCore) => {
+          if (!targetField) {
+            return;
+          }
+          if (targetField.type === FieldType.ConditionalRollup && !targetField.isLookup) {
+            this.generateConditionalRollupFieldCteForScope(
+              foreignTable,
+              targetField as ConditionalRollupFieldCore
+            );
+          }
+          if (targetField.isConditionalLookup) {
+            const options = targetField.getConditionalLookupOptions?.();
+            if (options) {
+              this.generateConditionalLookupFieldCteForScope(foreignTable, targetField, options);
+            }
+          }
+        };
+
+        const ensureLinkDependency = (linkFieldCore?: LinkFieldCore | null) =>
+          this.ensureLinkDependencyForScope(linkFieldCore, foreignTable, linkField.id, nestedJoins);
+
+        const collectLinkDependencies = (
+          field: FieldCore | undefined,
+          visited: Set<string> = new Set()
+        ) => {
+          if (!field || visited.has(field.id)) {
+            return;
+          }
+          visited.add(field.id);
+
+          ensureConditionalComputedCteForField(field);
+
+          if (field.type === FieldType.Link) {
+            ensureLinkDependency(field as LinkFieldCore);
+          }
+
+          const viaLookupId = getLinkFieldId(field.lookupOptions);
+          if (viaLookupId) {
+            const nestedLinkField = foreignTable.getField(viaLookupId) as LinkFieldCore | undefined;
+            ensureLinkDependency(nestedLinkField);
+          }
+
+          const directLinks = field.getLinkFields(foreignTable);
+          for (const lf of directLinks) {
+            ensureLinkDependency(lf);
+          }
+
+          const maybeGetReferenceFields = (
+            field as unknown as {
+              getReferenceFields?: (table: TableDomain) => FieldCore[];
+            }
+          ).getReferenceFields;
+          if (typeof maybeGetReferenceFields === 'function') {
+            const referencedFields = maybeGetReferenceFields.call(field, foreignTable) ?? [];
+            for (const refField of referencedFields) {
+              collectLinkDependencies(refField, visited);
+            }
+          }
+        };
+
+        // Check if any lookup/rollup fields depend on nested CTEs
+        for (const lookupField of lookupFields) {
+          const target = lookupField.getForeignLookupField(foreignTable);
+          if (target) {
+            collectLinkDependencies(target);
+          }
+        }
+
+        for (const rollupField of rollupFields) {
+          const target = rollupField.getForeignLookupField(foreignTable);
+          if (target) {
+            collectLinkDependencies(target);
+          }
+        }
+
+        collectLinkDependencies(linkField.getForeignLookupField(foreignTable));
+
+        this.qb.with(cteName, (cqb) => {
+          // Create set of JOINed CTEs for this scope
+          const joinedCtesInScope = new Set(nestedJoins);
+
+          const visitor = new FieldCteSelectionVisitor(
+            cqb,
+            this.dbProvider,
+            this.dialect,
+            table,
+            foreignTable,
+            this.state,
+            joinedCtesInScope,
+            usesJunctionTable || relationship === Relationship.OneMany ? false : true,
+            foreignAliasUsed,
+            linkField.id
+          );
+          const linkValue = linkField.accept(visitor);
+
+          cqb.select(`${mainAlias}.${ID_FIELD_NAME} as main_record_id`);
+          // Ensure jsonb type on Postgres to avoid type mismatch (e.g., NULL defaults)
+          const linkValueExpr =
+            this.dbProvider.driver === DriverClient.Pg ? `${linkValue}::jsonb` : `${linkValue}`;
+          cqb.select(cqb.client.raw(`${linkValueExpr} as link_value`));
+
+          for (const lookupField of lookupFields) {
+            const visitor = new FieldCteSelectionVisitor(
+              cqb,
+              this.dbProvider,
+              this.dialect,
+              table,
+              foreignTable,
+              this.state,
+              joinedCtesInScope,
+              usesJunctionTable || relationship === Relationship.OneMany ? false : true,
+              foreignAliasUsed,
+              linkField.id
+            );
+            const lookupValue = lookupField.accept(visitor);
+            cqb.select(cqb.client.raw(`${lookupValue} as "lookup_${lookupField.id}"`));
+          }
+
+          for (const rollupField of rollupFields) {
+            const visitor = new FieldCteSelectionVisitor(
+              cqb,
+              this.dbProvider,
+              this.dialect,
+              table,
+              foreignTable,
+              this.state,
+              joinedCtesInScope,
+              usesJunctionTable || relationship === Relationship.OneMany ? false : true,
+              foreignAliasUsed,
+              linkField.id
+            );
+            const rollupValue = rollupField.accept(visitor);
+            // Ensure the rollup CTE column has a type that matches the physical column
+            // to avoid Postgres UPDATE ... FROM assignment type mismatches (e.g., text vs numeric).
+            const value = typeof rollupValue === 'string' ? rollupValue : rollupValue.toQuery();
+            const castedRollupValue = this.castExpressionForDbType(value, rollupField);
+            cqb.select(cqb.client.raw(`${castedRollupValue} as "rollup_${rollupField.id}"`));
+          }
+
+          if (usesJunctionTable) {
+            this.fromTableWithRestriction(cqb, table, mainAlias);
+            cqb
+              .leftJoin(
+                `${fkHostTableName} as ${JUNCTION_ALIAS}`,
+                `${mainAlias}.__id`,
+                `${JUNCTION_ALIAS}.${selfKeyName}`
+              )
+              .leftJoin(
+                `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+                `${JUNCTION_ALIAS}.${foreignKeyName}`,
+                `${foreignAliasUsed}.__id`
+              );
+
+            // Add LEFT JOINs to nested CTEs
+            for (const nestedLinkFieldId of nestedJoins) {
+              const nestedCteName = this.getCteNameForField(nestedLinkFieldId);
+              if (!nestedCteName) {
+                continue;
+              }
+              cqb.leftJoin(
+                nestedCteName,
+                `${nestedCteName}.main_record_id`,
+                `${foreignAliasUsed}.__id`
+              );
+            }
+
+            cqb.groupBy(`${mainAlias}.__id`);
+
+            if (this.dbProvider.driver === DriverClient.Sqlite) {
+              if (linkField.getHasOrderColumn()) {
+                const ordCol = `${JUNCTION_ALIAS}.${linkField.getOrderColumnName()}`;
+                cqb.orderByRaw(`(CASE WHEN ${ordCol} IS NULL THEN 0 ELSE 1 END) ASC`);
+                cqb.orderBy(ordCol, 'asc');
+              }
+              cqb.orderBy(`${JUNCTION_ALIAS}.__id`, 'asc');
+            }
+          } else if (relationship === Relationship.OneMany) {
+            this.fromTableWithRestriction(cqb, table, mainAlias);
+            cqb.leftJoin(
+              `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+              `${mainAlias}.__id`,
+              `${foreignAliasUsed}.${selfKeyName}`
+            );
+
+            // Add LEFT JOINs to nested CTEs
+            for (const nestedLinkFieldId of nestedJoins) {
+              const nestedCteName = this.getCteNameForField(nestedLinkFieldId);
+              if (!nestedCteName) {
+                continue;
+              }
+              cqb.leftJoin(
+                nestedCteName,
+                `${nestedCteName}.main_record_id`,
+                `${foreignAliasUsed}.__id`
+              );
+            }
+
+            cqb.groupBy(`${mainAlias}.__id`);
+
+            if (this.dbProvider.driver === DriverClient.Sqlite) {
+              if (linkField.getHasOrderColumn()) {
+                cqb.orderByRaw(
+                  `(CASE WHEN ${foreignAliasUsed}.${selfKeyName}_order IS NULL THEN 0 ELSE 1 END) ASC`
+                );
+                cqb.orderBy(`${foreignAliasUsed}.${selfKeyName}_order`, 'asc');
+              }
+              cqb.orderBy(`${foreignAliasUsed}.__id`, 'asc');
+            }
+          } else if (
+            relationship === Relationship.ManyOne ||
+            relationship === Relationship.OneOne
+          ) {
+            const isForeignKeyInMainTable = fkHostTableName === table.dbTableName;
+            this.fromTableWithRestriction(cqb, table, mainAlias);
+
+            if (isForeignKeyInMainTable) {
+              cqb.leftJoin(
+                `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+                `${mainAlias}.${foreignKeyName}`,
+                `${foreignAliasUsed}.__id`
+              );
+            } else {
+              cqb.leftJoin(
+                `${foreignTable.dbTableName} as ${foreignAliasUsed}`,
+                `${foreignAliasUsed}.${selfKeyName}`,
+                `${mainAlias}.__id`
+              );
+            }
+
+            // Add LEFT JOINs to nested CTEs for single-value relationships
+            for (const nestedLinkFieldId of nestedJoins) {
+              const nestedCteName = this.getCteNameForField(nestedLinkFieldId);
+              if (!nestedCteName) {
+                continue;
+              }
+              cqb.leftJoin(
+                nestedCteName,
+                `${nestedCteName}.main_record_id`,
+                `${foreignAliasUsed}.__id`
+              );
+            }
+          }
+        });
+      };
+
+      buildForeignLinkCte();
+      this.state.setFieldCte(linkField.id, cteName);
+    } finally {
+      this.linkCteGenerationStack.delete(linkField.id);
+      this.pendingLinkCteNames.delete(linkField.id);
     }
   }
 
@@ -2475,7 +2604,7 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
   visitAutoNumberField(_field: AutoNumberFieldCore): void {}
   visitLinkField(field: LinkFieldCore): void {
     if (field.hasError) return;
-    const existingCteName = this.getLinkFieldCte(this.table, field.id);
+    const existingCteName = this.state.getCteName(field.id);
     if (existingCteName) {
       this.ensureLinkCteJoined(existingCteName);
       return;

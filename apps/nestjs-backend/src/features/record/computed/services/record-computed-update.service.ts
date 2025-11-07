@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { DbFieldType, FieldType } from '@teable/core';
+import { FieldType } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { Knex } from 'knex';
 import { match } from 'ts-pattern';
@@ -113,7 +113,7 @@ export class RecordComputedUpdateService {
             Array<{ __id: string; __version: number } & Record<string, unknown>>
           >(selectSql);
       } catch (error) {
-        this.handleRawQueryError(error, selectSql, tableId, dbTableName, fields);
+        this.handleRawQueryError(error, selectSql, fields);
       }
     }
 
@@ -143,7 +143,7 @@ export class RecordComputedUpdateService {
         .txClient()
         .$queryRawUnsafe<Array<{ __id: string; __version: number } & Record<string, unknown>>>(sql);
     } catch (error) {
-      this.handleRawQueryError(error, sql, tableId, dbTableName, fields);
+      this.handleRawQueryError(error, sql, fields);
     }
   }
 
@@ -175,26 +175,20 @@ export class RecordComputedUpdateService {
     }
   }
 
-  private handleRawQueryError(
-    error: unknown,
-    sql: string,
-    tableId: string,
-    dbTableName: string,
-    fields: IFieldInstance[]
-  ): never {
+  private handleRawQueryError(error: unknown, sql: string, fields: IFieldInstance[]): never {
     const fieldSnapshot = this.buildFieldDebugSnapshot(fields);
-    const fieldSnapshotString = this.stringifyFieldDebugSnapshot(tableId);
+    const fieldSnapshotString = this.stringifyFieldDebugSnapshot(fieldSnapshot);
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      error.message = `${error.message}\nSQL: ${sql}\ntableId: ${tableId}\ndbTableName: ${dbTableName}\nFields: ${fieldSnapshotString}`;
+      error.message = `${error.message}\nSQL: ${sql}\nFields: ${fieldSnapshotString}`;
       Object.assign(error, { sql, fields: fieldSnapshot });
       this.logger.error(
-        `updateFromSelect known request error. SQL: ${sql}. tableId: ${tableId} dbTableName: ${dbTableName} Fields: ${fieldSnapshotString}`,
+        `updateFromSelect known request error. SQL: ${sql}. Fields: ${fieldSnapshotString}`,
         error.stack ?? undefined
       );
       throw error;
     }
     this.logger.error(
-      `updateFromSelect unexpected query error. SQL: ${sql}. tableId: ${tableId} dbTableName: ${dbTableName} Fields: ${fieldSnapshotString}`,
+      `updateFromSelect unexpected query error. SQL: ${sql}. Fields: ${fieldSnapshotString}`,
       (error as Error)?.stack
     );
     if (error instanceof Error) {
