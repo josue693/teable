@@ -123,6 +123,8 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
 
     const wrapped = `(${value})`;
     const jsonbValue = `to_jsonb${wrapped}`;
+    const flattenedArray = `(SELECT STRING_AGG(elem.value, ', ' ORDER BY elem.ordinality)
+      FROM jsonb_array_elements_text(${jsonbValue}) WITH ORDINALITY AS elem(value, ordinality))`;
     const coerced = `(CASE
       WHEN ${wrapped} IS NULL THEN NULL
       ELSE
@@ -131,6 +133,7 @@ export class SelectQueryPostgres extends SelectQueryAbstract {
           WHEN 'number' THEN ${jsonbValue} #>> '{}'
           WHEN 'boolean' THEN ${jsonbValue} #>> '{}'
           WHEN 'null' THEN NULL
+          WHEN 'array' THEN COALESCE(${flattenedArray}, '')
           ELSE ${jsonbValue}::text
         END
     END)`;
