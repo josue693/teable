@@ -18,6 +18,7 @@ import { IThresholdConfig, ThresholdConfig } from '../../configs/threshold.confi
 import { InjectDbProvider } from '../../db-provider/db.provider';
 import { IDbProvider } from '../../db-provider/db.provider.interface';
 import type { IClsStore } from '../../types/cls';
+import { DataLoaderService } from '../data-loader/data-loader.service';
 import { FieldDuplicateService } from '../field/field-duplicate/field-duplicate.service';
 import { createFieldInstanceByRaw, rawField2FieldObj } from '../field/model/factory';
 import type { LinkFieldDto } from '../field/model/field-dto/link-field.dto';
@@ -36,13 +37,25 @@ export class TableDuplicateService {
     private readonly tableService: TableService,
     private readonly fieldOpenService: FieldOpenApiService,
     private readonly fieldDuplicateService: FieldDuplicateService,
+    private readonly dataLoaderService: DataLoaderService,
     @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig,
     @InjectDbProvider() private readonly dbProvider: IDbProvider,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex
   ) {}
 
+  private disableTableDomainDataLoader() {
+    if (!this.cls.isActive()) {
+      return;
+    }
+    this.cls.set('dataLoaderCache.disabled', true);
+    this.cls.set('dataLoaderCache.cacheKeys', []);
+    this.dataLoaderService.field.clear();
+    this.dataLoaderService.table.clear();
+  }
+
   async duplicateTable(baseId: string, tableId: string, duplicateRo: IDuplicateTableRo) {
     const { includeRecords, name } = duplicateRo;
+    this.disableTableDomainDataLoader();
     const {
       id: sourceTableId,
       icon,

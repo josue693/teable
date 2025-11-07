@@ -155,7 +155,16 @@ export class TableDomainQueryService {
   }
 
   private enableTableDomainDataLoader() {
-    const cacheKeys = this.cls.get('dataLoaderCache.cacheKeys') ?? [];
+    if (!this.cls.isActive()) {
+      return;
+    }
+    if (this.cls.get('dataLoaderCache.disabled')) {
+      return;
+    }
+    const cacheKeys = this.cls.get('dataLoaderCache.cacheKeys');
+    if (!cacheKeys) {
+      return;
+    }
     const requiredKeys: ('table' | 'field')[] = ['table', 'field'];
     const missingKeys = requiredKeys.filter((key) => !cacheKeys.includes(key));
     if (missingKeys.length) {
