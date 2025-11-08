@@ -438,6 +438,26 @@ describe('Select formula arithmetic coercion', () => {
     );
     expect(sql).toContain('::double precision');
   });
+
+  it('forces numeric addition when target db field type is numeric', () => {
+    const context = {
+      ...buildContext(),
+      targetDbFieldType: DbFieldType.Real,
+    };
+    const sql = provider.convertFormulaToSelectQuery(
+      `{${leftField.id}} + {${rightField.id}}`,
+      context
+    );
+
+    expect(sql).toContain(
+      "REGEXP_REPLACE(((\"main\".\"left_text_col\")::text), '[^0-9.+-]', '', 'g')"
+    );
+    expect(sql).toContain(
+      "REGEXP_REPLACE(((\"main\".\"right_text_col\")::text), '[^0-9.+-]', '', 'g')"
+    );
+    expect(sql).toContain('+');
+    expect(sql).not.toContain('CONCAT(');
+  });
 });
 
 describe('Select formula string comparisons', () => {

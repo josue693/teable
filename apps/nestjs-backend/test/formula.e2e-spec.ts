@@ -10,6 +10,7 @@ import type {
 } from '@teable/core';
 import {
   DateFormattingPreset,
+  DbFieldType,
   FieldKeyType,
   FieldType,
   FunctionName,
@@ -530,6 +531,98 @@ describe('OpenAPI formula (e2e)', () => {
     expect(updatedRecord.fields[plusTextSuffixField.name]).toEqual('x');
     expect(updatedRecord.fields[plusTextPrefixField.name]).toEqual('x');
     expect(updatedRecord.fields[plusMixedField.name]).toEqual('1x');
+  });
+
+  it('should safely update numeric formulas that add multi-value fields', async () => {
+    let foreign: ITableFullVo | undefined;
+
+    try {
+      foreign = await createTable(baseId, {
+        name: 'lookup-multi-number-foreign',
+        fields: [
+          { name: 'Title', type: FieldType.SingleLineText } as IFieldRo,
+          {
+            name: 'Effort',
+            type: FieldType.Number,
+            options: { formatting: { type: NumberFormattingType.Decimal, precision: 0 } },
+          } as IFieldRo,
+        ],
+        records: [
+          { fields: { Title: 'Task A', Effort: 3 } },
+          { fields: { Title: 'Task B', Effort: 7 } },
+        ],
+      });
+
+      const effortField = foreign.fields.find((field) => field.name === 'Effort');
+      expect(effortField).toBeDefined();
+
+      const linkField = await createField(table1Id, {
+        name: 'linked-tasks',
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyMany,
+          foreignTableId: foreign.id,
+        } as ILinkFieldOptionsRo,
+      } as IFieldRo);
+
+      const lookupField = await createField(table1Id, {
+        name: 'linked-effort',
+        type: FieldType.Number,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: foreign.id,
+          lookupFieldId: effortField!.id,
+          linkFieldId: linkField.id,
+        } as ILookupOptionsRo,
+      } as IFieldRo);
+
+      const numericFormulaField = await createField(table1Id, {
+        name: 'lookup-plus-number',
+        type: FieldType.Formula,
+        options: {
+          expression: `{${lookupField.id}} + {${numberFieldRo.id}}`,
+        },
+      });
+
+      const numericFormulaMeta = await getField(table1Id, numericFormulaField.id);
+      expect(numericFormulaMeta.dbFieldType).toBe(DbFieldType.Real);
+
+      const { records } = await createRecords(table1Id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: [
+          {
+            fields: {
+              [numberFieldRo.name]: 5,
+            },
+          },
+        ],
+      });
+
+      const recordId = records[0].id;
+
+      await updateRecordByApi(
+        table1Id,
+        recordId,
+        linkField.id,
+        foreign.records.map((record) => ({ id: record.id }))
+      );
+
+      const updatedRecord = await updateRecord(table1Id, recordId, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [numberFieldRo.name]: 9,
+          },
+        },
+      });
+
+      expect(updatedRecord.fields[numberFieldRo.name]).toEqual(9);
+      expect(updatedRecord.fields[numericFormulaField.name]).not.toBeUndefined();
+    } finally {
+      if (foreign) {
+        await permanentDeleteTable(baseId, foreign.id);
+      }
+    }
   });
 
   it('should treat empty string comparison as blank in formula condition', async () => {

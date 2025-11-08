@@ -766,11 +766,14 @@ abstract class BaseSqlConversionVisitor<
         const _leftType = this.inferExpressionType(ctx.expr(0));
         const _rightType = this.inferExpressionType(ctx.expr(1));
 
+        const forceNumericAddition = this.shouldForceNumericAddition();
+
         if (
-          _leftType === 'string' ||
-          _rightType === 'string' ||
-          _leftType === 'datetime' ||
-          _rightType === 'datetime'
+          !forceNumericAddition &&
+          (_leftType === 'string' ||
+            _rightType === 'string' ||
+            _leftType === 'datetime' ||
+            _rightType === 'datetime')
         ) {
           const coercedLeft = this.coerceToStringForConcatenation(left, ctx.expr(0), _leftType);
           const coercedRight = this.coerceToStringForConcatenation(right, ctx.expr(1), _rightType);
@@ -1233,6 +1236,12 @@ abstract class BaseSqlConversionVisitor<
       return this.formulaQuery.datetimeFormat(normalizedValue, "'YYYY-MM-DD'");
     }
     return normalizedValue;
+  }
+
+  private shouldForceNumericAddition(): boolean {
+    const selectContext = this.context as ISelectFormulaConversionContext | undefined;
+    const targetType = selectContext?.targetDbFieldType;
+    return targetType === DbFieldType.Integer || targetType === DbFieldType.Real;
   }
 
   private coerceCaseBranchToText(expr: string): string {
