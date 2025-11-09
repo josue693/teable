@@ -44,21 +44,41 @@ export class LinkCascadeResolver {
       return [];
     }
 
-    const state = { index: 0, bindings: [] as unknown[] };
+    const anchorState = { index: 0, bindings: [] as unknown[] };
     const anchorSelects = anchorClauses
-      .map((clause) => this.replacePlaceholders(clause.sql, clause.bindings, state))
-      .join('\nunion all\n');
-    const anchorSql = `select seed.table_id, seed.record_id from (${anchorSelects}) as seed`;
-    const graphEdgeSelects = graphEdgeClauses
-      .map((clause) => this.replacePlaceholders(clause.sql, clause.bindings, state))
+      .map((clause) => this.replacePlaceholders(clause.sql, clause.bindings, anchorState))
       .join('\nunion all\n');
 
-    const sql = `with recursive
+    const graphEdgeState = { index: 0, bindings: [] as unknown[] };
+    const graphEdgeSelects = graphEdgeClauses
+      .map((clause) => this.replacePlaceholders(clause.sql, clause.bindings, graphEdgeState))
+      .join('\nunion all\n');
+
+    const rows = await this.prismaService.$tx(async (tx) => {
+      const tempTableName = this.buildTempTableName();
+      await tx.$executeRawUnsafe(
+        `create temporary table ${tempTableName} (
+  src_table_id text not null,
+  src_record_id text not null,
+  dst_table_id text not null,
+  dst_record_id text not null
+) on commit drop`
+      );
+
+      await tx.$executeRawUnsafe(
+        `insert into ${tempTableName} (src_table_id, src_record_id, dst_table_id, dst_record_id)
+${graphEdgeSelects}`,
+        ...graphEdgeState.bindings
+      );
+
+      await tx.$executeRawUnsafe(`create index on ${tempTableName} (src_table_id, src_record_id)`);
+
+      const sql = `with recursive
 seed(table_id, record_id) as (
-${anchorSql}
-),
-graph_edges(src_table_id, src_record_id, dst_table_id, dst_record_id) as (
-${graphEdgeSelects}
+${anchorSelects
+  .split('\n')
+  .map((line) => `  ${line}`)
+  .join('\n')}
 ),
 link_reach(table_id, record_id) as (
   select table_id::text, record_id::text
@@ -66,18 +86,20 @@ link_reach(table_id, record_id) as (
 
   union
 
-  select ge.dst_table_id::text, ge.dst_record_id::text
+  select e.dst_table_id::text, e.dst_record_id::text
   from link_reach lr
-  join graph_edges ge
-    on ge.src_table_id = lr.table_id
-   and ge.src_record_id = lr.record_id
+  join ${tempTableName} e
+    on e.src_table_id = lr.table_id
+   and e.src_record_id = lr.record_id
 )
-select table_id, record_id
+select distinct table_id, record_id
 from link_reach`;
 
-    const rows = await this.prismaService
-      .txClient()
-      .$queryRawUnsafe<Array<{ table_id?: string; record_id?: string }>>(sql, ...state.bindings);
+      return await tx.$queryRawUnsafe<Array<{ table_id?: string; record_id?: string }>>(
+        sql,
+        ...anchorState.bindings
+      );
+    });
 
     const result: Array<{ tableId: string; recordId: string }> = [];
     for (const row of rows) {
@@ -167,5 +189,10 @@ where ${srcCol} is not null
       .split('.')
       .map((part) => this.quoteIdentifier(part))
       .join('.');
+  }
+
+  private buildTempTableName(): string {
+    const uniqueSuffix = Math.random().toString(36).slice(2, 8);
+    return `pg_temp.${this.quoteIdentifier(`link_edges_${uniqueSuffix}`)}`;
   }
 }
