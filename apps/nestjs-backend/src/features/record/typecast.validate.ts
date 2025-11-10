@@ -1,7 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import type {
-  IAttachmentCellValue,
+  IAttachmentCellValueRo,
   IAttachmentItem,
+  IAttachmentItemRo,
   ILinkCellValue,
   ISelectFieldChoice,
   ISelectFieldOptions,
@@ -438,16 +439,22 @@ export class TypeCastAndValidate {
         }
       },
       (validatedCellValue: unknown) => {
-        const attachmentCellValue = validatedCellValue as IAttachmentCellValue;
+        const attachmentCellValue = validatedCellValue as IAttachmentCellValueRo;
         const notInAttachmentMap = attachmentCellValue.find((v) => !attachmentCvMap[v.token]);
         if (notInAttachmentMap) {
           throw new BadRequestException(`Attachment(${notInAttachmentMap.token}) not found`);
         }
-        return attachmentCellValue.map((v) => {
+        const idsSet = new Set<string>();
+        return attachmentCellValue.map((v: IAttachmentItemRo) => {
+          let id = v.id ?? generateAttachmentId();
+          if (idsSet.has(id)) {
+            id = generateAttachmentId(); // duplicate id, generate new one
+          }
+          idsSet.add(id);
           return {
             ...nullsToUndefined(attachmentCvMap[v.token]),
             name: v.name,
-            id: generateAttachmentId(),
+            id,
           };
         });
       }
