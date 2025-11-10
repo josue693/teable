@@ -1074,6 +1074,8 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
   private readonly conditionalLookupGenerationStack = new Set<string>();
   private readonly linkCteGenerationStack = new Set<string>();
   private readonly pendingLinkCteNames = new Map<string, string>();
+  private readonly projectionByTable?: Map<string, Set<string>>;
+  private readonly suppressLinkValues: boolean;
   private filteredIdSet?: Set<string>;
   private readonly projection?: string[];
 
@@ -1083,11 +1085,26 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
     private readonly tables: Tables,
     state: IMutableQueryBuilderState | undefined,
     private readonly dialect: IRecordQueryDialectProvider,
-    projection?: string[]
+    projection?: string[],
+    suppressLinkValues?: boolean,
+    projectionByTable?: Record<string, string[]>
   ) {
     this.state = state ?? new RecordQueryBuilderManager('table');
     this._table = tables.mustGetEntryTable();
     this.projection = projection;
+    this.suppressLinkValues = suppressLinkValues ?? false;
+    let projectionMap = projectionByTable
+      ? new Map(
+          Object.entries(projectionByTable).map(([tableId, ids]) => [tableId, new Set(ids ?? [])])
+        )
+      : undefined;
+    if (projection && (!projectionMap || !projectionMap.has(this.table.id))) {
+      if (!projectionMap) {
+        projectionMap = new Map();
+      }
+      projectionMap.set(this.table.id, new Set(projection));
+    }
+    this.projectionByTable = projectionMap;
   }
 
   get table() {
@@ -1096,6 +1113,35 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
 
   get fieldCteMap(): ReadonlyMap<string, string> {
     return this.state.getFieldCteMap();
+  }
+
+  private getProjectionSetForTable(tableId: string): Set<string> | undefined {
+    return this.projectionByTable?.get(tableId);
+  }
+
+  private filterFieldsByProjection<T extends FieldCore>(fields: T[], table: TableDomain): T[] {
+    const projectionSet = this.getProjectionSetForTable(table.id);
+    if (!projectionSet) {
+      return fields;
+    }
+    if (projectionSet.size === 0) {
+      return [];
+    }
+    return fields.filter((field) => projectionSet.has(field.id));
+  }
+
+  private shouldEmitLinkValue(field: LinkFieldCore, scopeTable: TableDomain): boolean {
+    if (!this.suppressLinkValues) {
+      return true;
+    }
+    const projectionSet = this.getProjectionSetForTable(scopeTable.id);
+    if (!projectionSet) {
+      return true;
+    }
+    if (projectionSet.size === 0) {
+      return false;
+    }
+    return projectionSet.has(field.id);
   }
 
   private getCteNameForField(fieldId: string): string | undefined {
@@ -1895,13 +1941,16 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
 
     try {
       const buildLinkCte = () => {
+        const emitLinkValue = this.shouldEmitLinkValue(linkField, this.table);
         // Determine which lookup/rollup fields are actually needed from this link
         // NOTE: We intentionally do not filter by the projection (filteredIdSet). A lookup that
         // is not part of the direct projection can still be an intermediate dependency for
         // another lookup/rollup selected via a different table. Filtering here can therefore
         // omit required CTE columns, leading to generated SQL that references non-existent
-        const lookupFields = linkField.getLookupFields(this.table);
-        const rollupFields = linkField.getRollupFields(this.table);
+        let lookupFields = linkField.getLookupFields(this.table);
+        let rollupFields = linkField.getRollupFields(this.table);
+        lookupFields = this.filterFieldsByProjection(lookupFields, this.table);
+        rollupFields = this.filterFieldsByProjection(rollupFields, this.table);
 
         // Pre-generate nested CTEs limited to selected lookup/rollup dependencies
         this.generateNestedForeignCtesIfNeeded(
@@ -2005,7 +2054,9 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
           addDepLinksFromTarget(rollupField);
         }
 
-        addDepLinksFromTarget(linkField);
+        if (emitLinkValue) {
+          addDepLinksFromTarget(linkField);
+        }
 
         this.qb
           // eslint-disable-next-line sonarjs/cognitive-complexity
@@ -2013,25 +2064,28 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
             // Create set of JOINed CTEs for this scope
             const joinedCtesInScope = new Set(nestedJoins);
 
-            const visitor = new FieldCteSelectionVisitor(
-              cqb,
-              this.dbProvider,
-              this.dialect,
-              this.table,
-              foreignTable,
-              this.state,
-              joinedCtesInScope,
-              usesJunctionTable || relationship === Relationship.OneMany ? false : true,
-              foreignAliasUsed,
-              linkField.id
-            );
-            const linkValue = linkField.accept(visitor);
-
             cqb.select(`${mainAlias}.${ID_FIELD_NAME} as main_record_id`);
-            // Ensure jsonb type on Postgres to avoid type mismatch (e.g., NULL defaults)
-            const linkValueExpr =
-              this.dbProvider.driver === DriverClient.Pg ? `${linkValue}::jsonb` : `${linkValue}`;
-            cqb.select(cqb.client.raw(`${linkValueExpr} as link_value`));
+            if (emitLinkValue) {
+              const visitor = new FieldCteSelectionVisitor(
+                cqb,
+                this.dbProvider,
+                this.dialect,
+                this.table,
+                foreignTable,
+                this.state,
+                joinedCtesInScope,
+                usesJunctionTable || relationship === Relationship.OneMany ? false : true,
+                foreignAliasUsed,
+                linkField.id
+              );
+              const linkValue = linkField.accept(visitor);
+              const linkValueExpr =
+                this.dbProvider.driver === DriverClient.Pg ? `${linkValue}::jsonb` : `${linkValue}`;
+              cqb.select(cqb.client.raw(`${linkValueExpr} as link_value`));
+            } else {
+              const nullExpr = this.dbProvider.driver === DriverClient.Pg ? 'NULL::jsonb' : 'NULL';
+              cqb.select(cqb.client.raw(`${nullExpr} as link_value`));
+            }
 
             for (const lookupField of lookupFields) {
               const visitor = new FieldCteSelectionVisitor(
@@ -2334,8 +2388,10 @@ export class FieldCteVisitor implements IFieldVisitor<ICteResult> {
 
         // Collect all nested link dependencies that need to be JOINed
         const nestedJoins = new Set<string>();
-        const lookupFields = linkField.getLookupFields(table);
-        const rollupFields = linkField.getRollupFields(table);
+        let lookupFields = linkField.getLookupFields(table);
+        let rollupFields = linkField.getRollupFields(table);
+        lookupFields = this.filterFieldsByProjection(lookupFields, table);
+        rollupFields = this.filterFieldsByProjection(rollupFields, table);
         if (this.filteredIdSet) {
           // filteredIdSet belongs to the main table. For nested tables, we cannot filter
           // by main-table projection IDs; keep all nested lookup/rollup columns to ensure correctness.

@@ -150,7 +150,14 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
         hasSearch: options.hasSearch,
         restrictRecordIds: options.restrictRecordIds,
       });
-      this.buildFieldCtes(qb, tables, state, options.projection);
+      this.buildFieldCtes(
+        qb,
+        tables,
+        state,
+        options.projection,
+        options.suppressLinkValues,
+        options.projectionByTable
+      );
     }
 
     return { qb, alias, table, state };
@@ -281,7 +288,9 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
     qb: Knex.QueryBuilder,
     tables: Tables | undefined,
     state: IMutableQueryBuilderState,
-    projection?: string[]
+    projection?: string[],
+    suppressLinkValues?: boolean,
+    projectionByTable?: Record<string, string[]>
   ): void {
     if (!tables) {
       return;
@@ -292,7 +301,9 @@ export class RecordQueryBuilderService implements IRecordQueryBuilder {
       tables,
       state,
       this.dialect,
-      projection
+      projection,
+      suppressLinkValues,
+      projectionByTable
     );
     visitor.build();
   }

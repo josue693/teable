@@ -55,6 +55,12 @@ export interface ICreateRecordQueryBuilderOptions {
    */
   restrictRecordIds?: string[];
   /**
+   * When true, skip generating link display values (title/json) unless the link
+   * field itself is explicitly requested in the projection.
+   * Useful for computed evaluators that only need link relationships for rollups/lookups.
+   */
+  suppressLinkValues?: boolean;
+  /**
    * Optional table domain graph to reuse when building the query.
    */
   tables?: Tables;

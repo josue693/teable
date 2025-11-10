@@ -51,14 +51,19 @@ export class ComputedEvaluatorService {
   ): Promise<number> {
     const excludeFieldIds = opts.excludeFieldIds ?? new Set<string>();
     const globalPreferAutoNumberPaging = opts.preferAutoNumberPaging === true;
+    const tableDomainCache = opts.tableDomains;
     const entries = Object.entries(impact).filter(([, group]) => group.fieldIds.size);
     const projectionByTable = entries.reduce<Record<string, string[]>>((acc, [tableId, group]) => {
       acc[tableId] = Array.from(group.fieldIds);
       return acc;
     }, {});
+    for (const tableId of tableDomainCache.keys()) {
+      if (!(tableId in projectionByTable)) {
+        projectionByTable[tableId] = [];
+      }
+    }
 
     let totalOps = 0;
-    const tableDomainCache = opts.tableDomains;
     if (!tableDomainCache.size) {
       throw new Error('ComputedEvaluatorService.evaluate requires table domains');
     }
@@ -71,7 +76,12 @@ export class ComputedEvaluatorService {
       if (!tableDomain) {
         throw new Error(`Missing table domain for table ${tableId}`);
       }
-      const fieldInstances = this.getFieldInstancesFromDomain(tableDomain, requestedFieldIds);
+      let fieldInstances = this.getFieldInstancesFromDomain(tableDomain, requestedFieldIds);
+      if (!fieldInstances.length) continue;
+
+      fieldInstances = fieldInstances.filter(
+        (field) => field.type !== FieldType.Link || field.isComputed === true
+      );
       if (!fieldInstances.length) continue;
 
       const validFieldIdSet = new Set(fieldInstances.map((f) => f.id));
@@ -93,6 +103,7 @@ export class ComputedEvaluatorService {
         preferRawFieldReferences: true,
         projectionByTable,
         restrictRecordIds: builderRestrictRecordIds,
+        suppressLinkValues: true,
         tables: tablesOverride,
       });
 
