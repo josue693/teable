@@ -309,7 +309,7 @@ export const SearchButton = (props: ISearchButtonProps) => {
               <Button
                 variant="ghost"
                 size={'xs'}
-                className="flex w-[64px] shrink-0 items-center justify-center overflow-hidden truncate rounded-none border-r px-px"
+                className="flex w-[60px] shrink-0 items-center justify-center overflow-hidden truncate rounded-none border-r px-px"
                 ref={commandTrigger}
               >
                 <TooltipTrigger>

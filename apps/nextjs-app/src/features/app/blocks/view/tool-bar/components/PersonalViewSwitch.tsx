@@ -1,10 +1,17 @@
 import { User, Users } from '@teable/icons';
 import { useTablePermission, usePersonalView, useView } from '@teable/sdk/hooks';
 import { ConfirmDialog } from '@teable/ui-lib/base';
+import {
+  Switch,
+  Tooltip,
+  TooltipContent,
+  TooltipPortal,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'next-i18next';
 import { Fragment, useState } from 'react';
 import { tableConfig } from '@/features/i18n/table.config';
-import { ToolBarButton } from '../ToolBarButton';
 
 interface IPersonalViewSwitchProps {
   textClassName?: string;
@@ -21,29 +28,43 @@ export const PersonalViewSwitch = (props: IPersonalViewSwitchProps) => {
   const [isConfirmOpen, setIsConfirmOpen] = useState<boolean>(false);
   const hasSyncPermission = permission['view|update'];
 
-  const toggleViewStatus = () => {
-    if (isPersonalView) {
-      !hasSyncPermission || view?.isLocked ? closePersonalView?.() : setIsConfirmOpen(true);
-    } else {
+  const onSwitchChange = (checked: boolean) => {
+    if (checked) {
       openPersonalView?.();
+      return;
+    }
+
+    // turning off personal view
+    if (!hasSyncPermission || view?.isLocked) {
+      closePersonalView?.();
+    } else {
+      setIsConfirmOpen(true);
     }
   };
 
   return (
     <Fragment>
-      <ToolBarButton
-        isActive={isPersonalView}
-        text={
-          isPersonalView
-            ? t('table:toolbar.others.personalView.personal')
-            : t('table:toolbar.others.personalView.collaborative')
-        }
-        className={buttonClassName}
-        textClassName={textClassName}
-        onClick={toggleViewStatus}
-      >
-        {isPersonalView ? <User className="size-4" /> : <Users className="size-4" />}
-      </ToolBarButton>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div
+              className={`${buttonClassName ?? ''} flex h-7 pl-1 gap-2 text-xs items-center whitespace-nowrap cursor-pointer`}
+            >
+              <span>{t('table:toolbar.others.personalView.personal')}</span>
+              <Switch
+                id="personal-view-switch"
+                checked={Boolean(isPersonalView)}
+                onCheckedChange={onSwitchChange}
+              />
+            </div>
+          </TooltipTrigger>
+          <TooltipPortal>
+            <TooltipContent>
+              {<span>{t('table:toolbar.others.personalView.tip')}</span>}
+            </TooltipContent>
+          </TooltipPortal>
+        </Tooltip>
+      </TooltipProvider>
       <ConfirmDialog
         open={Boolean(isConfirmOpen)}
         closeable={true}

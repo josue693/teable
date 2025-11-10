@@ -35,12 +35,13 @@
       },
       "personalView": {
         "personal": "Personnel",
+        "tip": "Une fois activée, la configuration de la vue ne s’appliquera qu’à vous-même",
         "collaborative": "Collaboratif",
         "dialog": {
-          "title": "Passer en mode collaboratif",
-          "description": "Passer en mode collaboratif, la configuration personnelle de la vue sera synchronisée avec tous, veuillez confirmer si vous souhaitez synchroniser",
-          "cancelText": "Ne synchroniser pas",
-          "confirmText": "Synchroniser"
+          "title": "Quitter le mode personnel",
+          "description": "La configuration de la vue personnelle sera restaurée à l'état de collaboration en temps réel. Vous pouvez également enregistrer les paramètres de la vue personnelle et les synchroniser pour tout le monde.",
+          "cancelText": "Quitter et synchroniser",
+          "confirmText": "Confirmer la sortie"
         }
       }
     }

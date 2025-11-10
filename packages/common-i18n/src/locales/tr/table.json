@@ -34,6 +34,17 @@
         "label": "API",
         "restfulApi": "Restful API",
         "databaseConnection": "Veritabanı Bağlantısı"
+      },
+      "personalView": {
+        "personal": "Kişisel",
+        "tip": "Etkinleştirildiğinde, görünüm ayarları yalnızca size uygulanacaktır",
+        "collaborative": "İş Birlikçi",
+        "dialog": {
+          "title": "Kişisel moddan çık",
+          "description": "Kişisel görünüm yapılandırması, gerçek zamanlı iş birliği durumuna geri yüklenecek. Ayrıca kişisel görünüm ayarlarını kaydedip herkese senkronize edebilirsiniz.",
+          "cancelText": "Çık ve senkronize et",
+          "confirmText": "Çıkışı onayla"
+        }
       }
     }
   },

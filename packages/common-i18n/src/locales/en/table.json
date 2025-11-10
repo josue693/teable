@@ -38,11 +38,12 @@
       "personalView": {
         "personal": "Personal",
         "collaborative": "Collaborative",
+        "tip": "After enabling, the view settings will only take effect for you personally",
         "dialog": {
-          "title": "Switch to view collaborative mode",
-          "description": "Switch to view collaborative mode, the personal configuration of the view will be synchronized with everyone, please confirm whether to synchronize",
-          "cancelText": "Not synchronize",
-          "confirmText": "Synchronize"
+          "title": "Exit personal mode",
+          "description": "The personal view configuration will be restored to the real-time collaboration state, you can also save the personal view settings and synchronize them to everyone",
+          "cancelText": "Exit and sync",
+          "confirmText": "Confirm exit"
         }
       }
     }

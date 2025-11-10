@@ -37,12 +37,13 @@
       },
       "personalView": {
         "personal": "Personale",
+        "tip": "Dopo l’attivazione, la configurazione della visualizzazione si applicherà solo a te",
         "collaborative": "Collaborativo",
         "dialog": {
-          "title": "Passa alla modalità vista collaborativa",
-          "description": "Passa alla modalità vista collaborativa, la configurazione personale della vista sarà sincronizzata con tutti, conferma se sincronizzare",
-          "cancelText": "Non sincronizzare",
-          "confirmText": "Sincronizza"
+          "title": "Esci dalla modalità personale",
+          "description": "La configurazione della vista personale verrà ripristinata allo stato di collaborazione in tempo reale; puoi anche salvare le impostazioni della vista personale e sincronizzarle con tutti.",
+          "cancelText": "Esci e sincronizza",
+          "confirmText": "Conferma uscita"
         }
       }
     }

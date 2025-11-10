@@ -37,12 +37,13 @@
       },
       "personalView": {
         "personal": "个人",
+        "tip": "启用后，视配置仅对你本人生效",
         "collaborative": "协同",
         "dialog": {
-          "title": "切换到视图协同模式",
-          "description": "切换到视图协同模式后，视图的个人配置将同步给所有人，请确认是否同步",
-          "cancelText": "不同步",
-          "confirmText": "同步"
+          "title": "退出个人模式",
+          "description": "个人视图配置将恢复为实时协作状态，您也可以保存个人视图设置并同步给所有人。",
+          "cancelText": "退出并同步",
+          "confirmText": "确认退出"
         }
       }
     }
